@@ -1,0 +1,2 @@
+- take 1: bottle reads as clear glass, needs to be green -> router: rewrite_prompt (0.88)
+- take 2: coat looks orange, should match the yellow in cell 02 -> router: edit_bible (0.61), rewrite_prompt (0.34)

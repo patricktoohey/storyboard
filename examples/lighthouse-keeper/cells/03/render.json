@@ -1,0 +1,11 @@
+{
+  "model": "@cf/black-forest-labs/flux-2-klein-9b",
+  "references": ["bible/refs/maren.webp"],
+  "seed": 418877,
+  "steps": 4,
+  "width": 1344,
+  "height": 576,
+  "agent": "renderer-7",
+  "branch": "cell/03/take-3",
+  "elapsed_ms": 3120
+}

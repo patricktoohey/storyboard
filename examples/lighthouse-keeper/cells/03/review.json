@@ -1,0 +1,9 @@
+{
+  "model": "@cf/cloudflare/clef",
+  "adherence": { "score": 3.2, "confidence": 0.71 },
+  "continuity_prev_cell": {
+    "same_character": { "noul": 0.93 },
+    "same_wardrobe": { "noul": 0.88 },
+    "same_time_of_day": { "noul": 0.81 }
+  }
+}

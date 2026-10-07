@@ -1,0 +1,5 @@
+id,order,duration_s,shot,camera,beat,status,take
+01,1,5,EWS,slow push-in,"Lighthouse alone on the rock as a storm rolls in",approved,2
+02,2,4,MS,handheld,"Maren climbs the spiral stairs carrying an oil can",approved,1
+03,3,6,CU,static,"On the shore, Maren pulls a green bottle from the surf",in_review,3
+04,4,5,ECU,rack focus,"The note's handwriting; her eyes widen — it is her own",rendering,1
