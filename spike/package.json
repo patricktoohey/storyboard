@@ -5,10 +5,12 @@
   "scripts": {
     "dev": "cf dev",
     "build": "cf build",
-    "deploy": "cf deploy",
+    "deploy": "scripts/deploy.sh",
     "types": "cf workers types",
     "check": "tsc --noEmit",
-    "test": "node --experimental-strip-types --test \"test/*.test.ts\""
+    "test": "node --experimental-strip-types --test \"test/*.test.ts\"",
+    "setup": "scripts/setup.sh",
+    "smoke": "scripts/smoke.sh"
   },
   "devDependencies": {
     "@cloudflare/vite-plugin": "^2.0.0-beta.sha-52b0dc0e9",
@@ -18,5 +20,9 @@
   },
   "dependencies": {
     "isomorphic-git": "^1.43.1"
+  },
+  "allowScripts": {
+    "workerd@1.20261001.1": true,
+    "workerd@1.20260930.2": true
   }
 }

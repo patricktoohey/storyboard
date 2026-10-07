@@ -90,18 +90,33 @@ STORYBOARD_URL=https://storyboard-spike.<subdomain>.workers.dev scripts/clone-bo
 cd boards/<repo> && git show cell/02/take-2:cells/02/continuity.json
 ```
 
-## Setup (uses the `cf` CLI, no wrangler)
+## Setup and deploy (uses the `cf` CLI, no wrangler)
 
-Needs the Workers Paid plan (Artifacts beta).
+Needs a Cloudflare account on the Workers Paid plan (Artifacts beta) and `cf auth login`.
 
 ```sh
 cd spike
-npm install
-npm approve-scripts workerd      # lets workerd download its runtime binary (needed for `cf dev`)
-cf artifacts namespaces create --namespace storyboard
-echo "SPIKE_KEY=$(openssl rand -hex 16)" > .env   # gitignored
-cf deploy --secrets-file .env   # live at https://storyboard-spike.<subdomain>.workers.dev
+scripts/setup.sh     # npm install, approve workerd, create the `storyboard` Artifacts namespace, write SPIKE_KEY to .env
+scripts/deploy.sh    # types + tsc + unit tests, cf deploy --secrets-file .env, wait for the new version,
+                     # create/extend the storyboard-template skills repo; prints the UI URL
+export STORYBOARD_URL=https://storyboard-spike.<subdomain>.workers.dev
+scripts/smoke.sh     # creates a real 2-cell board (a few cents of Workers AI) and prints its takes and history
 ```
+
+All three are safe to re-run (`npm run setup|deploy|smoke` work too). `scripts/deploy.sh --reset` also
+overwrites the template's skills with `/skills`; that's an ordinary commit on the template, but it discards
+skills promoted from boards. What they run, for doing it by hand:
+
+| Step | Command |
+|---|---|
+| Namespace | `cf artifacts namespaces get storyboard \|\| cf artifacts namespaces create --namespace storyboard` |
+| Binding types | `cf workers types` (writes `.cloudflare/types/index.d.ts` from `cloudflare.config.ts`) |
+| Build only | `cf build` (delegates to Vite via `@cloudflare/vite-plugin`) |
+| Deploy | `cf deploy --secrets-file .env` (uploads `SPIKE_KEY` as a secret) |
+| Template | `curl -X POST $STORYBOARD_URL/template -H "authorization: Bearer $SPIKE_KEY"` |
+
+`npm audit` reports high-severity advisories in `sharp`, which comes in through local dev tooling
+(`cf` and the Vite plugin → miniflare); the deployed Worker's dependencies have none (`npm audit --omit=dev`).
 
 ## Try it
 
