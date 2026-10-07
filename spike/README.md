@@ -8,11 +8,14 @@ The goal is to prove the risky parts end to end before building the real app:
 
 ```
 POST /boards {"concept": "...", "cells": 3}
-  director        -> main:              concept.md, bible.md, storyboard.csv, cells/NN/beat.md
+  director        -> main: concept.md, bible.md, characters.json, storyboard.csv, cells/NN/beat.md
+  casting         -> main: bible/refs/<name>.webp   (one neutral portrait per character, in parallel)
   per cell, all in parallel, each on cell/NN/take-1:
-    cinematographer -> cells/NN/prompt.md
-    renderer        -> cells/NN/frame.webp, render.json
-    critic (Clef)   -> cells/NN/review.json   (adherence score, detected shot size, defects)
+    cinematographer -> cells/NN/prompt.md       ({{Name}} placeholders replaced by the bible look, verbatim)
+    renderer        -> cells/NN/frame.webp, render.json   (flux-2-klein-9b, portraits as references for MS/CU)
+    critic (Clef)   -> cells/NN/review.json     (adherence score, detected shot size, defects)
+    continuity      -> cells/NN/continuity.json (age, look, identity vs portrait, framing vs plan)
+  any cell failing continuity -> one automatic retake on cell/NN/take-2, briefed with the issues
 ```
 
 Every agent commits under its own author name, so `git log` shows who did what.
@@ -53,6 +56,32 @@ git fetch origin '+refs/heads/*:refs/remotes/origin/*' && git log --graph --all 
 
 To swap models, edit the `bindings.text(...)` values in `cloudflare.config.ts`
 (e.g. `@cf/moonshotai/kimi-k2.6` for the director).
+
+## Continuity fix (2026-10-07)
+
+The first run's cell 03 drew a child because the prompt said only "Emilia's face". What it took to get
+six cells of one consistent character:
+
+| Problem | Fix |
+|---|---|
+| Cinematographer drops the character description | It writes `{{Name}}` placeholders; code pastes the bible `look` verbatim (`insertLooks`) |
+| Director's look omitted age ("worn face" renders as ~30) | Prompted for "58-year-old woman, ..." first; code prefixes the age band if missing |
+| Same description, a different stranger every frame | **Casting agent** renders a portrait per character; flux-2-klein-9b takes it as a reference image |
+| Retakes can't fix identity with text alone (Clef same-person p stayed at 0.2–0.45) | The references above; identity is checked against the portrait, not the neighbouring cell |
+| Portrait references pulled EWS/ECU shots into medium shots | References only for MS/CU; render prompt starts with the spelled-out shot size ("EWS" means nothing to flux) |
+| Framing far from plan went unnoticed | Continuity fails when Clef's detected shot size is more than one step from the plan |
+
+Result on the 6-cell lighthouse board: all cells pass; one framing miss (ECU rendered as MS) was caught
+and fixed automatically on take-2; mean adherence rose from ~2.6 to ~3.0. Visually, the same
+grey-haired woman in the same olive coat appears in every frame, including the EWS rendered without a reference.
+
+Reliability lessons from the same runs:
+- The image safety filter sometimes flags harmless outputs (AiError **3030**); Workers AI also returns
+  transient **3043** (internal) errors. Image calls retry with a fresh seed; all AI calls retry 3040/3043.
+- **Concurrent pushes**: with 6+ agents pushing to one repo at once, Artifacts sometimes answered a push
+  with an empty body (isomorphic-git: `Expected "unpack ok"`). Each agent owns its branch, so pushes retry.
+- A freshly deployed version can take a few seconds to take effect; the first request after
+  `cf deploy` may hit the old one.
 
 ## What to watch for
 

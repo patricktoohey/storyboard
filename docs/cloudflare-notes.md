@@ -61,7 +61,11 @@ Responses: `choice` → `{choice, probabilities, confidence}`; `score` → `{sco
 
 ## Models
 
-Text-to-image (Workers AI): `@cf/black-forest-labs/flux-1-schnell` (fast drafts; input is only `prompt` + `steps`, no seed; ~750 KB JPEG out), `flux-2-dev`,
+Text-to-image (Workers AI): `@cf/black-forest-labs/flux-1-schnell` (fast drafts; input is only `prompt` + `steps`, no seed; ~750 KB JPEG out).
+`flux-2-klein-9b` / `flux-2-dev` / `flux-2-klein-4b` take **multipart** input: build a `FormData` (`prompt`, `width`, `height`, `seed`,
+`input_image_0..3` as Blobs, each <512×512), wrap it in `new Response(form)` and pass `{ multipart: { body: res.body, contentType: res.headers.get("content-type") } }`.
+Steps are fixed at 4 on klein. Errors: 3030 = output flagged by the safety filter (retry with a new seed), 3043 = transient internal error.
+Others: `flux-2-dev`,
 `flux-2-klein-4b`/`flux-2-klein-9b` (multi-reference editing), `@cf/leonardo/phoenix-1.0`, `lucid-origin`, SDXL lightning.
 
 Text generation: `kimi-k2.6`, `deepseek-v4-pro-0813`, `glm-5.3`, `nemotron-3-120b-a12b`, `gemma-4-26b-a4b-it`, `llama-3.3-70b-instruct-fp8-fast`.

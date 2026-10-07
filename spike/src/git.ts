@@ -73,9 +73,22 @@ export class WorkingTree {
 		});
 	}
 
-	async push(ref: string) {
-		const result = await git.push({ fs: this.fs, http, dir: DIR, url: this.remote.url, ref, onAuth: this.auth });
-		if (!result.ok) throw new Error(`push ${ref} failed: ${JSON.stringify(result.refs)}`);
-		return result;
+	/**
+	 * Under concurrent pushes to one repo, Artifacts sometimes answers receive-pack with an empty body
+	 * (isomorphic-git: 'Expected "unpack ok"... but received ""'). Each agent pushes its own branch, so a
+	 * retry is safe.
+	 */
+	async push(ref: string, attempts = 4) {
+		for (let attempt = 1; ; attempt++) {
+			try {
+				const result = await git.push({ fs: this.fs, http, dir: DIR, url: this.remote.url, ref, onAuth: this.auth });
+				if (!result.ok) throw new Error(`push ${ref} failed: ${JSON.stringify(result.refs)}`);
+				return result;
+			} catch (err) {
+				if (attempt >= attempts || !String(err).includes("unpack")) throw err;
+				console.warn(`push ${ref} attempt ${attempt} failed: ${err}`);
+				await new Promise((r) => setTimeout(r, 250 * 2 ** attempt + Math.random() * 250));
+			}
+		}
 	}
 }

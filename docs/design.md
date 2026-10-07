@@ -77,6 +77,10 @@ User concept ──► Director ──► storyboard.csv + cells/*/beat.md + bib
 - **Renderer**: the text-to-image model the user picked (`flux-1-schnell` for fast drafts,
   `flux-2-dev`/`phoenix-1.0` for final frames). `flux-2-klein-9b`/`flux-2-dev` take **multiple
   reference images**, so `bible/refs/` keeps characters consistent from cell to cell.
+- **Casting**: before any cell renders, one neutral portrait per character goes to `bible/refs/`.
+  Those portraits are passed as reference images for medium shots and close-ups, and continuity checks
+  identity against them. This turned out to be essential: matching text descriptions alone produced a
+  different stranger in every frame (see `spike/README.md`).
 - **Critic and continuity**: see §4.
 - **Coordinator**: one Durable Object per storyboard. It holds the work queue, takes a short
   lease on each cell so two renderers don't render the same take, and decides when to merge.

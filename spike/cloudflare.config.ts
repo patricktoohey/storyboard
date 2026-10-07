@@ -17,7 +17,8 @@ export default defineConfig({
 		env: {
 			DIRECTOR_MODEL: bindings.text("@cf/meta/llama-3.3-70b-instruct-fp8-fast"),
 			CINEMATOGRAPHER_MODEL: bindings.text("@cf/meta/llama-3.3-70b-instruct-fp8-fast"),
-			RENDER_MODEL: bindings.text("@cf/black-forest-labs/flux-1-schnell"),
+			// flux-2 models take character reference images (identity) and a seed (reproducible takes)
+			RENDER_MODEL: bindings.text("@cf/black-forest-labs/flux-2-klein-9b"),
 			// clef (27B) for image critique; clef-flash is for fast text-only routing
 			CLEF_MODEL: bindings.text("clef"),
 			// Bearer token callers must send; the workers.dev URL is public and every board spends AI credits
