@@ -40,15 +40,16 @@ async function shootCell(env: Env, remote: Remote, cell: Cell) {
 
 	const prompt = await cinematograph(env, bible, cell);
 	await tree.commit({ name: `cinematographer-${cell.id}` }, `Cell ${cell.id}: shot prompt`, { [`${dir}/prompt.md`]: `${prompt}\n` });
+	await tree.push(branch);
 
-	const seed = Math.floor(Math.random() * 2 ** 31);
-	const frame = await render(env, prompt, seed);
-	await tree.commit({ name: `renderer-${cell.id}` }, `Cell ${cell.id}: render seed ${seed}`, {
-		[`${dir}/frame.jpg`]: frame.bytes,
+	const frame = await render(env, prompt);
+	await tree.commit({ name: `renderer-${cell.id}` }, `Cell ${cell.id}: render`, {
+		[`${dir}/frame.webp`]: frame.frame,
 		[`${dir}/render.json`]: JSON.stringify({ ...frame.meta, branch }, null, 2) + "\n",
 	});
+	await tree.push(branch);
 
-	const verdict = await review(env, cell, prompt, frame.base64);
+	const verdict = await review(env, cell, prompt, frame.previewBase64);
 	await tree.commit({ name: `critic-${cell.id}` }, `Cell ${cell.id}: review`, {
 		[`${dir}/review.json`]: JSON.stringify(verdict, null, 2) + "\n",
 	});
@@ -105,7 +106,7 @@ export default {
 					if (!path) return Response.json({ error: "path is required" }, { status: 400 });
 					const blob = await repo.readFile({ ref, path });
 					if (!blob) return new Response("not found", { status: 404 });
-					const type = path.endsWith(".jpg") ? "image/jpeg" : blob.type || "text/plain;charset=utf-8";
+					const type = path.endsWith(".webp") ? "image/webp" : blob.type || "text/plain;charset=utf-8";
 					return new Response(blob, { headers: { "content-type": type } });
 				}
 				if (request.method === "POST" && action === "token") {

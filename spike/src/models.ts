@@ -74,26 +74,46 @@ ${bible}`;
 	return prompt.replace(/^"|"$/g, "");
 }
 
-export async function render(env: Env, prompt: string, seed: number) {
+async function toWebp(env: Env, jpeg: Uint8Array, width?: number) {
+	let img = env.IMAGES.input(new Blob([jpeg]).stream());
+	if (width) img = img.transform({ width });
+	const result = await img.output({ format: "image/webp", quality: 80 });
+	return new Uint8Array(await new Response(result.image()).arrayBuffer());
+}
+
+function toBase64(bytes: Uint8Array) {
+	let binary = "";
+	for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+	return btoa(binary);
+}
+
+// flux-1-schnell accepts only prompt + steps (no seed), so takes aren't reproducible yet
+export async function render(env: Env, prompt: string) {
 	const started = Date.now();
-	const out = (await env.AI.run(env.RENDER_MODEL as keyof AiModels, { prompt, seed, steps: 4 } as never)) as unknown as {
+	const out = (await env.AI.run(env.RENDER_MODEL as keyof AiModels, { prompt, steps: 4 } as never)) as unknown as {
 		image: string;
 	};
-	const bytes = Uint8Array.from(atob(out.image), (c) => c.charCodeAt(0));
+	const jpeg = Uint8Array.from(atob(out.image), (c) => c.charCodeAt(0));
+	const [frame, preview] = await Promise.all([toWebp(env, jpeg), toWebp(env, jpeg, 384)]);
 	return {
-		bytes,
-		base64: out.image,
-		meta: { model: env.RENDER_MODEL, seed, steps: 4, elapsed_ms: Date.now() - started },
+		frame,
+		previewBase64: toBase64(preview),
+		meta: {
+			model: env.RENDER_MODEL,
+			steps: 4,
+			bytes: { source_jpeg: jpeg.byteLength, frame_webp: frame.byteLength, preview_webp: preview.byteLength },
+			elapsed_ms: Date.now() - started,
+		},
 	};
 }
 
 /** Clef: typed questions about the frame, answered with probabilities instead of prose. */
-export async function review(env: Env, cell: Cell, prompt: string, jpegBase64: string) {
+export async function review(env: Env, cell: Cell, prompt: string, webpBase64: string) {
 	const started = Date.now();
 	const out = (await env.AI.run(`@cf/cloudflare/${env.CLEF_MODEL}` as keyof AiModels, {
 		model: env.CLEF_MODEL,
 		state: { prompt, intended_shot: cell.shot },
-		images: [{ content_type: "image/jpeg", base64: jpegBase64 }],
+		images: [{ content_type: "image/webp", base64: webpBase64 }],
 		questions: {
 			adherence: {
 				type: "score",

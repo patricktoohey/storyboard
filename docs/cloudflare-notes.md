@@ -34,7 +34,8 @@ CLI: `cf artifacts namespaces ...`. Use `cf cli search "<task>"` to discover com
 ## Clef
 
 `@cf/cloudflare/clef` (27B, ~210 ms text) and `@cf/cloudflare/clef-flash` (9B, ~40 ms). 64k context.
-Output tokens aren't billed. Images: ≤4, base64 PNG/JPEG/WebP, keep each ≲190 KB, no URLs.
+Output tokens aren't billed. Images: ≤4, base64 PNG/JPEG/WebP, no URLs. A 750 KB JPEG estimated ~200k tokens and was rejected;
+a 384px WebP (~18 KB) works, and Clef with one image answered in 0.4–0.6 s. Call it with `model: "clef"|"clef-flash"` in the body; answers come under `answers`.
 
 ```json
 {
@@ -60,7 +61,7 @@ Responses: `choice` → `{choice, probabilities, confidence}`; `score` → `{sco
 
 ## Models
 
-Text-to-image (Workers AI): `@cf/black-forest-labs/flux-1-schnell` (fast drafts), `flux-2-dev`,
+Text-to-image (Workers AI): `@cf/black-forest-labs/flux-1-schnell` (fast drafts; input is only `prompt` + `steps`, no seed; ~750 KB JPEG out), `flux-2-dev`,
 `flux-2-klein-4b`/`flux-2-klein-9b` (multi-reference editing), `@cf/leonardo/phoenix-1.0`, `lucid-origin`, SDXL lightning.
 
 Text generation: `kimi-k2.6`, `deepseek-v4-pro-0813`, `glm-5.3`, `nemotron-3-120b-a12b`, `gemma-4-26b-a4b-it`, `llama-3.3-70b-instruct-fp8-fast`.
