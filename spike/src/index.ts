@@ -21,13 +21,18 @@
 //   GET  /boards/:repo/log?ref=main            commit history for a ref
 //   GET  /boards/:repo/file?ref=&path=         read a file at a ref (images are served as images)
 //   POST /boards/:repo/token                   short-lived read token + remote URL, for `git clone`
+//   POST /arenas                               {"brief", "minutes"?, "budget"?, "cells"?, "teams"?} -> arena + team boards, first turns queued
+//   GET  /arenas, GET /arenas/:id/state        arenas; rules, teams, spend, scores, leaderboard, arena log
+//   POST /arenas/:id/close                     after the deadline: record submissions, queue the final round (cron does this too)
 //   POST /sweep                                mark jobs with no progress for 10 minutes failed (also runs every 5 minutes)
 //   POST /template[?reset=1]                   create the template / add newly bundled skills (reset: overwrite with bundled)
 // Every route except GET / requires `Authorization: Bearer $SPIKE_KEY`.
 import { addNote, boardState, chooseSkill, editSkill, listBoards, printTake, startBoard, startCut } from "./board";
+import { arenaState, closeArena, createArena, listArenas } from "./arena";
 import { consume } from "./consumer";
 import { ledger, submit, sweep } from "./coordinator";
 import { WorkingTree } from "./git";
+import { LimitError } from "./ledger.ts";
 import type { Job } from "./jobs";
 import { isRole, listSkills } from "./skills";
 import { TEMPLATE, ensureTemplate, promoteSkill, repoRemote } from "./template";
@@ -63,6 +68,24 @@ export default {
 			if (method === "POST" && root === "template") {
 				await ensureTemplate(env, url.searchParams.get("reset") === "1");
 				return Response.json({ template: TEMPLATE });
+			}
+			if (root === "arenas") {
+				if (method === "GET" && !repoName) return Response.json(await listArenas(env));
+				if (method === "POST" && !repoName) {
+					const body = await json<{ brief?: string; minutes?: number; budget?: number; cells?: number; teams?: string[] }>(request);
+					if (!body.brief) return Response.json({ error: "brief is required" }, { status: 400 });
+					const created = await createArena(env, {
+						brief: body.brief,
+						minutes: Math.min(Math.max(body.minutes ?? 20, 5), 120),
+						budget: Math.min(Math.max(body.budget ?? 5, 1), 50),
+						cells: Math.min(Math.max(body.cells ?? 4, 2), 8),
+						teams: body.teams,
+						origin: url.origin,
+					});
+					return Response.json(created, { status: 202 });
+				}
+				if (method === "GET" && action === "state") return Response.json(await arenaState(env, repoName));
+				if (method === "POST" && action === "close") return Response.json(await closeArena(env, repoName));
 			}
 			if (method === "POST" && root === "sweep") {
 				return Response.json({ swept: await sweep(env, (await listBoards(env)).map((b) => b.name)) });
@@ -147,6 +170,8 @@ export default {
 
 			return new Response("not found; see the route list at the top of src/index.ts\n", { status: 404 });
 		} catch (err) {
+			// Over an arena team's budget or past its deadline: refused, not failed
+			if (err instanceof LimitError) return Response.json({ error: err.message }, { status: 402 });
 			console.error(err);
 			return Response.json({ error: String(err) }, { status: 500 });
 		}
@@ -154,7 +179,12 @@ export default {
 	queue: consume,
 
 	async scheduled(_controller, env) {
-		const swept = await sweep(env, (await listBoards(env)).map((b) => b.name));
+		const swept = await sweep(env, [...(await listBoards(env)), ...(await listArenas(env))].map((b) => b.name));
 		console.log(`sweep: ${swept.length} stalled job(s)`, JSON.stringify(swept));
+		// Close arenas whose deadline has passed: record missing submissions, queue the final round
+		for (const a of await listArenas(env)) {
+			const closed = await closeArena(env, a.name).catch((e) => ({ error: String(e) }));
+			if ("closed" in closed && closed.closed && !("already" in closed)) console.log(`closed ${a.name}`);
+		}
 	},
 } satisfies ExportedHandler<Env, Job>;

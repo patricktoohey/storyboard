@@ -25,6 +25,10 @@ models the exact requests production builds (`npm run eval`, about a cent; resul
 | D16 | A cron sweep fails jobs with no progress for 10 minutes, so groups always close | live check (see below) |
 | D17 | Frames reach the video provider through signed, expiring URLs that grant one frame | `video.test.ts` |
 | D18 | Clips live on cut branches (`cut/vN/NN`, merged into `cut/vN` with an EDL), never on main | live run (see below) |
+| D19 | Arena budgets are reserved in the ledger: estimates are charged when a job is queued | `arena-rules.test.ts` |
+| D20 | One file per score (`scores/<team>/<judge>.json`); the leaderboard is computed on read | `arena-rules.test.ts` |
+| D21 | Judges are skills with public rubrics, and score a commit, never a branch | `arena-rules.test.ts` |
+| D22 | Showrunner actions are a closed set; code mandates when there's no choice, Clef chooses the rest | `arena-rules.test.ts` |
 
 ## D2: placeholders, not descriptions
 

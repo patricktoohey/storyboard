@@ -1,6 +1,6 @@
 # Arena: autonomous agent teams, judges and a live leaderboard
 
-Status: design, not built. Builds on the pipeline in [design.md](design.md) and the decisions in
+Status: minimum version built (see "What was built" at the end). Builds on the pipeline in [design.md](design.md) and the decisions in
 [decisions.md](decisions.md); new decisions are numbered from D19.
 
 ## The idea

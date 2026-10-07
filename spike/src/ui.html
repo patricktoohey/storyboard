@@ -83,6 +83,16 @@ aside.log h3 + ul { margin-bottom: 16px; }
 .cut ol { margin: 0; padding-left: 20px; display: grid; gap: 6px; font-size: 12px; }
 .cut li.now { color: var(--accent); }
 @media (max-width: 900px) { .cut { grid-template-columns: 1fr; } }
+.arena-head { display: flex; gap: 16px; align-items: baseline; flex-wrap: wrap; }
+.clock { font-size: 28px; font-variant-numeric: tabular-nums; color: var(--accent); }
+table.lb { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+table.lb th, table.lb td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--line); vertical-align: top; }
+table.lb th { color: var(--muted); font-weight: 500; font-size: 12px; }
+.bar { height: 6px; background: var(--panel-2); border-radius: 3px; overflow: hidden; min-width: 90px; }
+.bar > i { display: block; height: 100%; background: var(--accent); }
+.strip { display: flex; gap: 4px; margin-top: 6px; }
+.strip img, .strip .ph { width: 74px; aspect-ratio: 1344/576; object-fit: cover; border-radius: 3px; background: var(--panel-2); }
+.teams { display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: 16px; margin-top: 16px; }
 dialog { background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: var(--radius); max-width: 520px; width: calc(100% - 32px); }
 dialog::backdrop { background: rgba(0,0,0,.6); }
 @media (max-width: 900px) { .layout { grid-template-columns: 1fr; } .board-head { grid-template-columns: 1fr; } .grid { grid-template-columns: 1fr; } main, header { padding-left: 16px; padding-right: 16px; } }
@@ -146,9 +156,9 @@ async function img(ref, path, cacheable = true) {
 function askKey() { $("#keyin").value = key; $("#keydlg").showModal(); }
 $("#keydlg").addEventListener("close", () => { key = $("#keyin").value.trim(); store.set("storyboard.key", key); loadBoards(); });
 $("#key").onclick = askKey;
-$("#refresh").onclick = () => state && openBoard(state.repo);
+$("#refresh").onclick = () => arena ? openArena(arena.arena) : state && openBoard(state.repo);
 $("#new").onclick = () => { history.replaceState(null, "", "#"); renderNew(); };
-$("#boards").onchange = (e) => e.target.value ? openBoard(e.target.value) : renderNew();
+$("#boards").onchange = (e) => e.target.value ? open(e.target.value) : renderNew();
 
 function setBusy() { $("#busy").textContent = inflight ? `${inflight} operation${inflight > 1 ? "s" : ""} running…` : ""; }
 
@@ -191,15 +201,21 @@ setInterval(() => watch().catch(console.error), 2500);
 
 async function loadBoards() {
   if (!key) return askKey();
-  const boards = await api("/boards");
+  const [boards, arenas] = await Promise.all([api("/boards"), api("/arenas").catch(() => [])]);
   const sel = $("#boards");
-  sel.innerHTML = `<option value="">— New board —</option>` + boards.map((b) => `<option value="${esc(b.name)}">${esc(b.name.replace("board-", ""))} · ${esc((b.description || "").slice(0, 50))}</option>`).join("");
-  const want = location.hash.slice(1) || boards[0]?.name;
-  if (want) { sel.value = want; openBoard(want); } else renderNew();
+  sel.innerHTML = `<option value="">— New board or arena —</option>`
+    + (arenas.length ? `<optgroup label="Arenas">${arenas.map((a) => `<option value="${esc(a.name)}">${esc(a.name.replace("arena-", ""))} · ${esc((a.description || "").replace("Arena: ", "").slice(0, 45))}</option>`).join("")}</optgroup>` : "")
+    + `<optgroup label="Boards">${boards.map((b) => `<option value="${esc(b.name)}">${esc(b.name.replace("board-", ""))} · ${esc((b.description || "").slice(0, 50))}</option>`).join("")}</optgroup>`;
+  const want = location.hash.slice(1) || arenas[0]?.name || boards[0]?.name;
+  if (want) { sel.value = want; open(want); } else renderNew();
 }
+
+const open = (name) => (name.startsWith("arena-") ? openArena(name) : openBoard(name));
 
 async function renderNew() {
   state = null;
+  clearInterval(arenaTimer);
+  arena = null;
   $("#boards").value = "";
   const skills = await api("/skills").catch(() => []);
   const opts = (role) => skills.filter((s) => s.role === role).map((s) => `<option value="${esc(s.name)}">${esc(s.style)}</option>`).join("");
@@ -214,7 +230,30 @@ async function renderNew() {
         <button class="primary" id="create">Create board</button>
       </div>
       <div class="status" id="newstatus"></div>
+    </div>
+    <div class="panel newboard" style="margin-top:18px">
+      <h2 style="margin:0">New arena</h2>
+      <p class="muted" style="margin:0">Three autonomous teams (auteur, documentarian, safe) answer one brief with a budget and a deadline. Each team's showrunner agent plans, gives notes, prints, cuts video and submits; Clef judges score the boards live. Video is required.</p>
+      <textarea id="brief" rows="3" placeholder="A 30-second story about something lost and found."></textarea>
+      <div class="row">
+        <label class="small muted">Minutes <input id="aminutes" type="number" min="5" max="120" value="20" style="width:64px"></label>
+        <label class="small muted">Budget per team $<input id="abudget" type="number" min="1" max="50" value="5" style="width:64px"></label>
+        <label class="small muted">Cells <input id="acells" type="number" min="2" max="8" value="4" style="width:64px"></label>
+        <button class="primary" id="createArena">Start arena</button>
+      </div>
+      <div class="status" id="arenastatus"></div>
     </div>`;
+  $("#createArena").onclick = async () => {
+    const brief = $("#brief").value.trim();
+    if (!brief) return;
+    $("#createArena").disabled = true;
+    $("#arenastatus").textContent = "Creating the arena and forking a board per team…";
+    try {
+      const out = await api("/arenas", { method: "POST", body: JSON.stringify({ brief, minutes: Number($("#aminutes").value), budget: Number($("#abudget").value), cells: Number($("#acells").value) }) });
+      location.hash = out.arena;
+      await loadBoards();
+    } catch (err) { $("#arenastatus").textContent = `Error: ${err.message}`; $("#createArena").disabled = false; }
+  };
   $("#create").onclick = async () => {
     const concept = $("#concept").value.trim();
     if (!concept) return;
@@ -229,7 +268,72 @@ async function renderNew() {
   };
 }
 
+// ── Arena view ──────────────────────────────────────────────────────────────────────────────
+let arena = null;
+let arenaTimer = null;
+
+async function frameOf(repo, ref, path) {
+  const k = `${repo}|${ref}|${path}`;
+  if (imgCache.has(k)) return imgCache.get(k);
+  const res = await fetch(`/boards/${repo}/file?ref=${encodeURIComponent(ref)}&path=${encodeURIComponent(path)}`, { headers: { authorization: `Bearer ${key}` } });
+  if (!res.ok) return null;
+  const url = URL.createObjectURL(await res.blob());
+  imgCache.set(k, url);
+  return url;
+}
+
+async function openArena(name) {
+  location.hash = name;
+  state = null;
+  clearInterval(arenaTimer);
+  $("#main").innerHTML = `<p class="muted">Loading ${esc(name)}…</p>`;
+  const tick = async () => {
+    if (!location.hash.includes(name) || document.hidden) return;
+    arena = await api(`/arenas/${name}/state`).catch(() => arena);
+    renderArena();
+  };
+  await tick();
+  arenaTimer = setInterval(tick, 4000);
+}
+
+function renderArena() {
+  const a = arena;
+  if (!a) return;
+  const left = Math.max(0, Date.parse(a.rules.deadline) - Date.now());
+  const clock = a.closed ? "closed" : left ? `${Math.floor(left / 60000)}:${String(Math.floor((left % 60000) / 1000)).padStart(2, "0")}` : "deadline passed";
+  const team = (n) => a.teams.find((t) => t.team === n);
+  const judges = a.rules.judges.map((j) => j.name);
+  const rows = a.leaderboard.map((r, i) => {
+    const t = team(r.team);
+    const status = t.submission ? (t.submission.cut ? `submitted cut ${t.submission.cut}` : "no submission") : t.lastAction;
+    return `<tr><td>${i + 1}</td><td><b>${esc(r.team)}</b>${r.disqualified ? ` <span class="pill bad">${esc(r.disqualified)}</span>` : ""}<br><span class="small muted">${esc(t.showrunner)} · ${esc(t.cinematographer)}</span></td>
+      <td><b>${r.score.toFixed(2)}</b></td>${judges.map((j) => `<td>${r.byJudge[j] != null ? r.byJudge[j].toFixed(2) : "–"}</td>`).join("")}
+      <td>$${t.spent.toFixed(2)} / $${a.rules.budget_usd}<div class="bar"><i style="width:${Math.min(100, (t.spent / a.rules.budget_usd) * 100)}%"></i></div></td>
+      <td>${t.turns}</td><td class="small">${esc(status)}${t.openJobs ? `<br><span class="muted">${t.openJobs} job(s) running</span>` : ""}</td></tr>`;
+  }).join("");
+  $("#main").innerHTML = `
+    <section class="panel">
+      <div class="arena-head"><span class="clock">${esc(clock)}</span><h2 style="margin:0">${esc(a.rules.brief)}</h2></div>
+      <div class="small muted">${a.teams.length} teams · $${a.rules.budget_usd} each · ${a.rules.cells} cells · video required · ${a.closed ? "final scores" : "live scores"} · <code>${esc(a.arena)}</code>
+        ${!a.closed && !left ? ` · <button id="closeArena">Close now</button>` : ""}</div>
+      <table class="lb" style="margin-top:12px"><tr><th>#</th><th>team</th><th>score</th>${judges.map((j) => `<th>${esc(j.replace("judge-", ""))}</th>`).join("")}<th>spent</th><th>turns</th><th>now</th></tr>${rows}</table>
+    </section>
+    <div class="layout" style="margin-top:16px">
+      <div class="teams">${a.teams.map((t) => `<article class="panel"><b>${esc(t.team)}</b> <a href="#${esc(t.board)}" data-open="${esc(t.board)}" class="small">open board</a>
+        <div class="small muted">${esc(t.lastAction)}</div>
+        <div class="strip">${t.cells.map((c) => c.printed ? `<img data-repo="${esc(t.board)}" data-path="cells/${c.id}/frame.webp" alt="">` : `<div class="ph"></div>`).join("")}</div>
+        ${t.failedJobs ? `<div class="small issues">${t.failedJobs} failed job(s)</div>` : ""}</article>`).join("")}</div>
+      <aside class="log panel"><h3>arena</h3><ul>${a.log.map((l) => `<li><code>${esc(l.hash)}</code> <b>${esc(l.author)}</b> ${esc(l.message)}</li>`).join("")}</ul></aside>
+    </div>`;
+  document.querySelectorAll("img[data-repo]").forEach(async (el) => { const u = await frameOf(el.dataset.repo, "main", el.dataset.path); if (u) el.src = u; });
+  document.querySelectorAll("[data-open]").forEach((el) => (el.onclick = (e) => { e.preventDefault(); clearInterval(arenaTimer); arena = null; $("#boards").value = el.dataset.open; openBoard(el.dataset.open); }));
+  const close = $("#closeArena");
+  if (close) close.onclick = async () => { close.disabled = true; await api(`/arenas/${a.arena}/close`, { method: "POST", body: "{}" }).catch(console.error); };
+}
+
 async function openBoard(repo) {
+  clearInterval(arenaTimer);
+  arena = null;
   location.hash = repo;
   $("#main").innerHTML = `<p class="muted">Loading ${esc(repo)}…</p>`;
   state = { repo };

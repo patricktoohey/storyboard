@@ -4,12 +4,14 @@
 // only lock, and it is enough to make take numbering and group completion atomic.
 //
 // This file is the pure part: what a ledger edit does to the rows. coordinator.ts does the I/O.
+import { estimate, usd } from "./costs.ts";
 import { parseCsv, toCsv } from "./csv.ts";
-import type { Job, JobRequest, JobStatus } from "./jobs.ts";
+import type { Job, JobRequest, JobStatus, Limits } from "./jobs.ts";
 
 export const LEDGER_BRANCH = "jobs";
 export const LEDGER_FILE = "jobs.csv";
-export const LEDGER_HEADER = ["id", "kind", "cell", "take", "attempt", "group", "status", "detail", "result", "updated"] as const;
+// cost_est: what the job is charged (costs.ts), reserved when it is queued
+export const LEDGER_HEADER = ["id", "kind", "cell", "take", "attempt", "group", "status", "detail", "result", "updated", "cost_est"] as const;
 export type LedgerRow = Record<(typeof LEDGER_HEADER)[number], string>;
 
 // A group is a row too (kind "group"); its detail says what to do when its jobs are all finished.
@@ -21,6 +23,20 @@ export const ledgerCsv = (rows: LedgerRow[]) => toCsv(rows, LEDGER_HEADER);
 
 const open = (r: LedgerRow) => r.status === "queued" || r.status === "running";
 
+/** Everything charged so far: finished jobs and the reservations of open ones (D19). */
+export const spent = (rows: LedgerRow[]) => rows.reduce((sum, r) => sum + (Number(r.cost_est) || 0), 0);
+
+/** A request the board's budget or deadline doesn't allow; nothing is queued. */
+export class LimitError extends Error {
+	constructor(message: string) {
+		super(message);
+		this.name = "LimitError";
+	}
+}
+
+// After the deadline only judging continues (the arena's own jobs, which have no limits anyway)
+const AFTER_DEADLINE: JobRequest["kind"][] = ["judge"];
+
 /**
  * Appends jobs for `requests`, numbering takes after the highest take of that cell in the ledger or in
  * `existing` (take numbers from branches made before the ledger existed). Mutates `rows`.
@@ -29,9 +45,22 @@ export function appendJobs(
 	rows: LedgerRow[],
 	repo: string,
 	requests: JobRequest[],
-	opts: { group?: { id: string; kind: GroupKind }; existing?: Record<string, number>; now: string; newId: () => string },
+	opts: { group?: { id: string; kind: GroupKind }; existing?: Record<string, number>; now: string; newId: () => string; limits?: Limits },
 ): Job[] {
-	const { group, existing = {}, now, newId } = opts;
+	const { group, existing = {}, now, newId, limits = {} } = opts;
+	// Checked inside the ledger commit that queues the jobs, so racing submits can't both spend the last
+	// dollar or slip in after the deadline: the loser re-runs this check on the winner's rows
+	if (limits.deadline && Date.parse(now) > Date.parse(limits.deadline)) {
+		const late = requests.filter((r) => !AFTER_DEADLINE.includes(r.kind));
+		if (late.length) throw new LimitError(`deadline passed at ${limits.deadline}`);
+	}
+	if (limits.budget_usd !== undefined) {
+		const cost = requests.reduce((sum, r) => sum + estimate(r), 0);
+		const used = spent(rows);
+		if (used + cost > limits.budget_usd + 1e-9) {
+			throw new LimitError(`over budget: ${usd(used)} spent or reserved + ${usd(cost)} > ${usd(limits.budget_usd)}`);
+		}
+	}
 	if (group && !rows.some((r) => r.kind === "group" && r.id === group.id)) {
 		rows.push(row({ id: group.id, kind: "group", detail: group.kind, status: "running", updated: now }));
 	}
@@ -47,12 +76,14 @@ export function appendJobs(
 			row({
 				id: job.id,
 				kind: job.kind,
-				cell: "cell" in job ? job.cell : "",
+				// Arena jobs (turns, judging) record their team where a cell would go
+				cell: "cell" in job ? job.cell : "team" in job ? job.team : "",
 				take: job.kind === "take" ? String(job.take) : "",
 				attempt: job.kind === "take" ? String(job.attempt) : "",
 				group: job.group ?? "",
 				status: "queued",
 				updated: now,
+				cost_est: estimate(req).toFixed(4),
 			}),
 		);
 		return job;

@@ -20,6 +20,7 @@ export const seedSkills = Object.fromEntries(
 	Object.entries(SEED).map(([path, text]) => [path.replace(/^(\.\.\/)+/, ""), text]),
 );
 
+// Roles every board fills; arena boards also have a showrunner (board.json skills.showrunner)
 export const ROLES = ["director", "cinematographer", "casting"] as const;
 export type Role = (typeof ROLES)[number];
 export const isRole = (r: string | undefined): r is Role => ROLES.includes(r as Role);

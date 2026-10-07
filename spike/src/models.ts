@@ -348,3 +348,13 @@ export async function blastRadius(env: Env, change: string, cells: Cell[]) {
 	const p = Object.fromEntries(cells.map((c) => [c.id, answers[`affects.${c.id}`]?.noul ?? 0]));
 	return { affected: cells.filter((c) => p[c.id] >= 0.5).map((c) => c.id), probabilities: p, elapsed_ms };
 }
+
+/** Showrunner's note on a cell, in its skill's voice: one or two sentences for the cinematographer. */
+export async function writeNote(env: Env, skill: Skill, context: string) {
+	const system = `${skill.body}
+
+## Output contract
+Reply with ONLY the note: one or two sentences, addressed to the cinematographer, about this one shot.`;
+	const text = (await chat(env, skill.metadata.model ?? env.DIRECTOR_MODEL, system, context)).trim().replace(/^"|"$/g, "");
+	return text.split("\n")[0].slice(0, 400);
+}

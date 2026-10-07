@@ -3,7 +3,7 @@
 // submit() and report() each make one ledger commit, retried on a lost race, then queue whatever that
 // commit created.
 import { WorkingTree, type Remote } from "./git";
-import type { Job, JobRequest, JobStatus } from "./jobs";
+import type { Job, JobRequest, JobStatus, Limits } from "./jobs";
 import {
 	type GroupKind,
 	type LedgerRow,
@@ -57,10 +57,28 @@ async function onLedger<T>(remote: Remote, message: string, edit: (rows: LedgerR
 const describe = (j: Job) =>
 	j.kind === "take" ? `take ${j.take} of cell ${j.cell}` : j.kind === "bible" ? `bible edit from cell ${j.cell}` : j.kind;
 
-/** Records new jobs in the ledger (numbering takes), then queues them. */
-export async function submit(env: Env, repo: string, requests: JobRequest[], group?: { id: string; kind: GroupKind }) {
+/** A board's budget and deadline (board.json); none outside an arena. */
+export async function limitsOf(env: Env, repo: string): Promise<Limits> {
+	using handle = await env.ARTIFACTS.get(repo);
+	const text = await (await handle.readFile({ ref: "main", path: "board.json" }).catch(() => null))?.text();
+	const board = text ? (JSON.parse(text) as Limits) : {};
+	return { budget_usd: board.budget_usd, deadline: board.deadline };
+}
+
+/**
+ * Records new jobs in the ledger (numbering takes, checking the board's budget and deadline), then queues
+ * them. Throws LimitError, queueing nothing, if the board can't afford them or its deadline has passed.
+ */
+export async function submit(
+	env: Env,
+	repo: string,
+	requests: JobRequest[],
+	group?: { id: string; kind: GroupKind },
+	opts: { delaySeconds?: number } = {},
+) {
 	if (!requests.length) return [];
 	const remote = await repoRemote(env, repo);
+	const limits = await limitsOf(env, repo);
 	// Takes shot before the ledger existed still count when numbering
 	const existing: Record<string, number> = {};
 	if (requests.some((r) => r.kind === "take")) {
@@ -71,10 +89,10 @@ export async function submit(env: Env, repo: string, requests: JobRequest[], gro
 	}
 	let jobs: Job[] = [];
 	await onLedger(remote, `Queue ${requests.length} job${requests.length > 1 ? "s" : ""}`, (rows) => {
-		jobs = appendJobs(rows, repo, requests, { group, existing, now: now(), newId });
+		jobs = appendJobs(rows, repo, requests, { group, existing, now: now(), newId, limits });
 		return jobs;
 	});
-	await env.JOBS.sendBatch(jobs.map((body) => ({ body })));
+	await env.JOBS.sendBatch(jobs.map((body) => ({ body, delaySeconds: opts.delaySeconds })));
 	return jobs;
 }
 

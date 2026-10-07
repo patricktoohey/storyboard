@@ -24,9 +24,13 @@ export type Job = JobBase &
 		| { kind: "bible"; cell: string; note: string }
 		| { kind: "print"; picks: { cell: string; branch: string }[]; message: string }
 		// Animate one cell's printed frame into cut/<cut>/<cell>; `origin` is where the frame's signed URL points
-		| { kind: "video"; cell: string; cut: string; origin: string }
+		| { kind: "video"; cell: string; cut: string; origin: string; seconds: number }
 		// Merge a cut's video branches into cut/<cut> with an edit decision list
 		| { kind: "assemble"; cut: string; cells: string[] }
+		// Arena: one showrunner turn on a team's board (showrunner.ts)
+		| { kind: "turn"; arena: string; team: string; origin: string }
+		// Arena: score a team's board at its current main (or its submission, in the final round)
+		| { kind: "judge"; team: string; board: string; final: boolean }
 	);
 
 /** A job as submitted, before the coordinator assigns an id (and, for takes, a take number). */
@@ -35,8 +39,17 @@ export type JobRequest =
 	| { kind: "take"; cell: string; attempt?: 1 | 2; opts?: TakeOptions }
 	| { kind: "bible"; cell: string; note: string }
 	| { kind: "print"; picks: { cell: string; branch: string }[]; message: string }
-	| { kind: "video"; cell: string; cut: string; origin: string }
-	| { kind: "assemble"; cut: string; cells: string[] };
+	| { kind: "video"; cell: string; cut: string; origin: string; seconds: number }
+	| { kind: "assemble"; cut: string; cells: string[] }
+	| { kind: "turn"; arena: string; team: string; origin: string }
+	| { kind: "judge"; team: string; board: string; final: boolean };
+
+/** A team board's limits, from its board.json; absent on boards outside an arena. */
+export interface Limits {
+	budget_usd?: number;
+	// ISO time after which the board accepts no new work
+	deadline?: string;
+}
 
 /** What a finished take reports back, enough for the coordinator to pick the best take of a cell. */
 export interface TakeResult {

@@ -1,7 +1,10 @@
 // The storyboard-jobs queue consumer. One job per invocation: run it, reporting each stage to the jobs
 // ledger, and queue whatever it leads to (a board's takes, a continuity retake, a bible edit's takes).
 import { printTakes, retakeOptions, runAssembleJob, runBibleJob, runBoardJob, runTakeJob, runVideoJob } from "./board";
+import { queueLiveJudging, runJudgeJob } from "./arena";
 import { report, submit } from "./coordinator";
+import { LimitError } from "./ledger.ts";
+import { runTurnJob } from "./showrunner";
 import type { Job } from "./jobs";
 
 async function run(env: Env, job: Job) {
@@ -23,12 +26,17 @@ async function run(env: Env, job: Job) {
 			// The automatic retake joins the same group before this take is marked done, so a first cut
 			// waits for it
 			if (!t.ok && job.attempt === 1) {
-				await submit(
-					env,
-					job.repo,
-					[{ kind: "take", cell: job.cell, attempt: 2, opts: retakeOptions(job.opts, t.issues) }],
-					job.group ? { id: job.group, kind: "first_cut" } : undefined,
-				);
+				try {
+					await submit(
+						env,
+						job.repo,
+						[{ kind: "take", cell: job.cell, attempt: 2, opts: retakeOptions(job.opts, t.issues) }],
+						job.group ? { id: job.group, kind: "first_cut" } : undefined,
+					);
+				} catch (err) {
+					// An arena team out of budget or time: the take still stands, just without its retake
+					if (!(err instanceof LimitError)) throw err;
+				}
 			}
 			return { detail: t.ok ? `continuity ok (${t.skill})` : `continuity break: ${t.issues.join("; ")}`, result: t.ok ? "ok" : "break" };
 		}
@@ -40,15 +48,28 @@ async function run(env: Env, job: Job) {
 		case "print": {
 			await progress("editor merging the takes into main");
 			await printTakes(env, job.repo, job.picks, job.message);
+			// In an arena, a new print is scored live
+			await queueLiveJudging(env, job.repo).catch((e) => console.error("live judging", e));
 			return { detail: job.picks.map((p) => p.branch).join(", ") };
 		}
 		case "video": {
-			const clip = await runVideoJob(env, job.repo, job.cut, job.cell, job.origin, progress);
+			const clip = await runVideoJob(env, job.repo, job.cut, job.cell, job.origin, job.seconds, progress);
 			return { detail: `${clip.seconds}s clip, ${(clip.bytes / 1e6).toFixed(1)} MB in ${Math.round(clip.elapsed_ms / 1000)}s` };
 		}
 		case "assemble": {
 			const cut = await runAssembleJob(env, job.repo, job.cut, job.cells, progress);
+			await queueLiveJudging(env, job.repo).catch((e) => console.error("live judging", e));
 			return { detail: `${cut.branch}: ${cut.clips} clips, ${cut.seconds}s` };
+		}
+		case "turn":
+			return runTurnJob(env, job, progress);
+		case "judge": {
+			const judged = await runJudgeJob(env, job.repo, job.team, job.board, job.final, progress);
+			return {
+				detail: judged.judged
+					? `${job.final ? "final " : ""}${job.team}@${judged.commit.slice(0, 7)}: ${Object.entries(judged.totals ?? {}).map(([k, v]) => `${k.replace("judge-", "")} ${v.toFixed(2)}`).join(", ")}`
+					: `${job.team}: ${judged.reason}`,
+			};
 		}
 	}
 }

@@ -102,7 +102,7 @@ async function loadBoard(env: Env, tree: WorkingTree): Promise<LoadedBoard> {
  * Commits to main from a fresh clone. If someone else pushed in between (a print, a note), the push is
  * rejected; re-clone and re-apply, like `git pull --rebase` by hand.
  */
-async function onMain<T>(remote: Remote, apply: (tree: WorkingTree) => Promise<T>, attempts = 4): Promise<T> {
+export async function onMain<T>(remote: Remote, apply: (tree: WorkingTree) => Promise<T>, attempts = 6): Promise<T> {
 	for (let attempt = 1; ; attempt++) {
 		const tree = await WorkingTree.clone(remote, "main");
 		const result = await apply(tree);
@@ -327,13 +327,15 @@ export async function runBoardJob(
 	await progress("director planning the board");
 	const directed = await onMain(remote, async (tree) => {
 		const available = new Set(await tree.list("skills"));
-		const choice = { ...DEFAULT_SKILLS, ...skills };
+		// An arena team's board already has board.json (arena, team, budget, deadline, skills): keep it
+		const existing = (await tree.exists("board.json")) ? JSON.parse(await tree.read("board.json")) : {};
+		const choice = { ...DEFAULT_SKILLS, ...existing.skills, ...skills };
 		for (const role of ROLES) if (!available.has(choice[role])) throw new Error(`no skill "${choice[role]}" for ${role}`);
 		const skill = await loadSkill(tree, choice.director);
 		const board = await direct(env, skill, concept, cellCount);
 		const files: Files = {
 			"concept.md": `# Concept\n\n${concept}\n`,
-			"board.json": JSON.stringify({ skills: choice }, null, 2) + "\n",
+			"board.json": JSON.stringify({ ...existing, skills: choice }, null, 2) + "\n",
 			"bible.md": bibleMd(board.title, board.bible, board.characters),
 			// The source of truth for continuity checks; bible.md is the human-readable view of it
 			"characters.json": JSON.stringify(board.characters, null, 2) + "\n",
@@ -461,12 +463,14 @@ export async function startCut(env: Env, repo: string, origin: string) {
 	const csv = await (await handle.readFile({ ref: "main", path: "storyboard.csv" }))?.text();
 	const printed = parseCsv(csv ?? "").filter((r) => r.take);
 	if (!printed.length) throw new Error("print at least one take before making a cut");
-	const requests: JobRequest[] = printed.map((r) => ({ kind: "video", cell: r.id, cut, origin }));
+	// Priced per second, so the clip length is part of the request (and of the budget check)
+	const cap = Number(env.VIDEO_MAX_SECONDS);
+	const requests: JobRequest[] = printed.map((r) => ({ kind: "video", cell: r.id, cut, origin, seconds: clipSeconds(cellFromRow(r), cap) }));
 	return { cut, requests, group: { id: `cut-${cut}-${crypto.randomUUID().slice(0, 6)}`, kind: `cut:${cut}` as const } };
 }
 
 /** Job: animate one cell's printed frame and commit the clip to cut/<cut>/<cell>. */
-export async function runVideoJob(env: Env, repo: string, cut: string, cellId: string, origin: string, progress: Progress = quiet) {
+export async function runVideoJob(env: Env, repo: string, cut: string, cellId: string, origin: string, seconds: number, progress: Progress = quiet) {
 	const remote = await repoRemote(env, repo);
 	const branch = `cut/${cut}/${cellId}`;
 	const tree = await WorkingTree.clone(remote, "main", branch);
@@ -474,7 +478,6 @@ export async function runVideoJob(env: Env, repo: string, cut: string, cellId: s
 	const row = parseCsv(await tree.read("storyboard.csv")).find((r) => r.id === cellId);
 	if (!row?.take) throw new Error(`cell ${cellId} has no printed take`);
 	const cell = cellFromRow(row);
-	const seconds = clipSeconds(cell, Number(env.VIDEO_MAX_SECONDS));
 
 	// Signed at the commit the frame was printed in, so the clip is of exactly that frame even if main moves
 	const image = await frameUrl(env, origin, repo, frameCommit, `cells/${cellId}/frame.webp`);
