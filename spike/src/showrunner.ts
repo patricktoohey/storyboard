@@ -155,12 +155,12 @@ export async function runTurnJob(env: Env, job: TurnJob, progress: Progress) {
 				break;
 			}
 			case "submit": {
-				// The submission is a branch on the board pointing at the cut, and a record in the arena
-				const remote = await repoRemote(env, board);
+				// The submission is the cut's commit ID, recorded in the arena. Read from the Artifacts API: cloning
+				// the cut branch (its clips are ~15-20 MB) to make a ref got the first arena's submitting turn killed.
 				const cutBranch = `cut/${summary.cut}`;
-				const tree = await WorkingTree.clone(remote, cutBranch, "submission");
-				const commit = await tree.head();
-				await tree.push("submission");
+				using handle = await env.ARTIFACTS.get(board);
+				const [head] = await handle.log({ ref: cutBranch, limit: 1 });
+				const commit = head.hash;
 				await recordSubmission(env, job.arena, job.team, board, commit, summary.cut!, `submitted on turn ${acted + 1}`);
 				detail += `: ${cutBranch}@${commit.slice(0, 7)}`;
 				return { detail, result };

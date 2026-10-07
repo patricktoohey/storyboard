@@ -194,6 +194,73 @@ judge request builder; showrunner action request builder. Evals (live): the show
 recorded board states (e.g. "two cells have continuity breaks and $0.40 left" → retake, not cut); judge
 scores on fixture boards ordered as a person would order them.
 
+## Crew draft: teams choose their models (next)
+
+In the first arena every team ran the same models (Llama 3.3 70B, flux-2-klein-9b, Clef, Wan 2.7); teams
+differed only in skills. A **draft** makes the crew part of the strategy: before planning, the showrunner
+picks a model for each slot from a priced menu, and those prices replace the flat estimates in `costs.ts`.
+
+### The menu (Cloudflare prices, 2026-10)
+
+Per-use costs are for this pipeline's usage: 1344×576 frames, ~1.5k/1k tokens for the director,
+~1k/0.2k for the cinematographer, Clef with 1 to 3 small images.
+
+| Slot | Model | Unit price | Per use |
+|---|---|---|---|
+| Director, cinematographer, notes (LLM) | `@cf/google/gemma-4-26b-a4b-it` | $0.10 / $0.30 per M tokens in/out | ~$0.0005 per call |
+| | `@cf/meta/llama-3.3-70b-instruct-fp8-fast` (today) | $0.293 / $2.253 per M | ~$0.003 director, ~$0.001 cinematographer |
+| | `@cf/nvidia/nemotron-3-120b-a12b` | $0.50 / $1.50 per M | ~$0.002 |
+| | `@cf/moonshotai/kimi-k2.6` | $0.95 / $4.00 per M | ~$0.006 |
+| Frames (renderer) | `flux-2-klein-4b` | $0.000287 per output 512² tile | ~$0.002 per frame |
+| | `flux-2-klein-9b` (today) | $0.015 first MP + $0.002 per input image MP | ~$0.016 per frame |
+| | `@cf/leonardo/phoenix-1.0` | $0.00583 per tile + $0.00011 per step | ~$0.04 per frame |
+| | `flux-2-dev` | $0.00041 per output tile per step | ~$0.05 per frame (20 steps) |
+| Critic and continuity | `clef-flash` | $0.09 per M input tokens | ~$0.003 per take |
+| | `clef` (today) | $0.24 per M input tokens | ~$0.007 per take |
+| Video, per second at 720p | `minimax/hailuo-2.3-fast` | $0.19 per 6 s at 768p | ~$0.032/s |
+| | `google/veo-3.1-fast` | $0.08/s (720p), $0.10/s with audio | $0.08/s |
+| | `lightricks/ltx-2-5-fast` | $0.09/s (720p, with audio) | $0.09/s |
+| | `alibaba/wan-2.7-i2v` (today) | $0.10/s (720p) | $0.10/s |
+| | `bytedance/seedance-2.0-fast` | $0.12/s (720p, image input) | $0.12/s |
+
+A take today costs ~$0.028 (klein-9b frame, Llama cinematographer, two Clef calls), close to the flat
+$0.03 estimate. The draft's spread is wide: a budget crew (klein-4b, gemma, clef-flash, Hailuo) shoots a take
+for well under a cent and 20 s of video for ~$0.65; a premium crew (flux-2-dev, kimi, clef, Seedance) pays
+~$0.06 a take and $2.40 for the same video.
+
+### How the draft works
+
+- **Turn 0 is the draft.** For each slot, Clef picks from the menu with the showrunner skill as strategy,
+  the brief and the budget as state (closed set, probabilities recorded, D22). The crew goes in
+  `board.json` as `crew: { llm, renderer, critic, video }`, committed like any other change.
+- **The draft is checked against the budget.** Code rejects a crew whose cheapest complete film (plan,
+  one take per cell, the required cut) costs more than the budget, and reserves the cut at the crew's
+  video price, so a team can't draft a video model it can't afford to use.
+- **Costs follow the crew.** `estimate()` takes the board's crew: a take is renderer + LLM + 2 × critic;
+  a clip is seconds × the crew's video price. Actual token counts, where a response reports them, can
+  replace estimates later; until then the estimates remain the bill (D19).
+- **Agents read their model from the crew,** not from the Worker's settings: the renderer adapter
+  (multipart for flux-2, JSON for flux-1 and phoenix) and the video adapter (each provider's input
+  schema: `image` for Wan, `image_uri` for LTX, ...) are chosen by model ID. Skills keep their style; the
+  crew chooses who executes it.
+- **Judges stay fixed** (`clef`, the arena's rubric skills), so scores stay comparable across crews.
+
+### What it lets the arena show
+
+Whether results come from the crew or the strategy: an auteur on a budget crew versus a safe team on a
+premium one; whether paying for a better renderer reduces continuity retakes enough to pay for itself;
+whether a cheaper video model leaves money for the notes that raise story scores.
+
+### Also from the first arena
+
+- **Turn chains must not break.** The auteur's submitting turn was killed mid-run (it cloned the cut
+  branch, ~15 to 20 MB of video, just to create a `submission` branch), and a failed turn didn't queue the
+  next one. Fixes: submissions record the cut's commit ID from the Artifacts API without cloning; a failed
+  or interrupted turn still queues the next turn until the deadline.
+- **Showrunners repeat notes that don't work.** The auteur gave essentially the same note on cell 04 for 12
+  turns. The turn state should include each cell's recent notes and their outcomes, with a rule that a
+  cell whose last N notes failed is set aside (or gets a retake with a different style).
+
 ## Minimum version (about 2 days)
 
 1. Arena repo, `rules.json`, teams created by forking the template per team (`POST /arenas`).
@@ -215,3 +282,31 @@ each other's boards.
 - **Is video required for a submission**, or a bonus judged separately?
 - **Open or sealed scores** during the run: open makes the leaderboard a feedback loop the showrunners
   react to, which is the more interesting behaviour to show.
+
+## What was built, and the first arena (2026-10-07)
+
+Built: everything in "Minimum version" above (`src/arena.ts`, `src/arena-rules.ts`, `src/showrunner.ts`,
+`skills/showrunner-*`, `skills/judge-*`, the arena page), with 59 unit tests. Not yet: the crew draft,
+contact sheets (judges see up to 4 sampled frames instead), the critic judge, sealed scores.
+
+First run: brief "A 30-second story about something lost and found", 3 teams, 20 minutes, $5 each,
+4 cells, video required. Arena created in 9 s.
+
+| Team | Turns | Spent | What it did | Final (craft / story) |
+|---|---|---|---|---|
+| safe | 3 | $2.27 | plan → cut (p=0.99) → submit | **2.53** (2.55 / 2.52) |
+| documentarian | 3 | $2.22 | plan → cut (p=0.98) → submit; first to submit | 2.38 (2.45 / 2.32) |
+| auteur | 14 | $2.94 | plan → 12 turns of notes and retakes, mostly the same note on cell 04 → cut (required by the clock) → submitting turn killed | 2.15 (2.28 / 2.02), **disqualified: no video** |
+
+What it showed:
+- Skills alone produced three distinct behaviours from one brief and budget, and the deadline mandate
+  worked: the auteur was forced to cut 7.5 minutes out, and its clips were assembled with 4 minutes to spare.
+- The auteur's notes didn't move its scores (2.16 live before, 2.15 after): it repeated a note that kept
+  failing continuity. See "Showrunners repeat notes" above.
+- A failure mode the design missed: a turn killed mid-run (cloning ~15 to 20 MB of video to create a
+  submission ref) ended the team's turn chain. Fixed after the run: submissions read the cut's commit ID from
+  the API, and a failed or interrupted turn still queues the next one.
+- The judges barely separated the teams (2.15 to 2.53 out of 4), and final scores equalled live scores for
+  the same commits (Clef is deterministic). The rubric needs sharper criteria, or comparative judging (rank
+  the boards side by side), to make the leaderboard meaningful.
+- Estimated total spend $7.43 for the three teams, about half of it video.

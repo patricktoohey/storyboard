@@ -74,6 +74,18 @@ async function run(env: Env, job: Job) {
 	}
 }
 
+/**
+ * A showrunner's turns form a chain: each turn queues the next. A turn that fails or is interrupted must
+ * still queue the next one, or its team goes silent (in the first arena, the auteur stopped with a finished
+ * cut it never submitted). Refused after the deadline, which ends the chain.
+ */
+async function keepTurnsGoing(env: Env, job: Job) {
+	if (job.kind !== "turn") return;
+	await submit(env, job.repo, [{ kind: "turn", arena: job.arena, team: job.team, origin: job.origin }], undefined, { delaySeconds: 20 }).catch(
+		(e) => console.warn(`next turn for ${job.team} not queued: ${e}`),
+	);
+}
+
 export async function consume(batch: MessageBatch<Job>, env: Env) {
 	// Concurrently: a batch is usually one board's takes, which should shoot side by side
 	await Promise.all(batch.messages.map((msg) => consumeOne(msg, env)));
@@ -86,6 +98,7 @@ async function consumeOne(msg: Message<Job>, env: Env) {
 		// pushed, so record the failure instead of running it twice
 		if (msg.attempts > 1) {
 			await report(env, job, "failed", "interrupted; retake from the board");
+			await keepTurnsGoing(env, job);
 		} else {
 			// No separate "started" report: every job reports its first stage straight away, and each report is a commit
 			const out = await run(env, job);
@@ -94,6 +107,7 @@ async function consumeOne(msg: Message<Job>, env: Env) {
 	} catch (err) {
 		console.error(job.kind, job.id, err);
 		await report(env, job, "failed", String(err).slice(0, 300)).catch((e) => console.error("could not record failure", e));
+		await keepTurnsGoing(env, job);
 	}
 	msg.ack();
 }
