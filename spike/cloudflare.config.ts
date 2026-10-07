@@ -38,6 +38,10 @@ export default defineConfig({
 			// Routing decisions: which agent handles a note, which cells a change affects. clef, not clef-flash:
 			// on the router eval (test/evals) clef scored 7/7 at p>=0.83, clef-flash 6/7 (docs/decisions.md D10)
 			CLEF_ROUTER_MODEL: bindings.text("clef"),
+			// Image-to-video, from Cloudflare's unified model catalog: each printed frame becomes its shot's first frame
+			VIDEO_MODEL: bindings.text("alibaba/wan-2.7-i2v"),
+			// Billed per second of video (~$0.10/s at 720p): clips are each cell's duration, capped here
+			VIDEO_MAX_SECONDS: bindings.text("5"),
 			// Bearer token callers must send; the workers.dev URL is public and every board spends AI credits
 			SPIKE_KEY: bindings.secret(),
 			ARTIFACTS: bindings.artifacts({

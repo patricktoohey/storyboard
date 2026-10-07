@@ -23,6 +23,10 @@ export type Job = JobBase &
 		| { kind: "take"; cell: string; take: number; attempt: 1 | 2; opts: TakeOptions }
 		| { kind: "bible"; cell: string; note: string }
 		| { kind: "print"; picks: { cell: string; branch: string }[]; message: string }
+		// Animate one cell's printed frame into cut/<cut>/<cell>; `origin` is where the frame's signed URL points
+		| { kind: "video"; cell: string; cut: string; origin: string }
+		// Merge a cut's video branches into cut/<cut> with an edit decision list
+		| { kind: "assemble"; cut: string; cells: string[] }
 	);
 
 /** A job as submitted, before the coordinator assigns an id (and, for takes, a take number). */
@@ -30,7 +34,9 @@ export type JobRequest =
 	| { kind: "board"; concept: string; cells: number; skills: Record<string, string> }
 	| { kind: "take"; cell: string; attempt?: 1 | 2; opts?: TakeOptions }
 	| { kind: "bible"; cell: string; note: string }
-	| { kind: "print"; picks: { cell: string; branch: string }[]; message: string };
+	| { kind: "print"; picks: { cell: string; branch: string }[]; message: string }
+	| { kind: "video"; cell: string; cut: string; origin: string }
+	| { kind: "assemble"; cut: string; cells: string[] };
 
 /** What a finished take reports back, enough for the coordinator to pick the best take of a cell. */
 export interface TakeResult {

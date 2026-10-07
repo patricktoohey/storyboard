@@ -12,8 +12,9 @@ export const LEDGER_FILE = "jobs.csv";
 export const LEDGER_HEADER = ["id", "kind", "cell", "take", "attempt", "group", "status", "detail", "result", "updated"] as const;
 export type LedgerRow = Record<(typeof LEDGER_HEADER)[number], string>;
 
-// A group is a row too (kind "group"); its detail says what to do when its jobs are all finished
-export type GroupKind = "first_cut" | "bible";
+// A group is a row too (kind "group"); its detail says what to do when its jobs are all finished.
+// "cut:<name>" groups a cut's video jobs; when they finish, the videos are assembled into cut/<name>.
+export type GroupKind = "first_cut" | "bible" | `cut:${string}`;
 
 export const parseLedger = (text: string) => parseCsv<LedgerRow>(text);
 export const ledgerCsv = (rows: LedgerRow[]) => toCsv(rows, LEDGER_HEADER);
@@ -82,8 +83,10 @@ export function recordProgress(
 	if (rows.some((r) => r.group === group.id && r.kind !== "group" && open(r))) return { followUps: [] };
 	group.status = "done";
 	group.updated = update.now;
-	if (group.detail !== "first_cut") return { followUps: [] };
-	return { followUps: firstCut(rows.filter((r) => r.group === group.id)) };
+	const members = rows.filter((r) => r.group === group.id);
+	if (group.detail === "first_cut") return { followUps: firstCut(members) };
+	if (group.detail.startsWith("cut:")) return { followUps: assembleCut(group.detail.slice(4), members) };
+	return { followUps: [] };
 }
 
 /** Print the first take of each cell that passed continuity, else its latest finished take. */
@@ -97,6 +100,12 @@ export function firstCut(groupRows: LedgerRow[]): JobRequest[] {
 		return { cell, branch: `cell/${cell}/take-${best.take}` };
 	});
 	return [{ kind: "print", picks, message: "Print first cut" }];
+}
+
+/** Assemble the cells whose videos rendered, in board order; a failed cell is left out of the cut. */
+export function assembleCut(cut: string, groupRows: LedgerRow[]): JobRequest[] {
+	const cells = groupRows.filter((r) => r.kind === "video" && r.status === "done").map((r) => r.cell).sort();
+	return cells.length ? [{ kind: "assemble", cut, cells }] : [];
 }
 
 const row = (r: Partial<LedgerRow>): LedgerRow =>

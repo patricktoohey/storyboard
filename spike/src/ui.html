@@ -78,6 +78,11 @@ aside.log h3 + ul { margin-bottom: 16px; }
 .dot.queued { background: var(--line); } .dot.running { background: var(--accent); animation: pulse 1s infinite alternate; }
 .dot.done { background: var(--ok); } .dot.failed { background: var(--bad); }
 .newboard { display: grid; gap: 10px; max-width: 720px; }
+.cut { display: grid; grid-template-columns: minmax(0, 1fr) 280px; gap: 16px; margin-bottom: 18px; }
+.cut video { width: 100%; aspect-ratio: 16 / 9; background: #000; border-radius: 8px; display: block; }
+.cut ol { margin: 0; padding-left: 20px; display: grid; gap: 6px; font-size: 12px; }
+.cut li.now { color: var(--accent); }
+@media (max-width: 900px) { .cut { grid-template-columns: 1fr; } }
 dialog { background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: var(--radius); max-width: 520px; width: calc(100% - 32px); }
 dialog::backdrop { background: rgba(0,0,0,.6); }
 @media (max-width: 900px) { .layout { grid-template-columns: 1fr; } .board-head { grid-template-columns: 1fr; } .grid { grid-template-columns: 1fr; } main, header { padding-left: 16px; padding-right: 16px; } }
@@ -179,8 +184,8 @@ async function watch(force = false) {
   const changed = sig !== jobsSig;
   jobs = next; jobsSig = sig;
   ticks++;
+  // Re-render only on change: a re-render replaces the page, which would restart a playing video
   if (force || changed || (jobs.some(openJob) && ticks % 3 === 0)) await refresh();
-  else render();
 }
 setInterval(() => watch().catch(console.error), 2500);
 
@@ -247,7 +252,8 @@ function currentTake(cell) {
 const drafts = {};          // cell id -> unsent note text, kept across re-renders while polling
 
 function jobsHtml() {
-  const label = (j) => j.kind === "take" ? `cell ${j.cell} · take ${j.take}${j.attempt === "2" ? " (retake)" : ""}` : j.kind === "bible" ? `bible (from cell ${j.cell})` : j.kind;
+  const label = (j) => j.kind === "take" ? `cell ${j.cell} · take ${j.take}${j.attempt === "2" ? " (retake)" : ""}`
+    : j.kind === "bible" ? `bible (from cell ${j.cell})` : j.kind === "video" ? `cell ${j.cell} · video` : j.kind === "assemble" ? "assemble cut" : j.kind;
   return `<h3>jobs <span class="small muted">jobs.csv</span></h3><ul>${jobs.slice(0, 25).map((j) => `
     <li class="job"><span class="dot ${esc(j.status)}"></span><span><b>${esc(label(j))}</b> <span class="muted">${esc(j.status)}</span><br>
     <span class="small muted">${esc(j.detail || "")}</span></span></li>`).join("") || `<li class="muted small">no jobs yet</li>`}</ul>`;
@@ -270,6 +276,8 @@ function render() {
   }
   document.querySelectorAll(".cell").forEach((card) => (drafts[card.dataset.cell] = card.querySelector("[data-note]")?.value ?? ""));
   const s = state;
+  // The cut player survives re-renders while the cut is the same, so playback isn't interrupted
+  const oldCut = $("#cutpanel");
   const roleSelect = (role) => `<label>${role}<select data-role="${role}">${s.skills.available.filter((k) => k.role === role).map((k) => `<option value="${esc(k.name)}" ${k.name === s.skills.chosen[role] ? "selected" : ""}>${esc(k.style)} · ${esc(k.version)}</option>`).join("")}</select></label>`;
   $("#main").innerHTML = `
     <section class="board-head panel">
@@ -278,13 +286,61 @@ function render() {
         <div class="muted">${esc(s.concept)}</div>
         <div class="cast">${s.characters.map((c) => `<figure><img data-ref="main" data-path="${esc(c.portrait)}" alt=""><figcaption><b>${esc(c.name)}</b><br><span class="small muted">${esc(c.look)}</span></figcaption></figure>`).join("")}</div>
       </div>
-      <div class="roles"><span class="small muted">Skills on this board</span>${["director", "cinematographer", "casting"].map(roleSelect).join("")}</div>
+      <div class="roles"><span class="small muted">Skills on this board</span>${["director", "cinematographer", "casting"].map(roleSelect).join("")}
+        ${makeVideoButton(s)}</div>
     </section>
+    ${cutHtml(s)}
     <div class="layout">
       <div class="grid">${s.cells.map(cellHtml).join("")}</div>
       <aside class="log panel">${jobsHtml()}<h3>main</h3><ul>${s.log.map((l) => `<li><code>${esc(l.hash)}</code> <b>${esc(l.author)}</b> ${esc(l.message)}</li>`).join("")}</ul></aside>
     </div>`;
-  hydrate();
+  const newCut = $("#cutpanel");
+  if (oldCut && newCut && oldCut.dataset.key === newCut.dataset.key) newCut.replaceWith(oldCut);
+  hydrate(oldCut && $("#cutpanel") === oldCut);
+}
+
+const VIDEO_PRICE_PER_S = 0.10;   // wan-2.7-i2v at 720p
+const VIDEO_MAX_S = 5;            // VIDEO_MAX_SECONDS in cloudflare.config.ts
+
+function makeVideoButton(s) {
+  const printed = s.cells.filter((c) => c.printed);
+  if (!printed.length) return "";
+  const seconds = printed.reduce((n, c) => n + Math.max(2, Math.min(VIDEO_MAX_S, Math.round(c.duration_s) || 3)), 0);
+  const running = jobs.some((j) => (j.kind === "video" || j.kind === "assemble") && openJob(j));
+  return `<button class="primary" data-board-act="cut" ${running ? "disabled" : ""} title="Animates each printed frame (image-to-video), then assembles the clips">
+    ${running ? "Rendering video…" : `Make video · ${printed.length} clips, ${seconds}s, ≈$${(seconds * VIDEO_PRICE_PER_S).toFixed(2)}`}</button>`;
+}
+
+function cutHtml(s) {
+  const cut = s.cuts?.[0];
+  if (!cut?.edl?.length) return "";
+  const total = cut.edl.reduce((n, e) => n + Number(e.seconds), 0);
+  return `<section class="cut panel" id="cutpanel" data-key="${esc(cut.branch)}:${cut.edl.length}">
+    <div><video id="player" controls playsinline></video></div>
+    <div><h3 style="margin:0 0 4px">Cut ${esc(cut.name)} <span class="small muted">${cut.edl.length} clips · ${total}s · branch ${esc(cut.branch)}</span></h3>
+      <ol id="edl">${cut.edl.map((e, i) => `<li data-i="${i}"><b>${esc(e.cell)}</b> · ${esc(e.shot)} · ${esc(e.seconds)}s · take ${esc(e.frame_take)}<br><span class="muted">${esc(e.beat)}</span></li>`).join("")}</ol>
+      <div class="row" style="margin-top:8px"><button id="playall">Play all</button></div></div>
+  </section>`;
+}
+
+/** Plays a cut's clips in EDL order. Clips are fetched with the key and played from blob URLs. */
+async function hydrateCut() {
+  const cut = state.cuts?.[0];
+  const player = $("#player");
+  if (!cut?.edl?.length || !player) return;
+  const clipUrl = (i) => img(cut.branch, cut.edl[i].file);
+  let i = 0;
+  const play = async (n) => {
+    i = n;
+    document.querySelectorAll("#edl li").forEach((li) => li.classList.toggle("now", Number(li.dataset.i) === i));
+    const url = await clipUrl(i);
+    if (url) { player.src = url; player.play().catch(() => {}); }
+  };
+  player.onended = () => { if (i + 1 < cut.edl.length) play(i + 1); };
+  document.querySelectorAll("#edl li").forEach((li) => (li.onclick = () => play(Number(li.dataset.i))));
+  $("#playall").onclick = () => play(0);
+  const first = await clipUrl(0);
+  if (first && !player.src) player.src = first;
 }
 
 function cellHtml(cell) {
@@ -330,7 +386,14 @@ function cellHtml(cell) {
   </article>`;
 }
 
-async function hydrate() {
+async function hydrate(cutKept = false) {
+  if (!cutKept) hydrateCut();
+  const cutButton = document.querySelector("[data-board-act=cut]");
+  if (cutButton) cutButton.onclick = async () => {
+    cutButton.disabled = true;
+    try { await run("Queueing video…", [], () => api(`/boards/${state.repo}/cut`, { method: "POST", body: "{}" })); }
+    catch (err) { console.error(err); cutButton.disabled = false; }
+  };
   document.querySelectorAll("img[data-path]").forEach(async (el) => {
     const url = await img(el.dataset.ref, el.dataset.path, !el.dataset.live);
     if (url) el.src = url;

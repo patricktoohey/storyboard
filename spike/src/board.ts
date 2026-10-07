@@ -27,6 +27,7 @@ import {
 } from "./models";
 import { type Role, type SkillChoice, DEFAULT_SKILLS, ROLES, listSkills, loadSkill, skillTrailer } from "./skills";
 import { forkBoard, repoRemote } from "./template";
+import { animate, clipSeconds, frameUrl, motionPrompt } from "./video";
 
 // ── Files on main ────────────────────────────────────────────────────────────────────────────────
 
@@ -444,6 +445,89 @@ export async function runBibleJob(env: Env, repo: string, cellId: string, note: 
 	return { summary: edit.summary, recast, affected, blast: blast.probabilities, requests };
 }
 
+// ── Video ──────────────────────────────────────────────────────────────────────────────────────
+
+const EDL_HEADER = ["order", "cell", "shot", "camera", "seconds", "file", "frame_take", "beat"] as const;
+
+/**
+ * Route: start a cut. One video job per printed cell, in a "cut:<name>" group; when the group finishes,
+ * the ledger queues the assemble job. Cuts are numbered v1, v2, ... from the existing cut branches.
+ */
+export async function startCut(env: Env, repo: string, origin: string) {
+	const remote = await repoRemote(env, repo);
+	const existing = (await WorkingTree.listBranches(remote, "cut/")).filter((b) => /^cut\/v\d+$/.test(b));
+	const cut = `v${Math.max(0, ...existing.map((b) => Number(b.slice(5)))) + 1}`;
+	using handle = await env.ARTIFACTS.get(repo);
+	const csv = await (await handle.readFile({ ref: "main", path: "storyboard.csv" }))?.text();
+	const printed = parseCsv(csv ?? "").filter((r) => r.take);
+	if (!printed.length) throw new Error("print at least one take before making a cut");
+	const requests: JobRequest[] = printed.map((r) => ({ kind: "video", cell: r.id, cut, origin }));
+	return { cut, requests, group: { id: `cut-${cut}-${crypto.randomUUID().slice(0, 6)}`, kind: `cut:${cut}` as const } };
+}
+
+/** Job: animate one cell's printed frame and commit the clip to cut/<cut>/<cell>. */
+export async function runVideoJob(env: Env, repo: string, cut: string, cellId: string, origin: string, progress: Progress = quiet) {
+	const remote = await repoRemote(env, repo);
+	const branch = `cut/${cut}/${cellId}`;
+	const tree = await WorkingTree.clone(remote, "main", branch);
+	const frameCommit = await tree.head();
+	const row = parseCsv(await tree.read("storyboard.csv")).find((r) => r.id === cellId);
+	if (!row?.take) throw new Error(`cell ${cellId} has no printed take`);
+	const cell = cellFromRow(row);
+	const seconds = clipSeconds(cell, Number(env.VIDEO_MAX_SECONDS));
+
+	// Signed at the commit the frame was printed in, so the clip is of exactly that frame even if main moves
+	const image = await frameUrl(env, origin, repo, frameCommit, `cells/${cellId}/frame.webp`);
+	await progress(`animating ${seconds}s from take ${row.take} (${env.VIDEO_MODEL})`);
+	const clip = await animate(env, image, motionPrompt(cell), seconds);
+
+	await tree.commit(
+		{ name: `animator-${cellId}` },
+		`Cell ${cellId}: ${seconds}s clip for cut ${cut}\n\nFrame: cell/${cellId}/take-${row.take} (main@${frameCommit.slice(0, 7)})\nModel: ${env.VIDEO_MODEL}`,
+		{
+			[`video/${cellId}.mp4`]: clip.mp4,
+			[`video/${cellId}.json`]: JSON.stringify({ ...clip.meta, cut, frame_take: Number(row.take), frame_commit: frameCommit }, null, 2) + "\n",
+		},
+	);
+	await tree.push(branch);
+	return { branch, seconds, bytes: clip.mp4.byteLength, elapsed_ms: clip.meta.elapsed_ms };
+}
+
+/**
+ * Job: merge a cut's per-cell video branches into cut/<cut> (main plus video/ and edl.csv), like printing:
+ * the merge's extra parents are the cell branches, so the cut's history shows which clip came from where.
+ */
+export async function runAssembleJob(env: Env, repo: string, cut: string, cells: string[], progress: Progress = quiet) {
+	const remote = await repoRemote(env, repo);
+	const branch = `cut/${cut}`;
+	const tree = await WorkingTree.clone(remote, "main", branch);
+	await progress(`assembling ${cells.length} clips`);
+	const rows = parseCsv(await tree.read("storyboard.csv"));
+	const tips = await Promise.all(cells.map((c) => tree.fetchBranch(`cut/${cut}/${c}`)));
+	const files: Files = {};
+	const edl: Record<string, string>[] = [];
+	for (const [i, cellId] of cells.entries()) {
+		Object.assign(files, await tree.filesAt(tips[i], "video/"));
+		const meta = JSON.parse(new TextDecoder().decode(files[`video/${cellId}.json`] as Uint8Array));
+		const row = rows.find((r) => r.id === cellId);
+		edl.push({
+			order: String(i + 1),
+			cell: cellId,
+			shot: row?.shot ?? "",
+			camera: row?.camera ?? "",
+			seconds: String(meta.seconds),
+			file: `video/${cellId}.mp4`,
+			frame_take: String(meta.frame_take),
+			beat: row?.beat ?? "",
+		});
+	}
+	files["video/edl.csv"] = toCsv(edl, EDL_HEADER);
+	const total = edl.reduce((sum, e) => sum + Number(e.seconds), 0);
+	await tree.merge({ name: "editor" }, `Cut ${cut}: ${cells.length} clips, ${total}s\n\n${cells.map((c) => `- cut/${cut}/${c}`).join("\n")}`, tips, files);
+	await tree.push(branch);
+	return { branch, clips: cells.length, seconds: total };
+}
+
 /** Commits a new version of a skill to the board's main; takes shot afterwards use it. */
 export async function editSkill(env: Env, repo: string, name: string, text: string, message?: string) {
 	const remote = await repoRemote(env, repo);
@@ -523,9 +607,22 @@ export async function boardState(env: Env, repoName: string) {
 		board.cells.map(async (c) => ((await tree.exists(`cells/${c.id}/notes.md`)) ? tree.read(`cells/${c.id}/notes.md`) : "")),
 	);
 
+	// Cuts: cut/vN branches with their edit decision lists; clips still rendering are cut/vN/<cell> branches
+	const cutBranches = await WorkingTree.listBranches(remote, "cut/");
+	const cuts = await Promise.all(
+		cutBranches
+			.filter((b) => /^cut\/v\d+$/.test(b))
+			.sort((a, b) => Number(b.slice(5)) - Number(a.slice(5)))
+			.map(async (b) => {
+				const edl = await repo.readFile({ ref: b, path: "video/edl.csv" }).then((x) => x?.text());
+				return { name: b.slice(4), branch: b, edl: edl ? parseCsv<Record<string, string>>(edl) : [] };
+			}),
+	);
+
 	return {
 		repo: repoName,
 		title: board.title,
+		cuts,
 		concept: (await tree.read("concept.md")).replace(/^# Concept\s*/, "").trim(),
 		bible: board.bible,
 		characters: board.characters.map((c) => ({ ...c, portrait: portraitPath(c) })),

@@ -23,6 +23,8 @@ models the exact requests production builds (`npm run eval`, about a cent; resul
 | D14 | Every working tree gets its own path, and a queue batch runs its jobs concurrently | live runs (see below) |
 | D15 | Progress reports are best-effort; outcomes retry until they land | live runs (see below) |
 | D16 | A cron sweep fails jobs with no progress for 10 minutes, so groups always close | live check (see below) |
+| D17 | Frames reach the video provider through signed, expiring URLs that grant one frame | `video.test.ts` |
+| D18 | Clips live on cut branches (`cut/vN/NN`, merged into `cut/vN` with an EDL), never on main | live run (see below) |
 
 ## D2: placeholders, not descriptions
 
@@ -126,6 +128,29 @@ A job whose message is lost would hold its group open forever: the subway board 
 cut. A cron trigger (every 5 minutes, also `POST /sweep`) marks jobs with no progress for 10 minutes as
 failed. That is an ordinary ledger commit, so it closes the group like any other outcome: on the subway
 board the sweep failed the lost retake at 17:25 and the first cut printed 10 s later with the cell's take 1.
+
+## D17: signed frame URLs
+
+The image-to-video models (Cloudflare's unified catalog, called with `env.AI.run`) take the first frame as
+an HTTPS URL, and every board route needs the access key. The Worker signs a URL for one frame: an
+HMAC-SHA256 over repo, commit, path and expiry, valid for 15 minutes, served as JPEG at `/public/frame.jpg`
+without the key. It is signed at the commit the frame was printed in, so the clip is of exactly that frame
+even if main moves. Changing any parameter voids the signature, and even a validly signed URL is refused
+for anything but `cells/NN/frame.webp`.
+
+## D18: videos on cut branches
+
+A clip is several MB, and every agent clones main, so clips never go there. Each video job commits
+`video/NN.mp4` and `video/NN.json` (model, prompt, seed, the frame's take and commit) to `cut/vN/NN`; when
+the cut's last clip lands, the ledger queues an assemble job that merges those branches into `cut/vN` with
+`video/edl.csv` (order, cell, shot, camera, seconds, file, frame take, beat). Like printing, the merge's
+extra parents are the clip branches.
+
+First run (Silent Hive, 2 cells, `alibaba/wan-2.7-i2v` at 720P): the request returned in 2 s; Wan took
+300 s and 321 s per clip (run in parallel); assembly took 11 s; the cut was ready at 344 s. Clips came back at
+1466×628, matching the frames' aspect, 2.5 MB for 3 s and 4.8 MB for 5 s. Same character and coat across
+both clips, with motion that followed the beat. About $0.80. The provider's fetch of the signed URL was not
+blocked by Cloudflare's bot protection (which did block Python's default user agent).
 
 ## Backlog: staging continuity and non-human characters
 

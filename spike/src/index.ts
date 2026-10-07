@@ -8,6 +8,8 @@
 //   GET  /skills                               skills in the template library
 //   GET  /boards                               list boards
 //   POST /boards                               {"concept", "cells"?, "skills"?: {"cinematographer": "cinematographer-noir"}} -> 202, queued
+//   POST /boards/:repo/cut                     animate every printed frame (image-to-video), then assemble cut/vN
+//   GET  /public/frame.jpg?...&sig=            one frame via a signed, expiring URL (for the video provider; no key)
 //   GET  /boards/:repo/jobs                    the jobs ledger (jobs.csv on the board's `jobs` branch), newest first
 //   GET  /boards/:repo/state                   everything the UI shows: cells, takes, notes, skills, main log
 //   POST /boards/:repo/cells/:id/takes         {"note"?, "skill"?}  queue a new take (optionally in another style)
@@ -22,7 +24,7 @@
 //   POST /sweep                                mark jobs with no progress for 10 minutes failed (also runs every 5 minutes)
 //   POST /template[?reset=1]                   create the template / add newly bundled skills (reset: overwrite with bundled)
 // Every route except GET / requires `Authorization: Bearer $SPIKE_KEY`.
-import { addNote, boardState, chooseSkill, editSkill, listBoards, printTake, startBoard } from "./board";
+import { addNote, boardState, chooseSkill, editSkill, listBoards, printTake, startBoard, startCut } from "./board";
 import { consume } from "./consumer";
 import { ledger, submit, sweep } from "./coordinator";
 import { WorkingTree } from "./git";
@@ -30,6 +32,7 @@ import type { Job } from "./jobs";
 import { isRole, listSkills } from "./skills";
 import { TEMPLATE, ensureTemplate, promoteSkill, repoRemote } from "./template";
 import ui from "./ui.html?raw";
+import { verifyFrame } from "./video";
 
 const json = async <T>(request: Request) => (await request.json().catch(() => ({}))) as T;
 
@@ -39,6 +42,17 @@ export default {
 		const { method } = request;
 		if (method === "GET" && (url.pathname === "/" || url.pathname === "/index.html")) {
 			return new Response(ui, { headers: { "content-type": "text/html;charset=utf-8" } });
+		}
+		// A signed, expiring URL for one frame (video.ts): the video provider fetches it without the key
+		if (method === "GET" && url.pathname === "/public/frame.jpg") {
+			const grant = await verifyFrame(env, url);
+			if (!grant) return new Response("forbidden", { status: 403 });
+			using repo = await env.ARTIFACTS.get(grant.repo);
+			const blob = await repo.readFile({ ref: grant.ref, path: grant.path });
+			if (!blob) return new Response("not found", { status: 404 });
+			// JPEG, the format every video model accepts
+			const jpeg = await env.IMAGES.input(blob.stream()).output({ format: "image/jpeg", quality: 92 });
+			return jpeg.response({ headers: { "cache-control": "no-store" } });
 		}
 		if (request.headers.get("authorization") !== `Bearer ${env.SPIKE_KEY}`) {
 			return new Response("unauthorized", { status: 401 });
@@ -73,6 +87,11 @@ export default {
 			if (root === "boards" && repoName) {
 				if (method === "GET" && action === "state") return Response.json(await boardState(env, repoName));
 				if (method === "GET" && action === "jobs") return Response.json(await ledger(env, repoName));
+				if (method === "POST" && action === "cut") {
+					// One image-to-video job per printed cell; the ledger assembles the cut when they finish
+					const { cut, requests, group } = await startCut(env, repoName, url.origin);
+					return Response.json({ cut, jobs: await submit(env, repoName, requests, group) }, { status: 202 });
+				}
 				if (method === "POST" && action === "cells" && id) {
 					if (sub === "takes") {
 						const { note, skill } = await json<{ note?: string; skill?: string }>(request);
@@ -115,7 +134,7 @@ export default {
 					if (!path) return Response.json({ error: "path is required" }, { status: 400 });
 					const blob = await repo.readFile({ ref, path });
 					if (!blob) return new Response("not found", { status: 404 });
-					const type = path.endsWith(".webp") ? "image/webp" : blob.type || "text/plain;charset=utf-8";
+					const type = path.endsWith(".webp") ? "image/webp" : path.endsWith(".mp4") ? "video/mp4" : blob.type || "text/plain;charset=utf-8";
 					// Never cache: main and in-progress take branches move, and a cached frame once showed the
 					// previous take under the new take's label
 					return new Response(blob, { headers: { "content-type": type, "cache-control": "no-store" } });

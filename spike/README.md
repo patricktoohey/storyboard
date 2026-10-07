@@ -42,6 +42,14 @@ git log -p origin/jobs -- jobs.csv             # every status change as a diff
 Setup adds the queue (`cf queues create --queue-name storyboard-jobs`); the cron sweep runs every 5
 minutes and on `POST /sweep`.
 
+## Video (tested 2026-10-07)
+
+**Make video** on a board (`POST /boards/:repo/cut`) animates each printed frame with
+`alibaba/wan-2.7-i2v` (720P, the cell's duration capped by `VIDEO_MAX_SECONDS`, ~$0.10 per second) and
+assembles the clips into the `cut/vN` branch with `video/edl.csv`; the UI plays the cut in EDL order.
+Clips take about 5 minutes each to render (in parallel), so a cut is ready in roughly 6 minutes.
+See docs/decisions.md D17 and D18.
+
 ## Review UI
 
 Open the Worker URL (`https://storyboard-spike.<subdomain>.workers.dev/`) and paste `SPIKE_KEY` from

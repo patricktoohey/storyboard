@@ -134,6 +134,9 @@ take job ──► prompt, render, review, continuity ──► ledger: done (or
 last take in group ──► ledger: group done + queue print job (same commit: exactly once)
 print job ──► octopus merge of the best takes into main
 cron */5 ──► ledger: jobs with no progress for 10 min → failed (closes their groups)
+POST /cut ──► ledger: one video job per printed cell (group "cut:vN")
+video job ──► signed frame URL ──► wan-2.7-i2v ──► video/NN.mp4 on cut/vN/NN
+last clip in group ──► ledger: queue assemble ──► merge clips into cut/vN with video/edl.csv
 ```
 
 ## 4. Where Clef / Clef-flash fit

@@ -1,6 +1,6 @@
 // The storyboard-jobs queue consumer. One job per invocation: run it, reporting each stage to the jobs
 // ledger, and queue whatever it leads to (a board's takes, a continuity retake, a bible edit's takes).
-import { retakeOptions, printTakes, runBibleJob, runBoardJob, runTakeJob } from "./board";
+import { printTakes, retakeOptions, runAssembleJob, runBibleJob, runBoardJob, runTakeJob, runVideoJob } from "./board";
 import { report, submit } from "./coordinator";
 import type { Job } from "./jobs";
 
@@ -41,6 +41,14 @@ async function run(env: Env, job: Job) {
 			await progress("editor merging the takes into main");
 			await printTakes(env, job.repo, job.picks, job.message);
 			return { detail: job.picks.map((p) => p.branch).join(", ") };
+		}
+		case "video": {
+			const clip = await runVideoJob(env, job.repo, job.cut, job.cell, job.origin, progress);
+			return { detail: `${clip.seconds}s clip, ${(clip.bytes / 1e6).toFixed(1)} MB in ${Math.round(clip.elapsed_ms / 1000)}s` };
+		}
+		case "assemble": {
+			const cut = await runAssembleJob(env, job.repo, job.cut, job.cells, progress);
+			return { detail: `${cut.branch}: ${cut.clips} clips, ${cut.seconds}s` };
 		}
 	}
 }

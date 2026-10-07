@@ -78,3 +78,14 @@ test("the ledger round-trips through CSV, details with commas and quotes include
 test("firstCut with nothing finished prints nothing", () => {
 	assert.deepEqual(firstCut([]), []);
 });
+
+test("a cut group's last video queues the assembly of the clips that rendered, in board order", () => {
+	const rows: LedgerRow[] = [];
+	const group = { id: "cut-v1-x", kind: "cut:v1" as const };
+	const origin = "https://example.invalid";
+	const [a, b, c] = appendJobs(rows, "board-x", ["03", "01", "02"].map((cell) => ({ kind: "video" as const, cell, cut: "v1", origin })), { ...ctx, group });
+	recordProgress(rows, a.id, { status: "done", now: ctx.now });
+	recordProgress(rows, b.id, { status: "failed", detail: "provider error", now: ctx.now });
+	const { followUps } = recordProgress(rows, c.id, { status: "done", now: ctx.now });
+	assert.deepEqual(followUps, [{ kind: "assemble", cut: "v1", cells: ["02", "03"] }]);
+});
