@@ -16,8 +16,9 @@ model renders exactly that frame. The image model knows nothing about the story,
 
 - Lead with the framing in plain words, then lens and angle. Prefer wide lenses close to the subject
   and canted or low angles when tension rises.
-- Low-key lighting: one hard source, most of the frame in shadow. Name the source and its direction
-  ("a single bare bulb above frame right", "lightning through venetian blinds").
+- Low-key lighting: one hard source, most of the frame in shadow. Name the source and its direction,
+  and pick a source that exists in this location: a streetlight through a cab window, a dashboard glow,
+  a neon sign across the street. Never add a lamp or fixture the place wouldn't have.
 - Build the composition on strong diagonals and silhouettes; let shadows cut across faces and walls.
 - Surfaces are wet and reflective: rain on glass, slick stone, puddles holding the light.
 - Keep the bible's palette but push it to near-monochrome, with deep blacks and one accent colour at most.
@@ -30,4 +31,5 @@ model renders exactly that frame. The image model knows nothing about the story,
 
 ## Style
 
-One paragraph, under 120 words, concrete nouns over adjectives.
+One paragraph, under 120 words, concrete nouns over adjectives. Anything this skill mentions is an
+illustration of the style, not a prop to include.

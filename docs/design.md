@@ -118,6 +118,24 @@ code and Clef consume (`characters.json`, `review.json`, `continuity.json`).
 - **Next**: a coach agent that proposes skill edits from recurring notes ("third note asking for more
   headroom"), reviewed like a pull request; critic and continuity thresholds as skills too.
 
+## 3c. Jobs, the queue and the ledger
+
+Routes do the quick part (fork a board, commit and route a note) and queue the rest on `storyboard-jobs`:
+a board job (director and casting), take jobs (cinematographer, renderer, critic, continuity), bible jobs
+(director revision, recasting, blast radius) and print jobs. A batch's jobs run concurrently in one
+invocation. The coordinator keeps no state: `jobs.csv` on the board's `jobs` branch is the ledger, and
+every queue, progress and outcome change is a commit (see docs/decisions.md D13 to D16). The UI polls the
+ledger and refreshes when a job changes status.
+
+```
+POST /boards ──► fork template ──► ledger: queue board job ──► 202 {repo}
+board job ──► director, casting ──► ledger: queue N take jobs (group "first cut")
+take job ──► prompt, render, review, continuity ──► ledger: done (or queue retake into the group)
+last take in group ──► ledger: group done + queue print job (same commit: exactly once)
+print job ──► octopus merge of the best takes into main
+cron */5 ──► ledger: jobs with no progress for 10 min → failed (closes their groups)
+```
+
 ## 4. Where Clef / Clef-flash fit
 
 Clef doesn't generate anything. It returns **calibrated probabilities for typed questions**

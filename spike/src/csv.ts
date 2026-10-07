@@ -1,14 +1,16 @@
-// storyboard.csv: the board's index, one row per cell. Hand-rolled because it must round-trip quoted
-// beats ("a, b") and run in Workers without dependencies.
+// CSV for the board's tabular state: storyboard.csv (one row per cell) and the jobs ledger (one row per
+// job, ledger.ts). Hand-rolled because it must round-trip quoted text ("a, b") and run in Workers without
+// dependencies.
 
 const csvField = (v: string | number) => (/[",\n]/.test(String(v)) ? `"${String(v).replace(/"/g, '""')}"` : String(v));
 export const CSV_HEADER = ["id", "order", "duration_s", "shot", "camera", "characters", "beat", "status", "take"];
 export type CsvRow = Record<(typeof CSV_HEADER)[number], string>;
 
-export const toCsv = (rows: CsvRow[]) =>
-	[CSV_HEADER.join(","), ...rows.map((r) => CSV_HEADER.map((h) => csvField(r[h] ?? "")).join(","))].join("\n") + "\n";
+/** Rows to CSV under a fixed header (storyboard.csv's by default); missing fields are empty. */
+export const toCsv = <T extends Record<string, string>>(rows: T[], header: readonly string[] = CSV_HEADER) =>
+	[header.join(","), ...rows.map((r) => header.map((h) => csvField(r[h] ?? "")).join(","))].join("\n") + "\n";
 
-export function parseCsv(text: string): CsvRow[] {
+export function parseCsv<T extends Record<string, string> = CsvRow>(text: string): T[] {
 	const rows: string[][] = [];
 	let row: string[] = [];
 	let field = "";
@@ -26,5 +28,5 @@ export function parseCsv(text: string): CsvRow[] {
 	}
 	if (field || row.length) row.push(field), rows.push(row);
 	const [header, ...body] = rows;
-	return body.map((r) => Object.fromEntries(header.map((h, i) => [h, r[i] ?? ""])) as CsvRow);
+	return body.map((r) => Object.fromEntries(header.map((h, i) => [h, r[i] ?? ""])) as T);
 }

@@ -20,6 +20,28 @@ POST /boards {"concept": "...", "cells": 3}
 
 Every agent commits under its own author name, so `git log` shows who did what.
 
+## Jobs and the ledger (Day 3, tested 2026-10-07)
+
+Creating a board, retaking a cell and acting on a note now return in 2 to 4 s; the work runs as queued
+jobs and the UI follows it in the jobs feed. The coordinator's state is `jobs.csv` on each board's `jobs`
+branch; every queue, progress and outcome change is a commit. To replay a production:
+
+```sh
+scripts/clone-board.sh <repo> && cd boards/<repo>
+git log --reverse --format='%s' origin/jobs     # Queue 1 job / ▶ board: director planning / ...
+git log -p origin/jobs -- jobs.csv             # every status change as a diff
+```
+
+| Run | Result |
+|---|---|
+| 4 cells, first version | takes ran almost one at a time; 2 jobs died (shared isomorphic-git locks across invocations); no print |
+| 4 cells, per-tree paths + concurrent batches | 90 s end to end; 1 take failed losing 8 ledger races on a progress report |
+| 6 cells, best-effort progress | 79 s: directing, casting, 6 takes in parallel, 3 automatic retakes, first-cut print; no failures |
+| Lost job on the subway board | cron sweep failed it at 17:25; the first cut printed 10 s later |
+
+Setup adds the queue (`cf queues create --queue-name storyboard-jobs`); the cron sweep runs every 5
+minutes and on `POST /sweep`.
+
 ## Review UI
 
 Open the Worker URL (`https://storyboard-spike.<subdomain>.workers.dev/`) and paste `SPIKE_KEY` from

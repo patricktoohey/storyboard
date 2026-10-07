@@ -1,15 +1,17 @@
 // Storyboard spike. A board is an Artifacts repo forked from storyboard-template (the skills library).
-// The director and casting agents commit to main; one cinematographer/renderer/critic/continuity chain
-// per cell runs concurrently on its own take branch; printing a take merges it into main; notes are
-// committed and routed by Clef-flash to the agent that should act. See board.ts and template.ts.
+// Routes do the quick part (fork, commit a note, route it) and queue the rest as jobs on storyboard-jobs;
+// the consumer (consumer.ts) runs one job per invocation, so cells shoot in parallel. Coordination state is
+// the jobs ledger, jobs.csv on the board's `jobs` branch (ledger.ts, coordinator.ts): take numbers, job
+// status and group completion are all commits. See board.ts for the agents.
 //
 //   GET  /                                     the review UI (asks for the key, keeps it in the browser)
 //   GET  /skills                               skills in the template library
 //   GET  /boards                               list boards
-//   POST /boards                               {"concept", "cells"?, "skills"?: {"cinematographer": "cinematographer-noir"}}
+//   POST /boards                               {"concept", "cells"?, "skills"?: {"cinematographer": "cinematographer-noir"}} -> 202, queued
+//   GET  /boards/:repo/jobs                    the jobs ledger (jobs.csv on the board's `jobs` branch), newest first
 //   GET  /boards/:repo/state                   everything the UI shows: cells, takes, notes, skills, main log
-//   POST /boards/:repo/cells/:id/takes         {"note"?, "skill"?}  new take (optionally in another style)
-//   POST /boards/:repo/cells/:id/notes         {"note"}  commit the note, route it, act on it
+//   POST /boards/:repo/cells/:id/takes         {"note"?, "skill"?}  queue a new take (optionally in another style)
+//   POST /boards/:repo/cells/:id/notes         {"note"}  commit the note, route it, queue the work
 //   POST /boards/:repo/cells/:id/print         {"take"}  merge that take into main
 //   POST /boards/:repo/roles/:role             {"skill"} which skill fills a role on this board
 //   PUT  /boards/:repo/skills/:name            SKILL.md body; optional x-message header -> commit to board main
@@ -17,10 +19,14 @@
 //   GET  /boards/:repo/log?ref=main            commit history for a ref
 //   GET  /boards/:repo/file?ref=&path=         read a file at a ref (images are served as images)
 //   POST /boards/:repo/token                   short-lived read token + remote URL, for `git clone`
+//   POST /sweep                                mark jobs with no progress for 10 minutes failed (also runs every 5 minutes)
 //   POST /template[?reset=1]                   create the template / add newly bundled skills (reset: overwrite with bundled)
 // Every route except GET / requires `Authorization: Bearer $SPIKE_KEY`.
-import { addNote, boardState, chooseSkill, createBoard, editSkill, listBoards, printTake, retakeCell } from "./board";
+import { addNote, boardState, chooseSkill, editSkill, listBoards, printTake, startBoard } from "./board";
+import { consume } from "./consumer";
+import { ledger, submit, sweep } from "./coordinator";
 import { WorkingTree } from "./git";
+import type { Job } from "./jobs";
 import { isRole, listSkills } from "./skills";
 import { TEMPLATE, ensureTemplate, promoteSkill, repoRemote } from "./template";
 import ui from "./ui.html?raw";
@@ -44,6 +50,9 @@ export default {
 				await ensureTemplate(env, url.searchParams.get("reset") === "1");
 				return Response.json({ template: TEMPLATE });
 			}
+			if (method === "POST" && root === "sweep") {
+				return Response.json({ swept: await sweep(env, (await listBoards(env)).map((b) => b.name)) });
+			}
 			if (method === "GET" && root === "skills") {
 				await ensureTemplate(env);
 				return Response.json(await listSkills(await WorkingTree.clone(await repoRemote(env, TEMPLATE), "main")));
@@ -54,21 +63,28 @@ export default {
 				if (method === "POST") {
 					const { concept, cells = 3, skills } = await json<{ concept?: string; cells?: number; skills?: Record<string, string> }>(request);
 					if (!concept) return Response.json({ error: "concept is required" }, { status: 400 });
-					return Response.json(await createBoard(env, concept, Math.min(Math.max(cells, 1), 8), skills));
+					// Returns once the repo exists; directing, casting and shooting run as queued jobs
+					const repo = await startBoard(env, concept);
+					const jobs = await submit(env, repo, [{ kind: "board", concept, cells: Math.min(Math.max(cells, 1), 8), skills: skills ?? {} }]);
+					return Response.json({ repo, jobs }, { status: 202 });
 				}
 			}
 
 			if (root === "boards" && repoName) {
 				if (method === "GET" && action === "state") return Response.json(await boardState(env, repoName));
+				if (method === "GET" && action === "jobs") return Response.json(await ledger(env, repoName));
 				if (method === "POST" && action === "cells" && id) {
 					if (sub === "takes") {
 						const { note, skill } = await json<{ note?: string; skill?: string }>(request);
-						return Response.json(await retakeCell(env, repoName, id, { note, skill }));
+						const jobs = await submit(env, repoName, [{ kind: "take", cell: id, opts: { note, skill } }]);
+						return Response.json({ jobs }, { status: 202 });
 					}
 					if (sub === "notes") {
 						const { note } = await json<{ note?: string }>(request);
 						if (!note) return Response.json({ error: "note is required" }, { status: 400 });
-						return Response.json(await addNote(env, repoName, id, note));
+						// The note is committed and routed now; the work it leads to is queued
+						const { route, requests } = await addNote(env, repoName, id, note);
+						return Response.json({ cell: id, route, jobs: await submit(env, repoName, requests) }, { status: 202 });
 					}
 					if (sub === "print") {
 						const { take } = await json<{ take?: number }>(request);
@@ -116,4 +132,10 @@ export default {
 			return Response.json({ error: String(err) }, { status: 500 });
 		}
 	},
-} satisfies ExportedHandler<Env>;
+	queue: consume,
+
+	async scheduled(_controller, env) {
+		const swept = await sweep(env, (await listBoards(env)).map((b) => b.name));
+		console.log(`sweep: ${swept.length} stalled job(s)`, JSON.stringify(swept));
+	},
+} satisfies ExportedHandler<Env, Job>;

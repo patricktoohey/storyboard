@@ -19,6 +19,10 @@ models the exact requests production builds (`npm run eval`, about a cent; resul
 | D10 | Notes are routed with `clef`, not `clef-flash` | router eval results |
 | D11 | Every take is briefed with all of its cell's notes | `notes.test.ts` |
 | D12 | A take is stale when a character in its cell has changed since it was shot | live check (see below) |
+| D13 | Coordination state is a CSV ledger on the board's `jobs` branch; Git's push compare-and-swap is the lock | `ledger.test.ts` |
+| D14 | Every working tree gets its own path, and a queue batch runs its jobs concurrently | live runs (see below) |
+| D15 | Progress reports are best-effort; outcomes retry until they land | live runs (see below) |
+| D16 | A cron sweep fails jobs with no progress for 10 minutes, so groups always close | live check (see below) |
 
 ## D2: placeholders, not descriptions
 
@@ -87,3 +91,53 @@ Takes shot before a recast kept a green "continuity ok" judged against the old p
 "before bible change" for a take whose cell's characters looked different on its branch than on main.
 Verified on Night Drive: stale takes were exactly those showing the old driver; cell 01 (no characters)
 was not flagged.
+
+## D13: the coordinator's state lives in Artifacts
+
+Jobs (a board, a take, a bible edit, a print) run on a Cloudflare Queue, one invocation each. Instead of
+a Durable Object with SQLite, the coordinator is stateless: `jobs.csv` on the board repo's orphan `jobs`
+branch has one row per job, and every change (queue, progress, outcome) is a commit made by clone, edit,
+push. A push that loses a race is rejected and the edit is redone on the new rows. That compare-and-swap is
+the only lock, and it makes take numbering atomic (two retakes can't both become take 3) and group
+completion atomic (the commit that finishes a first-cut group's last take is the one that queues the print,
+so it happens exactly once). `git log -p jobs.csv` on the `jobs` branch replays the whole production.
+
+Cost: a status update is a commit (~1 s), not a row write (~ms), so progress is reported per stage.
+
+## D14: per-tree paths and concurrent batches
+
+The first queued run lost two jobs ("A promise was resolved or rejected from a different request
+context") and ran takes nearly one at a time (cells started at 37, 51, 57 and 67 s). isomorphic-git keeps
+module-level locks keyed by the repo path, every working tree used `/board`, and queue invocations share
+isolates, so concurrent jobs waited on, and then broke, each other's locks. With a unique path per tree and
+batches of up to 8 run concurrently, a 6-cell board's takes all started within ~10 s and the board
+(directing, casting, 6 takes, 3 retakes, print) finished in 79 s with no failed jobs.
+
+## D15: best-effort progress, durable outcomes
+
+With 4 jobs each committing progress every ~2 s, one take lost 8 ledger races in a row ("refs/heads/jobs:
+stale ref") on a progress report, and that failed the take. Progress ("renderer rendering the frame") now
+gets one attempt and is skipped if it loses; queueing and outcomes retry up to 20 times with growing,
+jittered backoff. In the 6-cell run, about 20 progress reports were skipped and every outcome landed.
+
+## D16: stalled jobs fail, so groups close
+
+A job whose message is lost would hold its group open forever: the subway board never printed its first
+cut. A cron trigger (every 5 minutes, also `POST /sweep`) marks jobs with no progress for 10 minutes as
+failed. That is an ordinary ledger commit, so it closes the group like any other outcome: on the subway
+board the sweep failed the lost retake at 17:25 and the first cut printed 10 s later with the cell's take 1.
+
+## Backlog: staging continuity and non-human characters
+
+Observed on the boards so far, not yet addressed:
+
+- **Blocking across angles**: who sits where isn't held as the camera moves (the 180° rule), and both cab
+  passengers ended up in the back seat. Needs a blocking section in the bible (seat positions and screen
+  direction per location), the cinematographer told to use it, and Clef questions like "is the person on the
+  left of frame the driver?".
+- **Skill examples leaking into frames**: the noir skill's example "a single bare bulb above frame right"
+  put a ceiling bulb inside a car. Fixed in the noir skill; the general lesson is that skill examples
+  must be illustrations the model won't copy literally.
+- **Non-human characters**: a seal pup got the human age prefix ("young child small grey fur…"), was cast
+  as a child, and continuity asked about its hair. Characters need a `kind` (person, animal, creature) that
+  gates age prefixes and the hair and outerwear checks.

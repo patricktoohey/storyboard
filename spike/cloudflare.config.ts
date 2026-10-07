@@ -1,8 +1,12 @@
-import { bindings, defineConfig } from "cf/config";
+import { bindings, defineConfig, triggers } from "cf/config";
+import type { Job } from "./src/jobs.ts";
+
+const WORKER = "storyboard-spike";
+const JOBS_QUEUE = "storyboard-jobs";
 
 export default defineConfig({
 	worker: {
-		name: "storyboard-spike",
+		name: WORKER,
 		compatibilityDate: "2026-10-06",
 		compatibilityFlags: [
 			"nodejs_compat",
@@ -14,6 +18,16 @@ export default defineConfig({
 		observability: {
 			enabled: true,
 		},
+		triggers: [
+			// Jobs: a board, a take, a bible edit, a print. A batch (a board's takes arrive together) runs its
+			// jobs concurrently in one invocation, so cells start at once instead of waiting for the queue's
+			// consumer concurrency to scale up. Coordination state is the jobs ledger in the board repo (ledger.ts), not
+			// the queue. Failures are recorded there rather than retried blindly: a take pushes a branch, so a
+			// blind retry would collide with its own half-finished work.
+			triggers.queue({ name: JOBS_QUEUE, maxBatchSize: 8, maxBatchTimeout: 1, maxRetries: 1, retryDelay: 5 }),
+			// Liveness: jobs with no progress for 10 minutes are marked failed so their groups can close
+			triggers.scheduled({ schedule: "*/5 * * * *" }),
+		],
 		env: {
 			DIRECTOR_MODEL: bindings.text("@cf/meta/llama-3.3-70b-instruct-fp8-fast"),
 			CINEMATOGRAPHER_MODEL: bindings.text("@cf/meta/llama-3.3-70b-instruct-fp8-fast"),
@@ -38,6 +52,7 @@ export default defineConfig({
 					remote: true,
 				},
 			}),
+			JOBS: bindings.queue<Job>({ name: JOBS_QUEUE }),
 			AI: bindings.ai({
 				dev: {
 					remote: true,

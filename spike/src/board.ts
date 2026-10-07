@@ -3,6 +3,7 @@
 // notes.md, and printing a take merges its branch into main. Anything later rebuilds the board from main.
 import { type CsvRow, parseCsv, toCsv } from "./csv.ts";
 import { WorkingTree, type Files, type Remote } from "./git";
+import type { JobRequest, TakeOptions, TakeResult } from "./jobs";
 import { noteHistory, noteLine, notesHeader } from "./notes.ts";
 import { cellsToReshoot } from "./router.ts";
 import {
@@ -139,13 +140,9 @@ async function castCharacters(env: Env, remote: Remote, characters: Character[],
 /** Files a take writes for its cell. A new take branch deletes main's copies first (see shootCell). */
 export const TAKE_OUTPUTS = ["frame.webp", "render.json", "review.json", "continuity.json"];
 
-interface TakeOptions {
-	note?: string;
-	// Cinematographer skill for this take; defaults to the board's choice
-	skill?: string;
-	// Reseed: reuse this exact prompt instead of asking the cinematographer
-	prompt?: string;
-}
+/** Reports what a job is doing now, to the coordinator's live feed. */
+export type Progress = (detail: string) => Promise<unknown>;
+const quiet: Progress = async () => {};
 
 interface Take {
 	cell: Cell;
@@ -165,7 +162,15 @@ interface Take {
  * One take of one cell, branched from main as it is now, so it picks up the board's current bible and
  * skills. Each stage is a separate agent and a separate commit on the take branch.
  */
-async function shootCell(env: Env, remote: Remote, loaded: LoadedBoard, cell: Cell, take: number, opts: TakeOptions = {}): Promise<Take> {
+async function shootCell(
+	env: Env,
+	remote: Remote,
+	loaded: LoadedBoard,
+	cell: Cell,
+	take: number,
+	opts: TakeOptions = {},
+	progress: Progress = quiet,
+): Promise<Take> {
 	const { board, refs, config } = loaded;
 	const branch = `cell/${cell.id}/take-${take}`;
 	const dir = `cells/${cell.id}`;
@@ -192,6 +197,7 @@ async function shootCell(env: Env, remote: Remote, loaded: LoadedBoard, cell: Ce
 			inherited,
 		);
 	} else {
+		await progress(`cinematographer (${skill.style}) writing the shot`);
 		// Every note on this cell so far still applies; a bible change shouldn't undo "shoot from the back seat"
 		const earlier = noteHistory(history).map((n) => `- ${n}`);
 		const brief = [earlier.length ? `Director's notes on this shot so far (all still apply):\n${earlier.join("\n")}` : "", opts.note ?? ""]
@@ -208,6 +214,7 @@ async function shootCell(env: Env, remote: Remote, loaded: LoadedBoard, cell: Ce
 	}
 	await tree.push(branch);
 
+	await progress("renderer rendering the frame");
 	const frame = await render(env, cell, prompt, cellRefs);
 	await tree.commit({ name: `renderer-${cell.id}` }, `Cell ${cell.id} take ${take}: render`, {
 		[`${dir}/frame.webp`]: frame.frame,
@@ -215,6 +222,7 @@ async function shootCell(env: Env, remote: Remote, loaded: LoadedBoard, cell: Ce
 	});
 	await tree.push(branch);
 
+	await progress("critic reviewing");
 	const verdict = await review(env, cell, prompt, frame.previewBase64);
 	await tree.commit({ name: `critic-${cell.id}` }, `Cell ${cell.id} take ${take}: review`, {
 		[`${dir}/review.json`]: JSON.stringify(verdict, null, 2) + "\n",
@@ -236,7 +244,8 @@ async function shootCell(env: Env, remote: Remote, loaded: LoadedBoard, cell: Ce
 }
 
 /** Continuity agent: commits its verdict onto the take branch it judged. */
-async function judgeContinuity(env: Env, take: Take) {
+async function judgeContinuity(env: Env, take: Take, progress: Progress = quiet) {
+	await progress("continuity checking against the bible");
 	const verdict = await checkContinuity(env, take.cell, take.refs, take.detailBase64, take.review.framing);
 	const summary = verdict.ok ? "ok" : verdict.issues.join("; ");
 	await take.tree.commit(
@@ -249,30 +258,15 @@ async function judgeContinuity(env: Env, take: Take) {
 	return take;
 }
 
-/** Shoot and judge a take; if continuity breaks, one automatic retake briefed with the issues. */
-async function shootJudged(env: Env, remote: Remote, loaded: LoadedBoard, cell: Cell, take: number, opts: TakeOptions = {}) {
-	const first = await judgeContinuity(env, await shootCell(env, remote, loaded, cell, take, opts));
-	if (first.continuity?.ok) return [first];
-	const issues = first.continuity?.issues.join("; ") ?? "";
-	const note = [opts.note, `The previous take was rejected for continuity: ${issues}. Fix that.`].filter(Boolean).join("\n");
-	// A reseed that broke continuity gets a real rewrite on the retake
-	const retake = await judgeContinuity(env, await shootCell(env, remote, loaded, cell, take + 1, { ...opts, prompt: undefined, note }));
-	return [first, retake];
+/** Brief for the automatic retake after a continuity break. A reseed gets a real rewrite this time. */
+export function retakeOptions(opts: TakeOptions, issues: string[]): TakeOptions {
+	const note = [opts.note, `The previous take was rejected for continuity: ${issues.join("; ")}. Fix that.`].filter(Boolean).join("\n");
+	return { ...opts, prompt: undefined, note };
 }
 
-const bestOf = (takes: Take[]) => takes.find((t) => t.continuity?.ok) ?? takes[takes.length - 1];
-
-const summarizeTake = (t: Take) => ({
-	branch: t.branch,
-	skill: t.skill,
-	prompt: t.prompt,
-	adherence: t.review.adherence,
-	continuity: t.continuity && { ok: t.continuity.ok, issues: t.continuity.issues },
-});
-
-async function nextTake(remote: Remote, cellId: string) {
+async function latestTake(remote: Remote, cellId: string) {
 	const existing = await WorkingTree.listBranches(remote, `cell/${cellId}/take-`);
-	return Math.max(0, ...existing.map((b) => Number(b.split("take-")[1]) || 0)) + 1;
+	return Math.max(0, ...existing.map((b) => Number(b.split("take-")[1]) || 0));
 }
 
 // ── Printing ─────────────────────────────────────────────────────────────────────────────────────
@@ -282,7 +276,8 @@ async function nextTake(remote: Remote, cellId: string) {
  * which take is printed, and the merge commit's extra parents are the takes, so `git log --graph`
  * shows exactly what was chosen. Several takes at once make an octopus merge.
  */
-async function printTakes(remote: Remote, picks: { cell: string; branch: string }[], message: string) {
+export async function printTakes(env: Env, repo: string, picks: { cell: string; branch: string }[], message: string) {
+	const remote = await repoRemote(env, repo);
 	return onMain(remote, async (tree) => {
 		const tips = await Promise.all(picks.map((p) => tree.fetchBranch(p.branch)));
 		const files: Files = {};
@@ -304,19 +299,31 @@ async function printTakes(remote: Remote, picks: { cell: string; branch: string 
 }
 
 export async function printTake(env: Env, repo: string, cellId: string, take: number) {
-	const remote = await repoRemote(env, repo);
 	const branch = `cell/${cellId}/take-${take}`;
-	const commit = await printTakes(remote, [{ cell: cellId, branch }], `Print cell ${cellId} take ${take}`);
+	const commit = await printTakes(env, repo, [{ cell: cellId, branch }], `Print cell ${cellId} take ${take}`);
 	return { printed: branch, commit };
 }
 
-// ── Workflows ────────────────────────────────────────────────────────────────────────────────────
+// ── Jobs (run by the queue consumer) and the fast route halves that queue them ───────────────────
 
-export async function createBoard(env: Env, concept: string, cellCount: number, skills: Partial<SkillChoice> = {}) {
-	const name = `board-${new Date().toISOString().slice(0, 10)}-${crypto.randomUUID().slice(0, 6)}`;
-	const remote = await forkBoard(env, name, concept.slice(0, 200));
+/** Route: fork the template into a new board repo. The coordinator then queues the board job. */
+export async function startBoard(env: Env, concept: string) {
+	const repo = `board-${new Date().toISOString().slice(0, 10)}-${crypto.randomUUID().slice(0, 6)}`;
+	await forkBoard(env, repo, concept.slice(0, 200));
+	return repo;
+}
 
-	// Director: reads its skill from the freshly forked board and commits the plan to main
+/** Job: the director plans the board on main, then casting renders every character. */
+export async function runBoardJob(
+	env: Env,
+	repo: string,
+	concept: string,
+	cellCount: number,
+	skills: Partial<SkillChoice>,
+	progress: Progress = quiet,
+) {
+	const remote = await repoRemote(env, repo);
+	await progress("director planning the board");
 	const directed = await onMain(remote, async (tree) => {
 		const available = new Set(await tree.list("skills"));
 		const choice = { ...DEFAULT_SKILLS, ...skills };
@@ -333,47 +340,33 @@ export async function createBoard(env: Env, concept: string, cellCount: number, 
 		};
 		for (const c of board.cells) files[`cells/${c.id}/beat.md`] = `${c.beat}\n`;
 		await tree.commit({ name: "director" }, `Board: ${board.title} (${board.cells.length} cells)\n\n${skillTrailer(skill)}`, files);
-		return { board, choice, skill };
+		return { board, choice };
 	});
+	await progress(`casting ${directed.board.characters.map((c) => c.name).join(", ") || "nobody"}`);
 	await castCharacters(env, remote, directed.board.characters, directed.choice.casting, "Cast");
-
-	const loaded = await loadBoard(env, await WorkingTree.clone(remote, "main"));
-	// The concurrency under test: N agents pushing N branches to one repo at once
-	const shot = await Promise.allSettled(loaded.board.cells.map((cell) => shootJudged(env, remote, loaded, cell, 1)));
-
-	// First cut: print the best take of every cell in one octopus merge
-	const picks = shot.flatMap((r, i) =>
-		r.status === "fulfilled" ? [{ cell: loaded.board.cells[i].id, branch: bestOf(r.value).branch }] : [],
-	);
-	if (picks.length) await printTakes(remote, picks, "Print first cut");
-
-	return {
-		repo: name,
-		title: loaded.board.title,
-		skills: directed.choice,
-		characters: loaded.board.characters,
-		cells: loaded.board.cells.map((cell, i) => {
-			const r = shot[i];
-			if (r.status === "rejected") return { cell: cell.id, error: String(r.reason) };
-			return { cell: cell.id, printed: bestOf(r.value).branch, takes: r.value.map(summarizeTake) };
-		}),
-	};
+	return { title: directed.board.title, cells: directed.board.cells.map((c) => c.id) };
 }
 
-/** A new take of one cell with the board's current skills (or another style), optionally with a note. */
-export async function retakeCell(env: Env, repo: string, cellId: string, opts: TakeOptions = {}) {
+/** Job: one take of one cell, shot and judged. */
+export async function runTakeJob(env: Env, repo: string, cellId: string, take: number, opts: TakeOptions, progress: Progress = quiet) {
 	const remote = await repoRemote(env, repo);
 	const loaded = await loadBoard(env, await WorkingTree.clone(remote, "main"));
 	const cell = loaded.board.cells.find((c) => c.id === cellId);
 	if (!cell) throw new Error(`no cell ${cellId} in ${repo}`);
-	const takes = await shootJudged(env, remote, loaded, cell, await nextTake(remote, cellId), opts);
-	return { cell: cellId, takes: takes.map(summarizeTake) };
+	const t = await judgeContinuity(env, await shootCell(env, remote, loaded, cell, take, opts, progress), progress);
+	return { branch: t.branch, take, ok: Boolean(t.continuity?.ok), issues: t.continuity?.issues ?? [], skill: t.skill } satisfies TakeResult;
+}
+
+/** Direction for fixing a shot against the bible as it stands: the cell's characters' looks, spelled out. */
+function matchBibleOptions(characters: Character[], cell: Cell, note: string): TakeOptions {
+	const looks = characters.filter((c) => cell.characters.includes(c.name)).map((c) => `${c.name}: ${c.look}`);
+	return { note: `${note}\nMatch the bible exactly${looks.length ? `: ${looks.join("; ")}` : ""}.` };
 }
 
 /**
- * A director's note on a cell. The note is committed first (so it is versioned even if nothing else
- * happens), then Clef-flash routes it: reseed, rewrite this cell's prompt, edit the shared bible (and
- * re-shoot every cell the change touches), or nothing.
+ * Route: a director's note on a cell. The note is committed first (so it is versioned even if nothing
+ * else happens), then routed: reseed, rewrite this cell's prompt, fix this shot to match the bible, edit
+ * the bible itself, or nothing. Returns the jobs to queue; the work happens there.
  */
 export async function addNote(env: Env, repo: string, cellId: string, note: string) {
 	const remote = await repoRemote(env, repo);
@@ -383,7 +376,7 @@ export async function addNote(env: Env, repo: string, cellId: string, note: stri
 	const row = loaded.rows.find((r) => r.id === cellId);
 	using handle = await env.ARTIFACTS.get(repo);
 	// The prompt the note is about: the printed take's (on main), else the newest take's
-	const latest = row?.take ? "main" : `cell/${cellId}/take-${(await nextTake(remote, cellId)) - 1}`;
+	const latest = row?.take ? "main" : `cell/${cellId}/take-${await latestTake(remote, cellId)}`;
 	const promptBlob = await handle.readFile({ ref: latest, path: `cells/${cellId}/prompt.md` });
 	const currentPrompt = (await promptBlob?.text())?.trim();
 
@@ -398,26 +391,30 @@ export async function addNote(env: Env, repo: string, cellId: string, note: stri
 		});
 	});
 
-	const result: Record<string, unknown> = { cell: cellId, route };
-	if (route.action === "no_op") return result;
-	if (route.action === "reseed" && currentPrompt) {
-		const takes = await shootJudged(env, remote, loaded, cell, await nextTake(remote, cellId), { prompt: currentPrompt });
-		return { ...result, takes: takes.map(summarizeTake) };
-	}
-	// Fix this shot against the bible as it stands: the cell's characters' looks, spelled out
-	const matchBible = async (extra: Record<string, unknown> = {}) => {
-		const looks = loaded.board.characters.filter((c) => cell.characters.includes(c.name)).map((c) => `${c.name}: ${c.look}`);
-		const direction = `${note}\nMatch the bible exactly${looks.length ? `: ${looks.join("; ")}` : ""}.`;
-		const takes = await shootJudged(env, remote, loaded, cell, await nextTake(remote, cellId), { note: direction });
-		return { ...result, ...extra, takes: takes.map(summarizeTake) };
-	};
-	if (route.action === "match_bible") return matchBible();
-	if (route.action !== "edit_bible") {
-		const takes = await shootJudged(env, remote, loaded, cell, await nextTake(remote, cellId), { note });
-		return { ...result, takes: takes.map(summarizeTake) };
-	}
+	const requests: JobRequest[] =
+		route.action === "no_op"
+			? []
+			: route.action === "edit_bible"
+				? [{ kind: "bible", cell: cellId, note }]
+				: route.action === "match_bible"
+					? [{ kind: "take", cell: cellId, opts: matchBibleOptions(loaded.board.characters, cell, note) }]
+					: route.action === "reseed" && currentPrompt
+						? [{ kind: "take", cell: cellId, opts: { prompt: currentPrompt } }]
+						: [{ kind: "take", cell: cellId, opts: { note } }];
+	return { cell: cellId, route, requests };
+}
 
-	// edit_bible: the director revises the bible and characters on main
+/**
+ * Job: the director revises the bible for a note, casting recasts changed characters, and every affected
+ * cell gets a take. Returns the takes to queue.
+ */
+export async function runBibleJob(env: Env, repo: string, cellId: string, note: string, progress: Progress = quiet) {
+	const remote = await repoRemote(env, repo);
+	const loaded = await loadBoard(env, await WorkingTree.clone(remote, "main"));
+	const cell = loaded.board.cells.find((c) => c.id === cellId);
+	if (!cell) throw new Error(`no cell ${cellId} in ${repo}`);
+
+	await progress("director revising the bible");
 	const edit = await onMain(remote, async (tree) => {
 		const current = await loadBoard(env, tree);
 		const skill = await loadSkill(tree, current.config.skills.director);
@@ -431,26 +428,20 @@ export async function addNote(env: Env, repo: string, cellId: string, note: stri
 		const changed = revised.characters.filter((c, i) => c.look !== current.board.characters[i]?.look);
 		return { unchanged: false as const, summary: revised.summary, changed, skills: current.config.skills };
 	});
-	if (edit.unchanged) return matchBible({ bible: `unchanged: ${edit.summary}` });
-	// A changed look needs a new casting portrait, or the renderer would keep drawing the old one
-	const recast = await castCharacters(env, remote, edit.changed, edit.skills.casting, "Recast");
+	if (edit.unchanged) {
+		const requests: JobRequest[] = [{ kind: "take", cell: cellId, opts: matchBibleOptions(loaded.board.characters, cell, note) }];
+		return { summary: `unchanged: ${edit.summary}`, recast: [] as string[], affected: [cellId], requests };
+	}
 
+	// A changed look needs a new casting portrait, or the renderer would keep drawing the old one
+	if (edit.changed.length) await progress(`casting ${edit.changed.map((c) => c.name).join(", ")} again`);
+	const recast = await castCharacters(env, remote, edit.changed, edit.skills.casting, "Recast");
 	const changeText = [edit.summary, ...edit.changed.map((c) => `${c.name} is now: ${c.look}`)].join(" ");
+	await progress("working out which cells the change affects");
 	const blast = await blastRadius(env, changeText, loaded.board.cells);
 	const affected = cellsToReshoot(cellId, loaded.board.cells, recast, blast.affected);
-	const reloaded = await loadBoard(env, await WorkingTree.clone(remote, "main"));
-	const shot = await Promise.allSettled(
-		reloaded.board.cells
-			.filter((c) => affected.includes(c.id))
-			.map(async (c) => shootJudged(env, remote, reloaded, c, await nextTake(remote, c.id), { note: `Bible changed: ${changeText}` })),
-	);
-	return {
-		...result,
-		bible: edit.summary,
-		recast,
-		blast_radius: { ...blast, affected },
-		takes: shot.map((r, i) => (r.status === "fulfilled" ? r.value.map(summarizeTake) : { cell: affected[i], error: String(r.reason) })),
-	};
+	const requests: JobRequest[] = affected.map((id) => ({ kind: "take", cell: id, opts: { note: `Bible changed: ${changeText}` } }));
+	return { summary: edit.summary, recast, affected, blast: blast.probabilities, requests };
 }
 
 /** Commits a new version of a skill to the board's main; takes shot afterwards use it. */
@@ -486,6 +477,11 @@ const readJson = async (repo: ArtifactsRepo, ref: string, path: string) => {
 export async function boardState(env: Env, repoName: string) {
 	const remote = await repoRemote(env, repoName);
 	const tree = await WorkingTree.clone(remote, "main");
+	// Forked but not planned yet: the board job is still queued or directing
+	if (!(await tree.exists("characters.json"))) {
+		const concept = (await tree.exists("concept.md")) ? await tree.read("concept.md") : "";
+		return { repo: repoName, pending: true, title: "Directing…", concept, bible: "", characters: [], skills: { chosen: DEFAULT_SKILLS, available: [] }, cells: [], log: [] };
+	}
 	const { board, config, rows } = await loadBoard(env, tree);
 	const [skills, branches] = await Promise.all([listSkills(tree), WorkingTree.listBranches(remote, "cell/")]);
 	using repo = await env.ARTIFACTS.get(repoName);

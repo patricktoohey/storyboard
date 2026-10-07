@@ -72,6 +72,11 @@ aside.log li { list-style: none; padding: 5px 0; border-bottom: 1px solid var(--
 aside.log ul { padding: 0; margin: 0; }
 aside.log code { color: var(--accent); }
 aside.log b { color: var(--text); font-weight: 600; }
+aside.log h3 + ul { margin-bottom: 16px; }
+.job { display: grid; grid-template-columns: 10px 1fr; gap: 8px; align-items: start; }
+.job .dot { position: static; margin-top: 4px; width: 8px; height: 8px; border-radius: 50%; }
+.dot.queued { background: var(--line); } .dot.running { background: var(--accent); animation: pulse 1s infinite alternate; }
+.dot.done { background: var(--ok); } .dot.failed { background: var(--bad); }
 .newboard { display: grid; gap: 10px; max-width: 720px; }
 dialog { background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: var(--radius); max-width: 520px; width: calc(100% - 32px); }
 dialog::backdrop { background: rgba(0,0,0,.6); }
@@ -106,7 +111,9 @@ const store = { get: (k) => { try { return localStorage.getItem(k); } catch { re
 
 let key = store.get("storyboard.key") || "";
 let state = null;          // current board state from /state
-let inflight = 0;          // running operations; while > 0 we poll for new takes
+let inflight = 0;          // API requests in flight
+let jobs = [];             // the board's jobs ledger (jobs.csv on its `jobs` branch), newest first
+let jobsSig = "";          // id:status of every job, to notice transitions
 const selected = {};       // cell id -> selected take number
 const busyCells = new Set();
 const cellStatus = {};     // cell id -> status line
@@ -144,20 +151,38 @@ async function run(label, cellIds, fn) {
   inflight++; setBusy();
   cellIds.forEach((c) => { busyCells.add(c); cellStatus[c] = label; });
   render();
-  const poll = setInterval(() => state && refresh(), 4000);
   try {
-    const out = await fn();
-    return out;
+    return await fn();
   } catch (err) {
     cellIds.forEach((c) => (cellStatus[c] = `Error: ${err.message}`));
     throw err;
   } finally {
-    clearInterval(poll);
     inflight--; setBusy();
     cellIds.forEach((c) => busyCells.delete(c));
-    if (state) await refresh();
+    if (state?.repo) await watch(true);
   }
 }
+
+const openJob = (j) => j.status === "queued" || j.status === "running";
+
+/**
+ * Polls the jobs ledger. Any job changing status refreshes the board (new branches, frames, prints);
+ * while jobs are running the board refreshes every few polls too, so frames appear as they render.
+ */
+let ticks = 0;
+async function watch(force = false) {
+  if (!state?.repo || document.hidden) return;
+  const repo = state.repo;
+  const next = await api(`/boards/${repo}/jobs`).catch(() => null);
+  if (!next || state?.repo !== repo) return;
+  const sig = next.map((j) => `${j.id}:${j.status}`).join(",");
+  const changed = sig !== jobsSig;
+  jobs = next; jobsSig = sig;
+  ticks++;
+  if (force || changed || (jobs.some(openJob) && ticks % 3 === 0)) await refresh();
+  else render();
+}
+setInterval(() => watch().catch(console.error), 2500);
 
 async function loadBoards() {
   if (!key) return askKey();
@@ -189,9 +214,10 @@ async function renderNew() {
     const concept = $("#concept").value.trim();
     if (!concept) return;
     $("#create").disabled = true;
-    $("#newstatus").textContent = "Directing, casting and shooting… about 30 seconds.";
+    $("#newstatus").textContent = "Forking the template…";
     try {
       const out = await api("/boards", { method: "POST", body: JSON.stringify({ concept, cells: Number($("#ncells").value), skills: { cinematographer: $("#cine").value } }) });
+      // The board exists now; directing, casting and shooting run as jobs you can watch
       location.hash = out.repo;
       await loadBoards();
     } catch (err) { $("#newstatus").textContent = `Error: ${err.message}`; $("#create").disabled = false; }
@@ -202,7 +228,8 @@ async function openBoard(repo) {
   location.hash = repo;
   $("#main").innerHTML = `<p class="muted">Loading ${esc(repo)}…</p>`;
   state = { repo };
-  await refresh();
+  jobs = []; jobsSig = "";
+  await watch(true);
 }
 
 async function refresh() {
@@ -213,13 +240,34 @@ async function refresh() {
 
 function currentTake(cell) {
   const n = selected[cell.id] ?? cell.printed ?? cell.takes.at(-1)?.take;
-  return cell.takes.find((t) => t.take === n);
+  // A just-queued take has no branch yet; show the printed (or latest) take until it does
+  return cell.takes.find((t) => t.take === n) ?? cell.takes.find((t) => t.take === cell.printed) ?? cell.takes.at(-1);
 }
 
 const drafts = {};          // cell id -> unsent note text, kept across re-renders while polling
 
+function jobsHtml() {
+  const label = (j) => j.kind === "take" ? `cell ${j.cell} · take ${j.take}${j.attempt === "2" ? " (retake)" : ""}` : j.kind === "bible" ? `bible (from cell ${j.cell})` : j.kind;
+  return `<h3>jobs <span class="small muted">jobs.csv</span></h3><ul>${jobs.slice(0, 25).map((j) => `
+    <li class="job"><span class="dot ${esc(j.status)}"></span><span><b>${esc(label(j))}</b> <span class="muted">${esc(j.status)}</span><br>
+    <span class="small muted">${esc(j.detail || "")}</span></span></li>`).join("") || `<li class="muted small">no jobs yet</li>`}</ul>`;
+}
+
+/** What a cell's running job is doing now, from the ledger. */
+function cellActivity(id) {
+  const j = jobs.find((x) => x.cell === id && openJob(x));
+  return j && `${j.kind === "take" ? `take ${j.take}` : j.kind}: ${j.status === "queued" ? "queued" : j.detail || "running"}`;
+}
+
 function render() {
   if (!state?.cells) return;
+  if (state.pending) {
+    $("#main").innerHTML = `<div class="layout"><section class="panel"><h2 style="margin:0 0 6px">Directing…</h2>
+      <div class="muted">${esc(state.concept.replace(/^# Concept\s*/, ""))}</div>
+      <p class="small muted">The director is planning the board; casting and the cell agents follow. Their progress is on the right.</p></section>
+      <aside class="log panel">${jobsHtml()}</aside></div>`;
+    return;
+  }
   document.querySelectorAll(".cell").forEach((card) => (drafts[card.dataset.cell] = card.querySelector("[data-note]")?.value ?? ""));
   const s = state;
   const roleSelect = (role) => `<label>${role}<select data-role="${role}">${s.skills.available.filter((k) => k.role === role).map((k) => `<option value="${esc(k.name)}" ${k.name === s.skills.chosen[role] ? "selected" : ""}>${esc(k.style)} · ${esc(k.version)}</option>`).join("")}</select></label>`;
@@ -234,7 +282,7 @@ function render() {
     </section>
     <div class="layout">
       <div class="grid">${s.cells.map(cellHtml).join("")}</div>
-      <aside class="log panel"><h3>main</h3><ul>${s.log.map((l) => `<li><code>${esc(l.hash)}</code> <b>${esc(l.author)}</b> ${esc(l.message)}</li>`).join("")}</ul></aside>
+      <aside class="log panel">${jobsHtml()}<h3>main</h3><ul>${s.log.map((l) => `<li><code>${esc(l.hash)}</code> <b>${esc(l.author)}</b> ${esc(l.message)}</li>`).join("")}</ul></aside>
     </div>`;
   hydrate();
 }
@@ -247,7 +295,7 @@ function cellHtml(cell) {
     : t.continuity.ok ? `<span class="pill ok">continuity ok</span>` : `<span class="pill bad">continuity break</span>`;
   const styleOpts = state.skills.available.filter((k) => k.role === "cinematographer").map((k) => `<option value="${esc(k.name)}" ${k.name === state.skills.chosen.cinematographer ? "selected" : ""}>${esc(k.style)}</option>`).join("");
   return `
-  <article class="cell ${busyCells.has(cell.id) ? "busy" : ""}" data-cell="${cell.id}">
+  <article class="cell ${busyCells.has(cell.id) || cellActivity(cell.id) ? "busy" : ""}" data-cell="${cell.id}">
     <div class="frame">
       ${t ? `<img data-ref="${esc(t.branch)}" data-path="cells/${cell.id}/frame.webp" data-live="${t.done ? "" : "1"}" alt="">` : `<div class="empty">no takes yet</div>`}
       <span class="tag">${cell.id} · ${esc(cell.shot)} · ${esc(cell.camera)}</span>
@@ -277,7 +325,7 @@ function cellHtml(cell) {
       </div>
       ${cell.notes ? `<div class="notes">${esc(cell.notes.replace(/^# Notes.*\n+/, "").replace(/\*\*/g, ""))}</div>` : ""}
       <div class="row"><textarea rows="2" data-note placeholder="Note on this shot, e.g. “her coat should be red” or “move the camera lower”">${esc(drafts[cell.id] || "")}</textarea></div>
-      <div class="row"><button data-act="note">Send note</button><span class="status">${esc(cellStatus[cell.id] || "")}</span></div>
+      <div class="row"><button data-act="note">Send note</button><span class="status">${esc(cellActivity(cell.id) || cellStatus[cell.id] || "")}</span></div>
     </div>
   </article>`;
 }
@@ -304,9 +352,9 @@ async function hydrate() {
           cellStatus[id] = `Printed take ${t.take} (merged into main)`;
         } else if (act === "retake") {
           const skill = card.querySelector("[data-style]").value;
-          const out = await run("Shooting a new take…", [id], () => api(`/boards/${state.repo}/cells/${id}/takes`, { method: "POST", body: JSON.stringify({ skill }) }));
-          selected[id] = Number(out.takes.at(-1).branch.split("take-")[1]);
-          cellStatus[id] = `New take ${selected[id]} with ${out.takes.at(-1).skill}`;
+          const out = await run("Queueing a take…", [id], () => api(`/boards/${state.repo}/cells/${id}/takes`, { method: "POST", body: JSON.stringify({ skill }) }));
+          selected[id] = out.jobs[0].take;
+          cellStatus[id] = `Take ${selected[id]} queued`;
         } else if (act === "note") {
           const note = card.querySelector("[data-note]").value.trim();
           if (!note) return;
@@ -314,9 +362,10 @@ async function hydrate() {
           card.querySelector("[data-note]").value = "";
           const out = await run("Routing note…", [id], () => api(`/boards/${state.repo}/cells/${id}/notes`, { method: "POST", body: JSON.stringify({ note }) }));
           const p = out.route.probabilities[out.route.action] ?? 0;
-          cellStatus[id] = `Routed → ${out.route.action} (p=${p.toFixed(2)})` + (out.blast_radius ? ` · bible changed, re-shot cells ${[id, ...out.blast_radius.affected].filter((v, i, a) => a.indexOf(v) === i).join(", ")}` : "");
-          const mine = Array.isArray(out.takes) ? out.takes.flat().filter((t) => t.branch?.startsWith(`cell/${id}/`)).at(-1) : null;
-          if (mine) selected[id] = Number(mine.branch.split("take-")[1]);
+          const queued = out.jobs.map((j) => (j.kind === "take" ? `take ${j.take}` : `${j.kind} edit`)).join(", ");
+          cellStatus[id] = `Routed → ${out.route.action} (p=${p.toFixed(2)})${queued ? ` · queued ${queued}` : ""}`;
+          const mine = out.jobs.find((j) => j.kind === "take" && j.cell === id);
+          if (mine) selected[id] = mine.take;
         }
       } catch (err) { console.error(err); }
       finally { render(); }

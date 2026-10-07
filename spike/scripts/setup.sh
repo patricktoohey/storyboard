@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# One-time setup for a Cloudflare account (safe to re-run). Requires the `cf` CLI, logged in
+# One-time setup for a Cloudflare account (safe to re-run): dependencies, the Artifacts namespace,
+# the jobs queue, and the access key. Requires the `cf` CLI, logged in
 # (`cf auth login`), on a Workers Paid plan (Artifacts beta).
 #
 #   scripts/setup.sh
@@ -17,6 +18,14 @@ if cf artifacts namespaces get "$NAMESPACE" >/dev/null 2>&1; then
   echo "exists"
 else
   cf artifacts namespaces create --namespace "$NAMESPACE"
+fi
+
+QUEUE=storyboard-jobs  # must match JOBS_QUEUE in cloudflare.config.ts
+echo "== queue: $QUEUE"
+if cf queues list 2>/dev/null | grep -q "\"$QUEUE\""; then
+  echo "exists"
+else
+  cf queues create --queue-name "$QUEUE"
 fi
 
 echo "== access key"
