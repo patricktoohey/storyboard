@@ -37,7 +37,9 @@ import type { Job } from "./jobs";
 import { isRole, listSkills } from "./skills";
 import { TEMPLATE, ensureTemplate, promoteSkill, repoRemote } from "./template";
 import ui from "./ui.html?raw";
-import { verifyFrame } from "./video";
+import { animate, frameUrl, verifyFrame } from "./video";
+import { type Crew, DEFAULT_CREW, isCrew } from "./crew.ts";
+import { withCrew } from "./crew-env";
 
 const json = async <T>(request: Request) => (await request.json().catch(() => ({}))) as T;
 
@@ -86,6 +88,17 @@ export default {
 				}
 				if (method === "GET" && action === "state") return Response.json(await arenaState(env, repoName));
 				if (method === "POST" && action === "close") return Response.json(await closeArena(env, repoName));
+			}
+			// Checks one video model's adapter on an existing printed frame: renders, downloads, discards
+			if (method === "POST" && root === "debug" && repoName === "animate") {
+				const { board, cell, video, seconds = 3 } = await json<{ board?: string; cell?: string; video?: string; seconds?: number }>(request);
+				const crew = { ...DEFAULT_CREW, video } as Crew;
+				if (!board || !cell || !isCrew(crew)) return Response.json({ error: "board, cell and a menu video model are required" }, { status: 400 });
+				using handle = await env.ARTIFACTS.get(board);
+				const [head] = await handle.log({ ref: "main", limit: 1 });
+				const image = await frameUrl(env, url.origin, board, head.hash, `cells/${cell}/frame.webp`);
+				const clip = await animate(withCrew(env, crew), image, "Subtle natural motion; the camera stays still.", seconds, true);
+				return Response.json({ ...clip.meta, input: undefined });
 			}
 			if (method === "POST" && root === "sweep") {
 				return Response.json({ swept: await sweep(env, (await listBoards(env)).map((b) => b.name)) });

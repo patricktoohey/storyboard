@@ -55,7 +55,7 @@ export function appendJobs(
 		if (late.length) throw new LimitError(`deadline passed at ${limits.deadline}`);
 	}
 	if (limits.budget_usd !== undefined) {
-		const cost = requests.reduce((sum, r) => sum + estimate(r), 0);
+		const cost = requests.reduce((sum, r) => sum + estimate(r, limits.crew), 0);
 		const used = spent(rows);
 		if (used + cost > limits.budget_usd + 1e-9) {
 			throw new LimitError(`over budget: ${usd(used)} spent or reserved + ${usd(cost)} > ${usd(limits.budget_usd)}`);
@@ -83,7 +83,7 @@ export function appendJobs(
 				group: job.group ?? "",
 				status: "queued",
 				updated: now,
-				cost_est: estimate(req).toFixed(4),
+				cost_est: estimate(req, limits.crew).toFixed(4),
 			}),
 		);
 		return job;

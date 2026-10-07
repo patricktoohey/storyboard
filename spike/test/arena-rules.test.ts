@@ -20,6 +20,7 @@ const take = (t: number, ok = true, done = true, stale = false) => ({ take: t, d
 
 function board(over: Partial<BoardSummary> = {}): BoardSummary {
 	return {
+		drafted: true,
 		planned: true,
 		planRequested: true,
 		cells: [
@@ -34,11 +35,13 @@ function board(over: Partial<BoardSummary> = {}): BoardSummary {
 		now,
 		deadline: minutes(20),
 		cutSeconds: 10,
+		prices: { take: 0.03, turn: 0.005, cut: 1.0 },
 		...over,
 	};
 }
 
-test("the first turn must plan; a planned board waits while work is running", () => {
+test("the first turn drafts the crew, the next plans; a planned board waits while work is running", () => {
+	assert.deepEqual(allowedActions(board({ drafted: false, planRequested: false, planned: false })), ["draft"]);
 	assert.deepEqual(allowedActions(board({ planRequested: false, planned: false })), ["plan"]);
 	assert.deepEqual(allowedActions(board({ openJobs: 3 })), ["wait"]);
 	assert.deepEqual(allowedActions(board({ cutRunning: true })), ["wait"]);
@@ -97,7 +100,7 @@ test("D19: a board's budget and deadline are enforced when jobs are queued", () 
 	let n = 0;
 	const opts = { now: "2026-10-07T12:00:00Z", newId: () => `j${++n}`, limits: { budget_usd: 1, deadline: "2026-10-07T12:20:00Z" } };
 	appendJobs(rows, "b", [{ kind: "video", cell: "01", cut: "v1", origin: "o", seconds: 5 }], opts);
-	assert.equal(spent(rows), 0.5);
+	assert.equal(spent(rows), 0.5, "5 s of Wan at $0.10/s (the default crew)");
 	assert.throws(() => appendJobs(rows, "b", [{ kind: "video", cell: "02", cut: "v1", origin: "o", seconds: 6 }], opts), LimitError);
 	assert.equal(rows.length, 1, "a refused request queues nothing");
 	assert.throws(() => appendJobs(rows, "b", [{ kind: "take", cell: "01" }], { ...opts, now: "2026-10-07T12:21:00Z" }), /deadline/);

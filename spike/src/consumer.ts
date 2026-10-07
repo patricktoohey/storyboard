@@ -2,7 +2,8 @@
 // ledger, and queue whatever it leads to (a board's takes, a continuity retake, a bible edit's takes).
 import { printTakes, retakeOptions, runAssembleJob, runBibleJob, runBoardJob, runTakeJob, runVideoJob } from "./board";
 import { queueLiveJudging, runJudgeJob } from "./arena";
-import { report, submit } from "./coordinator";
+import { limitsOf, report, submit } from "./coordinator";
+import { withCrew } from "./crew-env";
 import { LimitError } from "./ledger.ts";
 import { runTurnJob } from "./showrunner";
 import type { Job } from "./jobs";
@@ -54,7 +55,7 @@ async function run(env: Env, job: Job) {
 		}
 		case "video": {
 			const clip = await runVideoJob(env, job.repo, job.cut, job.cell, job.origin, job.seconds, progress);
-			return { detail: `${clip.seconds}s clip, ${(clip.bytes / 1e6).toFixed(1)} MB in ${Math.round(clip.elapsed_ms / 1000)}s` };
+			return { detail: `${clip.seconds}s clip (${clip.model}), ${(clip.bytes / 1e6).toFixed(1)} MB in ${Math.round(clip.elapsed_ms / 1000)}s` };
 		}
 		case "assemble": {
 			const cut = await runAssembleJob(env, job.repo, job.cut, job.cells, progress);
@@ -100,8 +101,10 @@ async function consumeOne(msg: Message<Job>, env: Env) {
 			await report(env, job, "failed", "interrupted; retake from the board");
 			await keepTurnsGoing(env, job);
 		} else {
+			// A board's jobs run with its crew's models; the arena's judges always use the Worker's own
+			const jobEnv = job.kind === "judge" ? env : withCrew(env, (await limitsOf(env, job.repo)).crew);
 			// No separate "started" report: every job reports its first stage straight away, and each report is a commit
-			const out = await run(env, job);
+			const out = await run(jobEnv, job);
 			await report(env, job, "done", out.detail, "result" in out ? out.result : undefined);
 		}
 	} catch (err) {

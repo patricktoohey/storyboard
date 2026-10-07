@@ -240,9 +240,10 @@ export async function arenaState(env: Env, arena: string) {
 	const closed = Boolean(await readText(env, arena, "closed.json"));
 	const teams = await Promise.all(
 		rules.teams.map(async (t) => {
-			const [jobs, csv, submission, ...scoreTexts] = await Promise.all([
+			const [jobs, csv, boardJson, submission, ...scoreTexts] = await Promise.all([
 				ledger(env, t.board),
 				readText(env, t.board, "storyboard.csv"),
+				readText(env, t.board, "board.json"),
 				readText(env, arena, `submissions/${t.team}.json`),
 				...rules.judges.flatMap((j) => [readText(env, arena, scorePath(t.team, j.name, false)), readText(env, arena, scorePath(t.team, j.name, true))]),
 			]);
@@ -254,6 +255,7 @@ export async function arenaState(env: Env, arena: string) {
 			const sub = submission ? JSON.parse(submission) : null;
 			return {
 				...t,
+				crew: boardJson ? (JSON.parse(boardJson).crew ?? null) : null,
 				spent: jobs.reduce((sum, j) => sum + (Number(j.cost_est) || 0), 0),
 				turns: turns.filter((j) => j.result === "acted").length,
 				lastAction: lastAction?.detail ?? (turns[0]?.detail || "starting"),

@@ -15,6 +15,7 @@ import {
 	recordProgress,
 } from "./ledger.ts";
 import { repoRemote } from "./template";
+import { isCrew } from "./crew.ts";
 
 const newId = () => crypto.randomUUID().slice(0, 8);
 
@@ -62,7 +63,7 @@ export async function limitsOf(env: Env, repo: string): Promise<Limits> {
 	using handle = await env.ARTIFACTS.get(repo);
 	const text = await (await handle.readFile({ ref: "main", path: "board.json" }).catch(() => null))?.text();
 	const board = text ? (JSON.parse(text) as Limits) : {};
-	return { budget_usd: board.budget_usd, deadline: board.deadline };
+	return { budget_usd: board.budget_usd, deadline: board.deadline, crew: isCrew(board.crew) ? board.crew : undefined };
 }
 
 /**

@@ -1,6 +1,8 @@
 // Image-to-video: each printed frame becomes the first frame of its shot's clip. The video models live in
 // Cloudflare's unified catalog (env.AI.run with a provider/model id) and take the image as an HTTPS URL, so
 // the Worker signs a short-lived URL for one frame (frameUrl/verifyFrame) that needs no access key.
+import { videoRequest } from "./crew.ts";
+import { crewOf } from "./crew-env.ts";
 import type { Cell } from "./vocab.ts";
 
 // Seconds a signed frame URL stays valid; the provider fetches it once, right after the request
@@ -53,19 +55,24 @@ export function clipSeconds(cell: Pick<Cell, "duration_s">, cap: number) {
 	return Math.max(2, Math.min(cap, Math.round(cell.duration_s) || 3));
 }
 
-/** Runs the image-to-video model and downloads the clip. */
-export async function animate(env: Env, imageUrl: string, prompt: string, seconds: number) {
+/** Runs the crew's image-to-video model (each provider has its own request shape) and downloads the clip. */
+export async function animate(env: Env, imageUrl: string, prompt: string, seconds: number, staticCamera: boolean) {
 	const started = Date.now();
 	const seed = Math.floor(Math.random() * 2 ** 31);
-	const input = { image: imageUrl, prompt, negative_prompt: NEGATIVE_PROMPT, duration: seconds, resolution: "720P", seed, watermark: false };
-	const out = (await env.AI.run(env.VIDEO_MODEL as keyof AiModels, input as never)) as unknown as
+	const crew = crewOf(env);
+	const req = videoRequest(crew, imageUrl, prompt, seconds, { seed, staticCamera });
+	if (crew.video === "wan-2.7-i2v") req.input.negative_prompt = NEGATIVE_PROMPT;
+	const out = (await env.AI.run(req.model as keyof AiModels, req.input as never)) as unknown as
 		| { video?: string; state?: string; result?: { video?: string } }
 		| undefined;
 	// The catalog returns the clip as a URL, either bare or wrapped in { state, result }
 	const url = out?.video ?? out?.result?.video;
-	if (!url) throw new Error(`${env.VIDEO_MODEL} returned no video: ${JSON.stringify(out).slice(0, 300)}`);
+	if (!url) throw new Error(`${req.model} returned no video: ${JSON.stringify(out).slice(0, 300)}`);
 	const res = await fetch(url);
 	if (!res.ok) throw new Error(`downloading the clip failed: ${res.status}`);
 	const mp4 = new Uint8Array(await res.arrayBuffer());
-	return { mp4, meta: { model: env.VIDEO_MODEL, prompt, negative_prompt: NEGATIVE_PROMPT, seconds, resolution: "720P", seed, bytes: mp4.byteLength, elapsed_ms: Date.now() - started } };
+	return {
+		mp4,
+		meta: { model: req.model, prompt, planned_seconds: seconds, seconds: req.billed, usd: req.usd, seed, input: { ...req.input, image: undefined, image_uri: undefined, image_input: undefined, first_frame_image: undefined }, bytes: mp4.byteLength, elapsed_ms: Date.now() - started },
+	};
 }

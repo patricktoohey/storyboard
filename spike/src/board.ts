@@ -482,7 +482,7 @@ export async function runVideoJob(env: Env, repo: string, cut: string, cellId: s
 	// Signed at the commit the frame was printed in, so the clip is of exactly that frame even if main moves
 	const image = await frameUrl(env, origin, repo, frameCommit, `cells/${cellId}/frame.webp`);
 	await progress(`animating ${seconds}s from take ${row.take} (${env.VIDEO_MODEL})`);
-	const clip = await animate(env, image, motionPrompt(cell), seconds);
+	const clip = await animate(env, image, motionPrompt(cell), seconds, /static|locked|tripod/i.test(cell.camera));
 
 	await tree.commit(
 		{ name: `animator-${cellId}` },
@@ -493,7 +493,7 @@ export async function runVideoJob(env: Env, repo: string, cut: string, cellId: s
 		},
 	);
 	await tree.push(branch);
-	return { branch, seconds, bytes: clip.mp4.byteLength, elapsed_ms: clip.meta.elapsed_ms };
+	return { branch, seconds: clip.meta.seconds, bytes: clip.mp4.byteLength, elapsed_ms: clip.meta.elapsed_ms, model: clip.meta.model };
 }
 
 /**

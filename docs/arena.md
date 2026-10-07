@@ -223,8 +223,8 @@ Per-use costs are for this pipeline's usage: 1344×576 frames, ~1.5k/1k tokens f
 | | `alibaba/wan-2.7-i2v` (today) | $0.10/s (720p) | $0.10/s |
 | | `bytedance/seedance-2.0-fast` | $0.12/s (720p, image input) | $0.12/s |
 
-A take today costs ~$0.028 (klein-9b frame, Llama cinematographer, two Clef calls), close to the flat
-$0.03 estimate. The draft's spread is wide: a budget crew (klein-4b, gemma, clef-flash, Hailuo) shoots a take
+A take today costs ~$0.024 (klein-9b frame, Llama cinematographer, two Clef calls), a little under the
+flat $0.03 estimate. The draft's spread is wide: a budget crew (klein-4b, gemma, clef-flash, Hailuo) shoots a take
 for well under a cent and 20 s of video for ~$0.65; a premium crew (flux-2-dev, kimi, clef, Seedance) pays
 ~$0.06 a take and $2.40 for the same video.
 
@@ -244,6 +244,26 @@ for well under a cent and 20 s of video for ~$0.65; a premium crew (flux-2-dev, 
   schema: `image` for Wan, `image_uri` for LTX, ...) are chosen by model ID. Skills keep their style; the
   crew chooses who executes it.
 - **Judges stay fixed** (`clef`, the arena's rubric skills), so scores stay comparable across crews.
+
+### Built (2026-10-07), awaiting a live run
+
+`src/crew.ts` (menu, per-use costs, `fitToBudget`, per-provider `videoRequest`), `src/crew-env.ts` (a
+board's crew applied to the Worker's environment), crew-aware `estimate()` and arena rules, and the
+showrunner's `draft` turn (first, before `plan`), with unit tests in `test/crew.test.ts`. Teams' crews show on
+the arena page.
+
+Adapter check (`POST /debug/animate`, one 3 s request per model on a Night Drive frame):
+
+| Model | Result |
+|---|---|
+| `minimax/hailuo-2.3-fast` | works: billed 6 s ($0.19), rendered in 60 s (Wan takes ~300 s) |
+| `lightricks/ltx-2-5-fast` | "Insufficient funds. Required: 27 cents" |
+| `google/veo-3.1-fast` | 2002 model execution failed (likely the same cause; to re-check) |
+| `bytedance/seedance-2.0-fast` | timed out (to re-check) |
+
+The third-party video models are billed from prepaid **AI Gateway credits** (unified billing), a balance
+separate from Workers AI. The first arena and the video tests drew it down; a crew arena needs it topped
+up. An arena's budgets should also never exceed the real balance: worth reading it before starting one.
 
 ### What it lets the arena show
 

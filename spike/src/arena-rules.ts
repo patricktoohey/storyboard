@@ -1,10 +1,10 @@
 // The arena's decisions without I/O: what a showrunner may do next, which takes to print, how rubrics
 // read, and how scores become a leaderboard. Pure, so it is unit-tested (test/arena-rules.test.ts).
-import { PRICES } from "./costs.ts";
 
 // ── Showrunner actions ──────────────────────────────────────────────────────────────────────────────
 
 export const ACTIONS = {
+	draft: "Choose the crew: which model fills each slot, within the budget",
 	plan: "Plan the board from the brief: director and casting, then every cell's first take",
 	note: "Give a director's note on the weakest cell, so it is re-shot",
 	retake: "Re-shoot the weakest cell as it is, hoping for a better render",
@@ -17,6 +17,8 @@ export type Action = keyof typeof ACTIONS;
 
 /** What a showrunner sees of its board each turn. */
 export interface BoardSummary {
+	// The crew has been chosen (board.json has a crew)
+	drafted: boolean;
 	planned: boolean;
 	// The plan has been requested (a board job exists), even if it hasn't finished
 	planRequested: boolean;
@@ -37,6 +39,8 @@ export interface BoardSummary {
 	deadline: number;
 	// Video seconds a cut of the whole board would need (each cell's clip, capped)
 	cutSeconds: number;
+	// The crew's prices: one take, one turn, and the whole cut at its video model's billing
+	prices: { take: number; turn: number; cut: number };
 }
 
 // A cut takes ~5 minutes to render (clips run in parallel) plus assembly; leave a margin on top
@@ -73,13 +77,14 @@ export function weakCells(s: BoardSummary) {
  */
 export function allowedActions(s: BoardSummary): Action[] {
 	if (s.submitted) return [];
+	if (!s.drafted) return ["draft"];
 	if (!s.planRequested) return ["plan"];
 	if (!s.planned || s.openJobs > 0 || s.cutRunning) return ["wait"];
 	// Video is required: a finished cut is submitted at once
 	if (s.cut) return ["submit"];
 
 	const timeLeft = (s.deadline - s.now) / 1000;
-	const videoCost = s.cutSeconds * PRICES.videoPerSecond;
+	const videoCost = s.prices.cut;
 	const allPrinted = s.cells.every((c) => c.printed !== undefined);
 	const picks = printPicks(s);
 	const canCut = allPrinted && s.spent + videoCost <= s.budget;
@@ -92,7 +97,7 @@ export function allowedActions(s: BoardSummary): Action[] {
 
 	const actions: Action[] = [];
 	// Notes and retakes may never eat the money the required video needs
-	const affordWork = s.spent + PRICES.take + PRICES.turn + videoCost <= s.budget;
+	const affordWork = s.spent + s.prices.take + s.prices.turn + videoCost <= s.budget;
 	if (affordWork && weakCells(s).length) actions.push("note", "retake");
 	if (picks.length) actions.push("print");
 	if (canCut) actions.push("cut");

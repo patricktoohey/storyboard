@@ -5,7 +5,8 @@
 // queues its next turn with a delay. Turns never overlap: a turn queues the next one only as it ends.
 import { ACTIONS, type Action, type BoardSummary, allowedActions, printPicks, weakCells } from "./arena-rules.ts";
 import { readRules, recordSubmission } from "./arena";
-import { addNote, boardState, startCut } from "./board";
+import { addNote, boardState, onMain, startCut } from "./board";
+import { type Crew, DEFAULT_CREW, MENU, SLOTS, clipCost, crewCosts, fitToBudget, isCrew } from "./crew.ts";
 import { LimitError } from "./ledger.ts";
 import { ledger, submit } from "./coordinator";
 import { WorkingTree } from "./git";
@@ -56,8 +57,12 @@ export async function runTurnJob(env: Env, job: TurnJob, progress: Progress) {
 	const state = planRequested ? await boardState(env, board) : undefined;
 	const planned = Boolean(state && !("pending" in state && state.pending));
 	const cap = Number(env.VIDEO_MAX_SECONDS);
+	const crew: Crew = isCrew(cfg.crew) ? cfg.crew : DEFAULT_CREW;
+	const costs = crewCosts(crew);
+	const clips = (state?.cells ?? []).map((c) => clipSeconds(c, cap));
 	const open = (kinds?: string[]) => rows.filter((r) => r.kind !== "turn" && (!kinds || kinds.includes(r.kind)) && (r.status === "queued" || r.status === "running")).length;
 	const summary: BoardSummary = {
+		drafted: isCrew(cfg.crew),
 		planned,
 		planRequested,
 		cells: (state?.cells ?? []).map((c) => ({
@@ -73,7 +78,8 @@ export async function runTurnJob(env: Env, job: TurnJob, progress: Progress) {
 		budget: Number(cfg.budget_usd),
 		now: Date.now(),
 		deadline,
-		cutSeconds: (state?.cells ?? []).reduce((sum, c) => sum + clipSeconds(c, cap), 0),
+		cutSeconds: clips.reduce((a, b) => a + b, 0),
+		prices: { take: costs.take, turn: costs.turn, cut: clips.reduce((sum, sec) => sum + clipCost(crew, sec).usd, 0) },
 	};
 
 	const allowed = allowedActions(summary);
@@ -90,7 +96,8 @@ export async function runTurnJob(env: Env, job: TurnJob, progress: Progress) {
 	const brief = {
 		strategy: skill.body,
 		minutes_left: Math.round((deadline - Date.now()) / 60000),
-		budget: { spent: Number(summary.spent.toFixed(2)), total: summary.budget, video_cost: Number((summary.cutSeconds * 0.1).toFixed(2)) },
+		budget: { spent: Number(summary.spent.toFixed(2)), total: summary.budget, video_cost: Number(summary.prices.cut.toFixed(2)) },
+		crew,
 		cells: summary.cells.map((c) => {
 			const shown = c.takes.find((t) => t.take === c.printed) ?? c.takes[c.takes.length - 1];
 			return { cell: c.id, printed: c.printed ?? null, takes: c.takes.length, continuity: shown ? (shown.stale ? "stale" : shown.ok ? "ok" : shown.issues.join("; ")) : "no take" };
@@ -110,6 +117,33 @@ export async function runTurnJob(env: Env, job: TurnJob, progress: Progress) {
 	let result: "acted" | "waited" = action === "wait" ? "waited" : "acted";
 	try {
 		switch (action) {
+			case "draft": {
+				// One Clef choice per slot, with the strategy and the budget in view; then code makes it affordable
+				const planned = Array(rules.cells).fill(cap);
+				const picks = {} as Record<string, string>;
+				for (const slot of SLOTS) {
+					await progress(`drafting the ${slot}`);
+					const options = Object.fromEntries(
+						Object.entries(MENU[slot]).map(([key, o]) => {
+							const film = fitToBudget({ ...DEFAULT_CREW, ...picks, [slot]: key } as Crew, planned, Infinity).film;
+							return [key, `${o.label} (a minimal ${rules.cells}-shot film with this choice: ~$${film.toFixed(2)})`];
+						}),
+					);
+					const draftState = { strategy: skill.body, budget_usd: summary.budget, shots: rules.cells, minutes_left: brief.minutes_left };
+					picks[slot] = (await clefChoice(env, draftState, `Following \`strategy\` and within \`budget_usd\`, which ${slot} should the team hire?`, options)).choice;
+				}
+				const fit = fitToBudget(picks as Crew, planned, summary.budget);
+				await onMain(await repoRemote(env, board), async (tree) => {
+					const current = JSON.parse(await tree.read("board.json"));
+					await tree.commit(
+						{ name: `showrunner-${job.team}` },
+						`Draft crew: ${SLOTS.map((sl) => fit.crew[sl]).join(", ")}${fit.changes.length ? `\n\nDowngraded to fit the budget: ${fit.changes.join("; ")}` : ""}`,
+						{ "board.json": JSON.stringify({ ...current, crew: fit.crew }, null, 2) + "\n" },
+					);
+				});
+				detail += `: ${SLOTS.map((sl) => `${sl} ${fit.crew[sl]}`).join(", ")}; minimal film ~$${fit.film.toFixed(2)}${fit.changes.length ? ` (downgraded ${fit.changes.join("; ")})` : ""}`;
+				break;
+			}
 			case "plan":
 				await progress("planning the board from the brief");
 				await submit(env, board, [{ kind: "board", concept: rules.brief, cells: rules.cells, skills: {} }]);

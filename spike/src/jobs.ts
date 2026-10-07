@@ -47,6 +47,8 @@ export type JobRequest =
 /** A team board's limits, from its board.json; absent on boards outside an arena. */
 export interface Limits {
 	budget_usd?: number;
+	// The board's drafted crew (crew.ts), which prices its jobs; absent means DEFAULT_CREW
+	crew?: import("./crew.ts").Crew;
 	// ISO time after which the board accepts no new work
 	deadline?: string;
 }

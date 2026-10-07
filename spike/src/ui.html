@@ -306,7 +306,7 @@ function renderArena() {
   const rows = a.leaderboard.map((r, i) => {
     const t = team(r.team);
     const status = t.submission ? (t.submission.cut ? `submitted cut ${t.submission.cut}` : "no submission") : t.lastAction;
-    return `<tr><td>${i + 1}</td><td><b>${esc(r.team)}</b>${r.disqualified ? ` <span class="pill bad">${esc(r.disqualified)}</span>` : ""}<br><span class="small muted">${esc(t.showrunner)} · ${esc(t.cinematographer)}</span></td>
+    return `<tr><td>${i + 1}</td><td><b>${esc(r.team)}</b>${r.disqualified ? ` <span class="pill bad">${esc(r.disqualified)}</span>` : ""}<br><span class="small muted">${esc(t.showrunner)} · ${esc(t.cinematographer)}</span>${t.crew ? `<br><span class="small muted">crew: ${esc(Object.values(t.crew).join(" · "))}</span>` : `<br><span class="small muted">crew: drafting…</span>`}</td>
       <td><b>${r.score.toFixed(2)}</b></td>${judges.map((j) => `<td>${r.byJudge[j] != null ? r.byJudge[j].toFixed(2) : "–"}</td>`).join("")}
       <td>$${t.spent.toFixed(2)} / $${a.rules.budget_usd}<div class="bar"><i style="width:${Math.min(100, (t.spent / a.rules.budget_usd) * 100)}%"></i></div></td>
       <td>${t.turns}</td><td class="small">${esc(status)}${t.openJobs ? `<br><span class="muted">${t.openJobs} job(s) running</span>` : ""}</td></tr>`;

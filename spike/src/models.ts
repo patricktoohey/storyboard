@@ -2,6 +2,7 @@
 // Director, cinematographer and casting take their craft from a skill in the board repo (skills.ts);
 // what stays here is each role's output contract, which code depends on.
 import { continuityQuestions, continuityVerdict } from "./continuity-rules.ts";
+import { llmFor } from "./crew-env";
 import { insertLooks } from "./looks";
 import { type NoteAction, routerRequest } from "./router.ts";
 import { type Skill, promptTemplate } from "./skills";
@@ -69,7 +70,7 @@ Reply with ONLY a JSON object:
             "characters": [names of characters visible in the frame]}]}
 Write exactly ${cellCount} cells.`;
 	const board = extractJson<Omit<Board, "cells"> & { cells: Omit<Cell, "id">[] }>(
-		await chat(env, skill.metadata.model ?? env.DIRECTOR_MODEL, system, concept),
+		await chat(env, llmFor(env, skill.metadata.model, env.DIRECTOR_MODEL), system, concept),
 	);
 	const characters = (board.characters ?? []).map((c) => {
 		const age_band = c.age_band in AGE_BANDS ? c.age_band : "young_adult";
@@ -116,7 +117,7 @@ Reply with ONLY the prompt text.
 ${bible}`;
 	const brief = [`Beat: ${cell.beat}`, `Camera: ${cell.camera}`];
 	if (direction) brief.push(direction);
-	const draft = (await chat(env, skill.metadata.model ?? env.CINEMATOGRAPHER_MODEL, system, brief.join("\n")))
+	const draft = (await chat(env, llmFor(env, skill.metadata.model, env.CINEMATOGRAPHER_MODEL), system, brief.join("\n")))
 		.trim()
 		.replace(/^"|"$/g, "");
 	return insertLooks(draft, cast);
@@ -318,7 +319,7 @@ ${bible}
 CURRENT CHARACTERS:
 ${JSON.stringify(characters, null, 2)}`;
 	const out = extractJson<{ changed?: boolean; summary: string; bible: string; characters: Character[] }>(
-		await chat(env, skill.metadata.model ?? env.DIRECTOR_MODEL, system, user),
+		await chat(env, llmFor(env, skill.metadata.model, env.DIRECTOR_MODEL), system, user),
 	);
 	const known = new Map(characters.map((c) => [c.name, c]));
 	return {
@@ -355,6 +356,6 @@ export async function writeNote(env: Env, skill: Skill, context: string) {
 
 ## Output contract
 Reply with ONLY the note: one or two sentences, addressed to the cinematographer, about this one shot.`;
-	const text = (await chat(env, skill.metadata.model ?? env.DIRECTOR_MODEL, system, context)).trim().replace(/^"|"$/g, "");
+	const text = (await chat(env, llmFor(env, skill.metadata.model, env.DIRECTOR_MODEL), system, context)).trim().replace(/^"|"$/g, "");
 	return text.split("\n")[0].slice(0, 400);
 }
