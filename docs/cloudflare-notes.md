@@ -2,10 +2,15 @@
 
 ## Artifacts
 
-wrangler config:
-```jsonc
-{ "artifacts": [{ "binding": "ARTIFACTS", "namespace": "default" }] }
+Config (`cloudflare.config.ts`, the `cf` CLI's format; `cf migrate` converts a wrangler config):
+```ts
+env: {
+  ARTIFACTS: bindings.artifacts({ namespace: "storyboard", dev: { remote: true } }),
+  AI: bindings.ai({ dev: { remote: true } }),
+}
 ```
+`cf build` / `cf deploy` delegate to Vite when `@cloudflare/vite-plugin` is a devDependency
+(plus a `vite.config.ts` with `cloudflare()`); `cf workers types` writes `.cloudflare/types/index.d.ts`.
 
 Namespace: `create(name, {readOnly, description, setDefaultBranch})` → `{name, remote, defaultBranch, token}`,
 `get(name)` (a disposable handle; declare it with `using`), `list({limit, cursor})`, `import({source:{url,branch,depth}, target:{name}})`, `delete(name)`.
