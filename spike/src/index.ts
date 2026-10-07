@@ -100,8 +100,9 @@ export default {
 					const blob = await repo.readFile({ ref, path });
 					if (!blob) return new Response("not found", { status: 404 });
 					const type = path.endsWith(".webp") ? "image/webp" : blob.type || "text/plain;charset=utf-8";
-					// Take branches are immutable once finished, but main and in-progress branches move
-					return new Response(blob, { headers: { "content-type": type, "cache-control": "private, max-age=10" } });
+					// Never cache: main and in-progress take branches move, and a cached frame once showed the
+					// previous take under the new take's label
+					return new Response(blob, { headers: { "content-type": type, "cache-control": "no-store" } });
 				}
 				if (method === "POST" && action === "token") {
 					const [token, info] = await Promise.all([repo.createToken("read", 3600), repo.info()]);

@@ -3,7 +3,7 @@
 // concurrency is resolved by Git refs on the Artifacts side.
 import git from "isomorphic-git";
 import http from "isomorphic-git/http/web";
-import { MemoryFS } from "./memory-fs";
+import { MemoryFS } from "./memory-fs.ts";
 
 const DIR = "/board";
 
@@ -21,10 +21,13 @@ export interface Agent {
 export type Files = Record<string, string | Uint8Array>;
 
 export class WorkingTree {
-	private constructor(
-		private fs: MemoryFS,
-		private remote: Remote,
-	) {}
+	private fs: MemoryFS;
+	private remote: Remote;
+
+	private constructor(fs: MemoryFS, remote: Remote) {
+		this.fs = fs;
+		this.remote = remote;
+	}
 
 	private get auth() {
 		const password = this.remote.token.split("?expires=")[0];
@@ -121,6 +124,11 @@ export class WorkingTree {
 		});
 	}
 
+	/** Parent commit ids of a commit; a print merge has the takes as extra parents. */
+	async parents(oid: string) {
+		return (await git.readCommit({ fs: this.fs, dir: DIR, oid })).commit.parent;
+	}
+
 	/** Branch names on the remote under a prefix, e.g. "cell/03/" -> ["cell/03/take-1", ...] */
 	static async listBranches(remote: Remote, prefix: string) {
 		const auth = new WorkingTree(new MemoryFS(), remote).auth;
@@ -128,10 +136,16 @@ export class WorkingTree {
 		return refs.map((r) => r.ref.replace(/^refs\/heads\//, ""));
 	}
 
-	async commit(agent: Agent, message: string, files: Files) {
+	/** Writes `files` and deletes `remove` (paths that don't exist are skipped), then commits. */
+	async commit(agent: Agent, message: string, files: Files, remove: string[] = []) {
 		for (const [path, data] of Object.entries(files)) {
 			await this.fs.promises.writeFile(`${DIR}/${path}`, data);
 			await git.add({ fs: this.fs, dir: DIR, filepath: path });
+		}
+		for (const path of remove) {
+			if (!(await this.exists(path))) continue;
+			await this.fs.promises.unlink(`${DIR}/${path}`);
+			await git.remove({ fs: this.fs, dir: DIR, filepath: path });
 		}
 		return git.commit({
 			fs: this.fs,

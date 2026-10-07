@@ -1,0 +1,33 @@
+{
+  "suite": "continuity",
+  "model": "clef",
+  "at": "2026-10-07T12:07:31.331Z",
+  "passed": 3,
+  "total": 3,
+  "rows": [
+    {
+      "decision": "D7",
+      "case": "night-drive-03-old-driver.jpg",
+      "expected": "break: Driver's hair",
+      "got": "break: Driver's hair reads as black but the casting portrait shows grey white (p=0.07)",
+      "pass": true,
+      "detail": "Driver hair black/grey_white p=0.068, outerwear yellow/yellow p=0.925 | Passenger outerwear black/black p=0.954"
+    },
+    {
+      "decision": "D7",
+      "case": "night-drive-03-recast-driver.jpg",
+      "expected": "ok",
+      "got": "ok",
+      "pass": true,
+      "detail": "Driver hair grey_white/grey_white p=0.943, outerwear yellow/yellow p=0.884 | Passenger hair dark_brown/dark_brown p=0.745, outerwear black/black p=0.949"
+    },
+    {
+      "decision": "D7",
+      "case": "night-drive-04-back-seat.jpg",
+      "expected": "ok",
+      "got": "ok",
+      "pass": true,
+      "detail": "Driver hair grey_white/grey_white p=0.827, outerwear yellow/yellow p=0.95 | Passenger hair dark_brown/dark_brown p=0.722, outerwear black/black p=0.957"
+    }
+  ]
+}

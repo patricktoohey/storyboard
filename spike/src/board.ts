@@ -1,7 +1,10 @@
 // The storyboard pipeline. All state lives in the board repo: the director and casting commit to main,
 // each take is a branch (cell/NN/take-K) with one commit per agent, notes are committed to the cell's
 // notes.md, and printing a take merges its branch into main. Anything later rebuilds the board from main.
+import { type CsvRow, parseCsv, toCsv } from "./csv.ts";
 import { WorkingTree, type Files, type Remote } from "./git";
+import { noteHistory, noteLine, notesHeader } from "./notes.ts";
+import { cellsToReshoot } from "./router.ts";
 import {
 	type Board,
 	type Cell,
@@ -26,13 +29,6 @@ import { forkBoard, repoRemote } from "./template";
 
 // ── Files on main ────────────────────────────────────────────────────────────────────────────────
 
-const csvField = (v: string | number) => (/[",\n]/.test(String(v)) ? `"${String(v).replace(/"/g, '""')}"` : String(v));
-const CSV_HEADER = ["id", "order", "duration_s", "shot", "camera", "characters", "beat", "status", "take"];
-type CsvRow = Record<(typeof CSV_HEADER)[number], string>;
-
-const toCsv = (rows: CsvRow[]) =>
-	[CSV_HEADER.join(","), ...rows.map((r) => CSV_HEADER.map((h) => csvField(r[h] ?? "")).join(","))].join("\n") + "\n";
-
 function storyboardCsv(board: Board) {
 	return toCsv(
 		board.cells.map((c, i) => ({
@@ -49,26 +45,6 @@ function storyboardCsv(board: Board) {
 	);
 }
 
-function parseCsv(text: string): CsvRow[] {
-	const rows: string[][] = [];
-	let row: string[] = [];
-	let field = "";
-	let quoted = false;
-	for (let i = 0; i < text.length; i++) {
-		const ch = text[i];
-		if (quoted) {
-			if (ch === '"' && text[i + 1] === '"') (field += '"'), i++;
-			else if (ch === '"') quoted = false;
-			else field += ch;
-		} else if (ch === '"') quoted = true;
-		else if (ch === ",") row.push(field), (field = "");
-		else if (ch === "\n") row.push(field), rows.push(row), (row = []), (field = "");
-		else if (ch !== "\r") field += ch;
-	}
-	if (field || row.length) row.push(field), rows.push(row);
-	const [header, ...body] = rows;
-	return body.map((r) => Object.fromEntries(header.map((h, i) => [h, r[i] ?? ""])) as CsvRow);
-}
 
 const cellFromRow = (r: CsvRow): Cell => ({
 	id: r.id,
@@ -160,6 +136,9 @@ async function castCharacters(env: Env, remote: Remote, characters: Character[],
 	return portraits.map((p) => p.character.name);
 }
 
+/** Files a take writes for its cell. A new take branch deletes main's copies first (see shootCell). */
+export const TAKE_OUTPUTS = ["frame.webp", "render.json", "review.json", "continuity.json"];
+
 interface TakeOptions {
 	note?: string;
 	// Cinematographer skill for this take; defaults to the board's choice
@@ -176,6 +155,7 @@ interface Take {
 	skill: string;
 	review: Awaited<ReturnType<typeof review>>;
 	previewBase64: string;
+	detailBase64: string;
 	refs: Reference[];
 	tree: WorkingTree;
 	continuity?: Awaited<ReturnType<typeof checkContinuity>>;
@@ -199,26 +179,32 @@ async function shootCell(env: Env, remote: Remote, loaded: LoadedBoard, cell: Ce
 	const castList = board.characters.filter((c) => cell.characters.includes(c.name));
 	const cellRefs = refs.filter((r) => cell.characters.includes(r.character.name));
 
+	// The branch starts from main, which holds the printed take's outputs for this cell. Drop them in the
+	// first commit, or until the renderer commits, this take would serve the previous take's frame.
+	const inherited = TAKE_OUTPUTS.map((f) => `${dir}/${f}`);
 	let prompt: string;
 	if (opts.prompt) {
 		prompt = opts.prompt;
-		await tree.commit({ name: `cinematographer-${cell.id}` }, `Cell ${cell.id} take ${take}: reseed (same prompt)`, {
-			[`${dir}/prompt.md`]: `${prompt}\n`,
-		});
+		await tree.commit(
+			{ name: `cinematographer-${cell.id}` },
+			`Cell ${cell.id} take ${take}: reseed (same prompt)`,
+			{ [`${dir}/prompt.md`]: `${prompt}\n` },
+			inherited,
+		);
 	} else {
 		// Every note on this cell so far still applies; a bible change shouldn't undo "shoot from the back seat"
-		const earlier = history
-			.split("\n")
-			.filter((l) => l.startsWith("- "))
-			.map((l) => l.replace(/^- [\d-]+ [\d:]+: /, "- ").replace(/ → \*\*\w+\*\* \(p=[\d.]+\)$/, ""));
+		const earlier = noteHistory(history).map((n) => `- ${n}`);
 		const brief = [earlier.length ? `Director's notes on this shot so far (all still apply):\n${earlier.join("\n")}` : "", opts.note ?? ""]
 			.filter(Boolean)
 			.join("\n\n");
 		prompt = await cinematograph(env, skill, bible, castList, cell, brief || undefined);
 		const subject = `Cell ${cell.id} take ${take}: shot prompt${opts.note ? ` (with notes)\n\n${opts.note}` : ""}`;
-		await tree.commit({ name: `cinematographer-${cell.id}` }, `${subject}\n\n${skillTrailer(skill)}`, {
-			[`${dir}/prompt.md`]: `${prompt}\n`,
-		});
+		await tree.commit(
+			{ name: `cinematographer-${cell.id}` },
+			`${subject}\n\n${skillTrailer(skill)}`,
+			{ [`${dir}/prompt.md`]: `${prompt}\n` },
+			inherited,
+		);
 	}
 	await tree.push(branch);
 
@@ -235,12 +221,23 @@ async function shootCell(env: Env, remote: Remote, loaded: LoadedBoard, cell: Ce
 	});
 	await tree.push(branch);
 
-	return { cell, take, branch, prompt, skill: `${skill.name}@${skill.version}`, review: verdict, previewBase64: frame.previewBase64, refs: cellRefs, tree };
+	return {
+		cell,
+		take,
+		branch,
+		prompt,
+		skill: `${skill.name}@${skill.version}`,
+		review: verdict,
+		previewBase64: frame.previewBase64,
+		detailBase64: frame.detailBase64,
+		refs: cellRefs,
+		tree,
+	};
 }
 
 /** Continuity agent: commits its verdict onto the take branch it judged. */
 async function judgeContinuity(env: Env, take: Take) {
-	const verdict = await checkContinuity(env, take.cell, take.refs, take.previewBase64, take.review.framing);
+	const verdict = await checkContinuity(env, take.cell, take.refs, take.detailBase64, take.review.framing);
 	const summary = verdict.ok ? "ok" : verdict.issues.join("; ");
 	await take.tree.commit(
 		{ name: `continuity-${take.cell.id}` },
@@ -394,8 +391,8 @@ export async function addNote(env: Env, repo: string, cellId: string, note: stri
 	const p = route.probabilities[route.action] ?? 0;
 	await onMain(remote, async (tree) => {
 		const path = `cells/${cellId}/notes.md`;
-		const before = (await tree.exists(path)) ? await tree.read(path) : `# Notes: cell ${cellId}\n\n`;
-		const line = `- ${new Date().toISOString().slice(0, 16).replace("T", " ")}: ${note} → **${route.action}** (p=${p.toFixed(2)})\n`;
+		const before = (await tree.exists(path)) ? await tree.read(path) : notesHeader(cellId);
+		const line = noteLine(new Date(), note, route.action, p);
 		return tree.commit({ name: "user" }, `Note on cell ${cellId}: ${note}\n\nRoute: ${route.action} p=${p.toFixed(2)} (${route.model})`, {
 			[path]: before + line,
 		});
@@ -407,6 +404,14 @@ export async function addNote(env: Env, repo: string, cellId: string, note: stri
 		const takes = await shootJudged(env, remote, loaded, cell, await nextTake(remote, cellId), { prompt: currentPrompt });
 		return { ...result, takes: takes.map(summarizeTake) };
 	}
+	// Fix this shot against the bible as it stands: the cell's characters' looks, spelled out
+	const matchBible = async (extra: Record<string, unknown> = {}) => {
+		const looks = loaded.board.characters.filter((c) => cell.characters.includes(c.name)).map((c) => `${c.name}: ${c.look}`);
+		const direction = `${note}\nMatch the bible exactly${looks.length ? `: ${looks.join("; ")}` : ""}.`;
+		const takes = await shootJudged(env, remote, loaded, cell, await nextTake(remote, cellId), { note: direction });
+		return { ...result, ...extra, takes: takes.map(summarizeTake) };
+	};
+	if (route.action === "match_bible") return matchBible();
 	if (route.action !== "edit_bible") {
 		const takes = await shootJudged(env, remote, loaded, cell, await nextTake(remote, cellId), { note });
 		return { ...result, takes: takes.map(summarizeTake) };
@@ -417,21 +422,22 @@ export async function addNote(env: Env, repo: string, cellId: string, note: stri
 		const current = await loadBoard(env, tree);
 		const skill = await loadSkill(tree, current.config.skills.director);
 		const revised = await editBible(env, skill, bibleBody(current.board.bible), current.board.characters, note);
+		// Backstop for a misroute: the director says the bible already covers this. Commit nothing.
+		if (!revised.changed) return { unchanged: true as const, summary: revised.summary };
 		await tree.commit({ name: "director" }, `Bible: ${revised.summary}\n\nNote: ${note}\n${skillTrailer(skill)}`, {
 			"bible.md": bibleMd(current.board.title, revised.bible, revised.characters),
 			"characters.json": JSON.stringify(revised.characters, null, 2) + "\n",
 		});
 		const changed = revised.characters.filter((c, i) => c.look !== current.board.characters[i]?.look);
-		return { summary: revised.summary, changed, skills: current.config.skills };
+		return { unchanged: false as const, summary: revised.summary, changed, skills: current.config.skills };
 	});
+	if (edit.unchanged) return matchBible({ bible: `unchanged: ${edit.summary}` });
 	// A changed look needs a new casting portrait, or the renderer would keep drawing the old one
 	const recast = await castCharacters(env, remote, edit.changed, edit.skills.casting, "Recast");
 
 	const changeText = [edit.summary, ...edit.changed.map((c) => `${c.name} is now: ${c.look}`)].join(" ");
 	const blast = await blastRadius(env, changeText, loaded.board.cells);
-	// Guardrail: a cell that lists a recast character is affected no matter what Clef thinks
-	const withChanged = loaded.board.cells.filter((c) => c.characters.some((n) => recast.includes(n))).map((c) => c.id);
-	const affected = [...new Set([cellId, ...withChanged, ...blast.affected])];
+	const affected = cellsToReshoot(cellId, loaded.board.cells, recast, blast.affected);
 	const reloaded = await loadBoard(env, await WorkingTree.clone(remote, "main"));
 	const shot = await Promise.allSettled(
 		reloaded.board.cells
@@ -484,15 +490,23 @@ export async function boardState(env: Env, repoName: string) {
 	const [skills, branches] = await Promise.all([listSkills(tree), WorkingTree.listBranches(remote, "cell/")]);
 	using repo = await env.ARTIFACTS.get(repoName);
 	const log = await repo.log({ ref: "main", limit: 40 });
+	const current = new Map((JSON.parse(await tree.read("characters.json")) as Character[]).map((c) => [c.name, c.look]));
+	// A take is stale if a character in its cell looked different when it was shot
+	const staleFor = (names: string[], thenJson: string) => {
+		const then = new Map((JSON.parse(thenJson) as Character[]).map((c) => [c.name, c.look]));
+		return names.some((n) => then.get(n) !== current.get(n));
+	};
 
 	const takes = await Promise.all(
 		branches.map(async (branch) => {
 			const cell = branch.split("/")[1];
-			const [prompt, renderMeta, critic, continuity] = await Promise.all([
+			const [prompt, renderMeta, critic, continuity, characters] = await Promise.all([
 				repo.readFile({ ref: branch, path: `cells/${cell}/prompt.md` }).then((b) => b?.text()),
 				readJson(repo, branch, `cells/${cell}/render.json`),
 				readJson(repo, branch, `cells/${cell}/review.json`),
 				readJson(repo, branch, `cells/${cell}/continuity.json`),
+				// The bible's characters as they were when this take branched from main
+				repo.readFile({ ref: branch, path: "characters.json" }).then((b) => b?.text()),
 			]);
 			return {
 				cell,
@@ -504,6 +518,8 @@ export async function boardState(env: Env, repoName: string) {
 				adherence: critic?.adherence?.score,
 				framing: critic?.framing?.choice,
 				continuity: continuity && { ok: continuity.ok, issues: continuity.issues },
+				// Shot and judged against characters that have since changed: its verdict no longer holds
+				stale: characters !== undefined && staleFor(board.cells.find((c) => c.id === cell)?.characters ?? [], characters),
 			};
 		}),
 	);

@@ -55,7 +55,19 @@ Run on the noir test board ("Night Drive"):
 Found and fixed during the run: Clef-flash gave cell 03 only 0.33 even though the recast driver is in it,
 so any cell listing a changed character is now always re-shot (Clef decides the less obvious ones).
 
-`npm test` runs unit tests for the `{{Name}}` look insertion (`src/looks.ts`).
+## Testing
+
+Three layers, each tied to the decisions in [docs/decisions.md](../docs/decisions.md):
+
+| Layer | Command | What it covers | Cost |
+|---|---|---|---|
+| Unit | `npm test` | Pure modules: look insertion, CSV, notes log, skill parsing, router request, continuity rules (including recorded Clef answers), and Git behaviour of takes and prints on an in-memory repo | free, offline; runs in `deploy.sh` |
+| Eval | `npm run eval` | The router and continuity decisions in `test/evals/cases.json`, asked of the real models with the requests production builds; fixtures are real frames from the Night Drive board | about a cent; `--record` saves results as evidence |
+| End to end | `scripts/smoke.sh` | A real board through the deployed Worker | a few cents |
+
+The logic the evals exercise lives in dependency-free modules (`src/router.ts`, `src/continuity-rules.ts`,
+`src/vocab.ts`) so production and the evals share one implementation. `npm run eval -- router clef-flash`
+compares a different model on the same cases.
 
 ## Skills
 

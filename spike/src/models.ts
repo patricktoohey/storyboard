@@ -1,74 +1,26 @@
 // The model roles from docs/design.md: director, casting, cinematographer, renderer, critic, continuity.
 // Director, cinematographer and casting take their craft from a skill in the board repo (skills.ts);
 // what stays here is each role's output contract, which code depends on.
+import { continuityQuestions, continuityVerdict } from "./continuity-rules.ts";
 import { insertLooks } from "./looks";
+import { type NoteAction, routerRequest } from "./router.ts";
 import { type Skill, promptTemplate } from "./skills";
+import {
+	type Board,
+	type Cell,
+	type Character,
+	type ClefAnswer,
+	type Reference,
+	AGE_BANDS,
+	AGE_WORDS,
+	SHOT_ORDER,
+	SHOT_SIZES,
+	slug,
+	usesPortraits,
+} from "./vocab.ts";
 
-export const SHOT_SIZES = {
-	EWS: "Extreme wide shot: location dominates, figures tiny",
-	WS: "Wide shot: full body with surroundings",
-	MS: "Medium shot: waist up",
-	CU: "Close-up: face or a single object fills the frame",
-	ECU: "Extreme close-up: a detail such as eyes, hands, text",
-} as const;
-export type ShotSize = keyof typeof SHOT_SIZES;
-const SHOT_ORDER = Object.keys(SHOT_SIZES) as ShotSize[];
-// Shots where a face is the subject: casting portraits are passed as identity references and identity is
-// checked. Wider shots make faces too small to judge, ECUs are details, and in both a head-and-shoulders
-// reference drags the composition toward a medium shot.
-const PORTRAIT_SHOTS: ShotSize[] = ["MS", "CU"];
-export const usesPortraits = (shot: ShotSize) => PORTRAIT_SHOTS.includes(shot);
-
-export const AGE_BANDS = {
-	child: "Under 13",
-	teen: "13 to 19",
-	young_adult: "20 to 35",
-	middle_aged: "36 to 59",
-	elderly: "60 and older",
-} as const;
-export type AgeBand = keyof typeof AGE_BANDS;
-const AGE_ORDER = Object.keys(AGE_BANDS) as AgeBand[];
-const AGE_WORDS: Record<AgeBand, string> = {
-	child: "young child",
-	teen: "teenage",
-	young_adult: "young adult",
-	middle_aged: "middle-aged",
-	elderly: "elderly",
-};
-
-export interface Character {
-	name: string;
-	age_band: AgeBand;
-	// Visual description pasted verbatim into every prompt the character appears in
-	look: string;
-}
-
-export interface Cell {
-	id: string;
-	beat: string;
-	shot: ShotSize;
-	camera: string;
-	duration_s: number;
-	characters: string[];
-}
-
-export interface Board {
-	title: string;
-	bible: string;
-	characters: Character[];
-	cells: Cell[];
-}
-
-/** A character's casting portrait: the identity anchor for rendering and for continuity checks. */
-export interface Reference {
-	character: Character;
-	path: string;
-	// <512px JPEG: flux-2 reference inputs must be smaller than 512x512
-	jpeg: Uint8Array;
-	previewBase64: string;
-}
-
-export const slug = (name: string) => name.toLowerCase().replace(/[^a-z0-9]+/g, "_");
+export * from "./vocab.ts";
+export { NOTE_ACTIONS, type NoteAction } from "./router.ts";
 
 // Workers AI errors worth retrying: 3040 out of capacity, 3043 internal error, 3030 output flagged by the
 // safety filter (often a false positive; only worth retrying with a new seed, so image calls pass it)
@@ -248,10 +200,16 @@ export async function render(env: Env, cell: Cell, prompt: string, references: R
 		: framed;
 	// 1344x576 is close to 2.39:1 anamorphic and divisible by 16
 	const { bytes: source, seed, attempts } = await runImageModel(env, anchored, { width: 1344, height: 576, references: refs });
-	const [frame, preview] = await Promise.all([encode(env, source, "image/webp"), encode(env, source, "image/webp", 384)]);
+	// 384px for the per-frame critic; 640px for continuity, where hair and clothing need to be legible
+	const [frame, preview, detail] = await Promise.all([
+		encode(env, source, "image/webp"),
+		encode(env, source, "image/webp", 384),
+		encode(env, source, "image/webp", 640),
+	]);
 	return {
 		frame,
 		previewBase64: toBase64(preview),
+		detailBase64: toBase64(detail),
 		meta: {
 			model: env.RENDER_MODEL,
 			seed,
@@ -265,8 +223,6 @@ export async function render(env: Env, cell: Cell, prompt: string, references: R
 		},
 	};
 }
-
-type ClefAnswer = { noul?: number; choice?: string; score?: number; probabilities?: Record<string, number> };
 
 async function clef(env: Env, state: unknown, images: string[], questions: Record<string, unknown>, model: string = env.CLEF_MODEL) {
 	const started = Date.now();
@@ -304,83 +260,33 @@ export async function review(env: Env, cell: Cell, prompt: string, webpBase64: s
 }
 
 /**
- * Continuity critic. Checks the frame against the bible: each character's age and look, and (when
- * faces are big enough) identity against the casting portrait. Also flags framing far from the plan.
- * The per-cell critic can't catch these: it only sees its own prompt, which may itself be wrong.
+ * Continuity critic. Checks the frame against the bible: each character's age and look; hair and outerwear
+ * colour compared between the frame and the casting portrait; identity against the portrait when faces
+ * are big enough; and framing against the plan. The per-cell critic can't catch these: it only sees its
+ * own prompt, which may itself be wrong. The rules live in continuity-rules.ts.
  */
 export async function checkContinuity(
 	env: Env,
 	cell: Cell,
 	refs: Reference[],
-	previewBase64: string,
+	detailBase64: string,
 	framing: ClefAnswer | undefined,
 ) {
-	const issues: string[] = [];
-	const seenShot = framing?.choice as ShotSize | undefined;
-	if (seenShot && Math.abs(SHOT_ORDER.indexOf(seenShot) - SHOT_ORDER.indexOf(cell.shot)) > 1) {
-		issues.push(`framing reads as ${seenShot} but the shot is ${cell.shot} (${SHOT_SIZES[cell.shot]})`);
+	const characters = refs.map((r) => r.character);
+	if (!characters.length) {
+		const { ok, issues } = continuityVerdict(cell, [], {}, framing);
+		return { ok, issues, checked: "framing only: no characters in frame" };
 	}
-	if (!refs.length) return { ok: issues.length === 0, issues, checked: "framing only: no characters in frame" };
-
-	const state = { beat: cell.beat, characters: Object.fromEntries(refs.map((r) => [r.character.name, r.character.look])) };
-	const images = [previewBase64];
-	const questions: Record<string, unknown> = {};
-	const faces = usesPortraits(cell.shot);
-	for (const r of refs) {
-		const c = r.character;
-		questions[`age.${slug(c.name)}`] = {
-			type: "choice",
-			instructions: `Find the person in the first image who is most likely \`characters.${c.name}\`. What is their apparent age?`,
-			criteria: AGE_BANDS,
-		};
-		questions[`look.${slug(c.name)}`] = {
-			type: "noul",
-			instructions: `Does the first image show a person matching \`characters.${c.name}\` (age, hair, build and wardrobe)?`,
-		};
-		if (faces && images.length < 4) {
-			images.push(r.previewBase64);
-			questions[`identity.${slug(c.name)}`] = {
-				type: "noul",
-				instructions: `Image ${images.length} is the casting portrait of \`characters.${c.name}\`. Is that same individual (same face, age and hair) in the first image?`,
-			};
-		}
-	}
-
-	const { answers, elapsed_ms } = await clef(env, state, images, questions);
-	for (const r of refs) {
-		const c = r.character;
-		const seen = answers[`age.${slug(c.name)}`]?.choice as AgeBand | undefined;
-		// Adjacent bands pass: "late 50s" reading as elderly is not a continuity break
-		if (seen && Math.abs(AGE_ORDER.indexOf(seen) - AGE_ORDER.indexOf(c.age_band)) > 1) {
-			issues.push(`${c.name} reads as ${AGE_WORDS[seen]} but should be ${AGE_WORDS[c.age_band]}`);
-		}
-		const look = answers[`look.${slug(c.name)}`]?.noul ?? 1;
-		if (look < 0.5) issues.push(`${c.name} does not match "${c.look}" (p=${look.toFixed(2)})`);
-		const identity = answers[`identity.${slug(c.name)}`]?.noul;
-		if (identity !== undefined && identity < 0.5) {
-			issues.push(`${c.name} is not the same person as in the casting portrait (p=${identity.toFixed(2)})`);
-		}
-	}
-	return { ok: issues.length === 0, issues, identity_checked: faces, model: env.CLEF_MODEL, elapsed_ms, answers };
+	const asked = continuityQuestions(cell, characters);
+	const images = [detailBase64, ...refs.slice(0, asked.checked.length).map((r) => r.previewBase64)];
+	const { answers, elapsed_ms } = await clef(env, asked.state, images, asked.questions);
+	const verdict = continuityVerdict(cell, characters, answers, framing);
+	return { ...verdict, identity_checked: asked.identityChecked, model: env.CLEF_MODEL, elapsed_ms, answers };
 }
 
-export const NOTE_ACTIONS = {
-	reseed: "The shot is right as described; only this particular render is off (a glitch, odd face, bad hands). Render the same prompt again",
-	rewrite_prompt: "Change this shot only: framing, angle, action, light, props, or what is in the frame",
-	edit_bible: "Change something shared across shots: a character's look, age or wardrobe, the palette, time of day, or a location",
-	no_op: "Praise, a question, or nothing to change",
-} as const;
-export type NoteAction = keyof typeof NOTE_ACTIONS;
-
-/** Notes router (Clef-flash): which agent should act on a note. Probabilities are kept for the commit. */
 export async function routeNote(env: Env, note: string, cell: Cell, prompt: string | undefined, characters: Character[]) {
-	const { answers, elapsed_ms } = await clef(
-		env,
-		{ note, shot: { beat: cell.beat, size: cell.shot, prompt: prompt ?? "(not shot yet)" }, characters },
-		[],
-		{ action: { type: "choice", instructions: "What change does the director's `note` ask for?", criteria: NOTE_ACTIONS } },
-		env.CLEF_ROUTER_MODEL,
-	);
+	const { state, questions } = routerRequest(note, cell, prompt, characters);
+	const { answers, elapsed_ms } = await clef(env, state, [], questions, env.CLEF_ROUTER_MODEL);
 	const a = answers.action;
 	return {
 		action: (a?.choice ?? "rewrite_prompt") as NoteAction,
@@ -400,7 +306,8 @@ characters. Change only what the note asks for and keep everything else word for
 
 ## Output contract
 Reply with ONLY a JSON object:
-{"summary": string,   // one sentence: what changed
+{"changed": boolean, // false if the bible and characters already say what the note asks for
+ "summary": string,   // one sentence: what changed
  "bible": string,     // the full markdown style bible: ## Look and ## Locations sections only
  "characters": [{"name": string, "age_band": one of ${Object.keys(AGE_BANDS).join("|")}, "look": string}]}`;
 	const user = `NOTE: ${note}
@@ -410,11 +317,12 @@ ${bible}
 
 CURRENT CHARACTERS:
 ${JSON.stringify(characters, null, 2)}`;
-	const out = extractJson<{ summary: string; bible: string; characters: Character[] }>(
+	const out = extractJson<{ changed?: boolean; summary: string; bible: string; characters: Character[] }>(
 		await chat(env, skill.metadata.model ?? env.DIRECTOR_MODEL, system, user),
 	);
 	const known = new Map(characters.map((c) => [c.name, c]));
 	return {
+		changed: out.changed !== false,
 		summary: out.summary,
 		bible: out.bible,
 		// Names are keys across the repo (portraits, cells); the director may not add or rename characters here

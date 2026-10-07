@@ -1,0 +1,90 @@
+{
+  "characters": {
+    "Driver": { "name": "Driver", "age_band": "middle_aged", "look": "58-year-old woman, round face, grey hair in a bun, medium build, yellow oilskin coat" },
+    "Driver (before recast)": { "name": "Driver", "age_band": "middle_aged", "look": "38-year-old woman, round face, short black hair, medium build, yellow raincoat" },
+    "Passenger": { "name": "Passenger", "age_band": "middle_aged", "look": "42-year-old man, gaunt face, balding brown hair, tall build, black leather jacket" }
+  },
+  "router": [
+    {
+      "decision": "D5",
+      "why": "Misrouted to edit_bible in the browser review (p=0.62): recast the driver and re-shot three cells for nothing",
+      "note": "The driver here still looks like her old casting. She should match the current bible: 58, grey hair in a bun.",
+      "characters": ["Driver", "Passenger"],
+      "expect": "match_bible"
+    },
+    {
+      "decision": "D5",
+      "why": "A real bible change: the bible still says 38 with black hair",
+      "note": "The driver should be older, late fifties, with grey hair in a bun",
+      "characters": ["Driver (before recast)", "Passenger"],
+      "expect": "edit_bible"
+    },
+    {
+      "decision": "D5",
+      "why": "Changes a character's wardrobe everywhere",
+      "note": "Make the passenger's jacket red instead of black",
+      "characters": ["Driver", "Passenger"],
+      "expect": "edit_bible"
+    },
+    {
+      "decision": "D5",
+      "why": "Framing for this shot only",
+      "note": "Shoot this from the back seat, over the passenger's shoulder",
+      "characters": ["Driver", "Passenger"],
+      "expect": "rewrite_prompt"
+    },
+    {
+      "decision": "D5",
+      "why": "The frame is wrong, the bible is right; routed to edit_bible (p=0.77) before match_bible existed",
+      "note": "His jacket here looks brown, it should be the black leather one",
+      "characters": ["Driver", "Passenger"],
+      "expect": "match_bible"
+    },
+    {
+      "decision": "D5",
+      "why": "Praise; routed to match_bible (p=0.40) by the first match_bible wording",
+      "note": "Love this one",
+      "characters": ["Driver", "Passenger"],
+      "expect": "no_op"
+    },
+    {
+      "decision": "D5",
+      "why": "A glitch, not a change",
+      "note": "Her hands look melted, just render it again",
+      "characters": ["Driver", "Passenger"],
+      "expect": "reseed"
+    }
+  ],
+  "continuity": [
+    {
+      "decision": "D7",
+      "why": "The old driver against the recast portrait. Same-person scored 0.53 (a pass); the hair attribute must catch it",
+      "frame": "night-drive-03-old-driver.jpg",
+      "shot": "CU",
+      "beat": "The passenger leans forward, his face inches from the driver's ear",
+      "characters": ["Driver", "Passenger"],
+      "portraits": ["portrait-driver.jpg", "portrait-passenger.jpg"],
+      "expect": { "ok": false, "issue": "Driver's hair" }
+    },
+    {
+      "decision": "D7",
+      "why": "The recast driver: must pass, or retakes loop forever",
+      "frame": "night-drive-03-recast-driver.jpg",
+      "shot": "CU",
+      "beat": "The passenger leans forward, his face inches from the driver's ear",
+      "characters": ["Driver", "Passenger"],
+      "portraits": ["portrait-driver.jpg", "portrait-passenger.jpg"],
+      "expect": { "ok": true }
+    },
+    {
+      "decision": "D7",
+      "why": "A wide shot from behind: faces barely visible, attributes must not false-fail",
+      "frame": "night-drive-04-back-seat.jpg",
+      "shot": "WS",
+      "beat": "The cab stops at a red light, the driver's eyes fixed on the passenger",
+      "characters": ["Driver", "Passenger"],
+      "portraits": ["portrait-driver.jpg", "portrait-passenger.jpg"],
+      "expect": { "ok": true }
+    }
+  ]
+}

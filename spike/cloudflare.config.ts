@@ -21,8 +21,9 @@ export default defineConfig({
 			RENDER_MODEL: bindings.text("@cf/black-forest-labs/flux-2-klein-9b"),
 			// clef (27B) for image critique; clef-flash is for fast text-only routing
 			CLEF_MODEL: bindings.text("clef"),
-			// Text-only routing decisions on the hot path: which agent handles a note, which cells a change affects
-			CLEF_ROUTER_MODEL: bindings.text("clef-flash"),
+			// Routing decisions: which agent handles a note, which cells a change affects. clef, not clef-flash:
+			// on the router eval (test/evals) clef scored 7/7 at p>=0.83, clef-flash 6/7 (docs/decisions.md D10)
+			CLEF_ROUTER_MODEL: bindings.text("clef"),
 			// Bearer token callers must send; the workers.dev URL is public and every board spends AI credits
 			SPIKE_KEY: bindings.secret(),
 			ARTIFACTS: bindings.artifacts({

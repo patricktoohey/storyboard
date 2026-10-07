@@ -11,7 +11,10 @@ function fsError(code: string, path: string) {
 }
 
 class MemoryStats {
-	constructor(private entry: Entry) {}
+	private entry: Entry;
+	constructor(entry: Entry) {
+		this.entry = entry;
+	}
 	get size() {
 		return this.entry.kind === "file" ? this.entry.data.byteLength : 0;
 	}

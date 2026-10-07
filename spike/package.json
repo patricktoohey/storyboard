@@ -10,7 +10,8 @@
     "check": "tsc --noEmit",
     "test": "node --experimental-strip-types --test \"test/*.test.ts\"",
     "setup": "scripts/setup.sh",
-    "smoke": "scripts/smoke.sh"
+    "smoke": "scripts/smoke.sh",
+    "eval": "node --experimental-strip-types test/evals/run.ts"
   },
   "devDependencies": {
     "@cloudflare/vite-plugin": "^2.0.0-beta.sha-52b0dc0e9",

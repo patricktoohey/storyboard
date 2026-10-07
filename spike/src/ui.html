@@ -59,7 +59,7 @@ main { padding: 20px; max-width: 1500px; margin: 0 auto; }
 .take.sel { border-color: var(--text); }
 .take .n { position: absolute; left: 3px; bottom: 3px; font-size: 10px; background: rgba(0,0,0,.7); padding: 0 5px; border-radius: 4px; }
 .take .dot { position: absolute; right: 4px; top: 4px; width: 8px; height: 8px; border-radius: 50%; }
-.dot.ok { background: var(--ok); } .dot.bad { background: var(--bad); } .dot.wip { background: var(--accent); animation: pulse 1s infinite alternate; }
+.dot.ok { background: var(--ok); } .dot.bad { background: var(--bad); } .dot.stale { background: var(--muted); } .dot.wip { background: var(--accent); animation: pulse 1s infinite alternate; }
 @keyframes pulse { to { opacity: .3; } }
 .prompt { font-size: 12px; color: var(--muted); max-height: 7.5em; overflow: auto; border-left: 2px solid var(--line); padding-left: 8px; }
 .issues { font-size: 12px; color: var(--bad); }
@@ -242,7 +242,9 @@ function render() {
 function cellHtml(cell) {
   const t = currentTake(cell);
   const printedHere = t && t.take === cell.printed;
-  const cont = t?.continuity ? (t.continuity.ok ? `<span class="pill ok">continuity ok</span>` : `<span class="pill bad">continuity break</span>`) : t ? `<span class="pill">shooting…</span>` : "";
+  const cont = !t ? "" : !t.continuity ? `<span class="pill">shooting…</span>`
+    : t.stale ? `<span class="pill" title="This take was judged against characters that have since changed">before bible change</span>`
+    : t.continuity.ok ? `<span class="pill ok">continuity ok</span>` : `<span class="pill bad">continuity break</span>`;
   const styleOpts = state.skills.available.filter((k) => k.role === "cinematographer").map((k) => `<option value="${esc(k.name)}" ${k.name === state.skills.chosen.cinematographer ? "selected" : ""}>${esc(k.style)}</option>`).join("");
   return `
   <article class="cell ${busyCells.has(cell.id) ? "busy" : ""}" data-cell="${cell.id}">
@@ -264,16 +266,16 @@ function cellHtml(cell) {
         <button class="take ${t && k.take === t.take ? "sel" : ""}" data-take="${k.take}" title="${esc(k.branch)}">
           ${k.done ? `<img data-ref="${esc(k.branch)}" data-path="cells/${cell.id}/frame.webp" alt="">` : `<div class="ph"></div>`}
           <span class="n">${k.take}${k.take === cell.printed ? " ★" : ""}</span>
-          <span class="dot ${!k.done ? "wip" : k.continuity?.ok ? "ok" : "bad"}"></span>
+          <span class="dot ${!k.done ? "wip" : k.stale ? "stale" : k.continuity?.ok ? "ok" : "bad"}"></span>
         </button>`).join("")}</div>
-      ${t?.continuity && !t.continuity.ok ? `<div class="issues">${t.continuity.issues.map(esc).join("<br>")}</div>` : ""}
+      ${t?.continuity && !t.continuity.ok && !t.stale ? `<div class="issues">${t.continuity.issues.map(esc).join("<br>")}</div>` : ""}
       ${t?.prompt ? `<div class="prompt">${esc(t.prompt)}</div>` : ""}
       <div class="row">
         ${t && t.done && !printedHere ? `<button class="primary" data-act="print">Print take ${t.take}</button>` : ""}
         <select data-style>${styleOpts}</select>
         <button data-act="retake">Retake</button>
       </div>
-      ${cell.notes ? `<div class="notes">${esc(cell.notes.replace(/^# Notes.*\n+/, ""))}</div>` : ""}
+      ${cell.notes ? `<div class="notes">${esc(cell.notes.replace(/^# Notes.*\n+/, "").replace(/\*\*/g, ""))}</div>` : ""}
       <div class="row"><textarea rows="2" data-note placeholder="Note on this shot, e.g. “her coat should be red” or “move the camera lower”">${esc(drafts[cell.id] || "")}</textarea></div>
       <div class="row"><button data-act="note">Send note</button><span class="status">${esc(cellStatus[cell.id] || "")}</span></div>
     </div>

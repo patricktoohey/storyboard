@@ -1,0 +1,65 @@
+{
+  "suite": "router",
+  "model": "clef-flash",
+  "at": "2026-10-07T12:06:27.968Z",
+  "passed": 6,
+  "total": 7,
+  "rows": [
+    {
+      "decision": "D5",
+      "case": "The driver here still looks like her old casting. She should match the current bible: 58, grey hair in a bun.",
+      "expected": "match_bible",
+      "got": "match_bible",
+      "pass": true,
+      "detail": "match_bible=0.55 edit_bible=0.31"
+    },
+    {
+      "decision": "D5",
+      "case": "The driver should be older, late fifties, with grey hair in a bun",
+      "expected": "edit_bible",
+      "got": "edit_bible",
+      "pass": true,
+      "detail": "edit_bible=0.87 match_bible=0.07"
+    },
+    {
+      "decision": "D5",
+      "case": "Make the passenger's jacket red instead of black",
+      "expected": "edit_bible",
+      "got": "edit_bible",
+      "pass": true,
+      "detail": "edit_bible=0.82 match_bible=0.07"
+    },
+    {
+      "decision": "D5",
+      "case": "Shoot this from the back seat, over the passenger's shoulder",
+      "expected": "rewrite_prompt",
+      "got": "rewrite_prompt",
+      "pass": true,
+      "detail": "rewrite_prompt=0.92 edit_bible=0.02"
+    },
+    {
+      "decision": "D5",
+      "case": "His jacket here looks brown, it should be the black leather one",
+      "expected": "match_bible",
+      "got": "edit_bible",
+      "pass": false,
+      "detail": "edit_bible=0.50 match_bible=0.38"
+    },
+    {
+      "decision": "D5",
+      "case": "Love this one",
+      "expected": "no_op",
+      "got": "no_op",
+      "pass": true,
+      "detail": "no_op=0.90 rewrite_prompt=0.05"
+    },
+    {
+      "decision": "D5",
+      "case": "Her hands look melted, just render it again",
+      "expected": "reseed",
+      "got": "reseed",
+      "pass": true,
+      "detail": "reseed=0.88 match_bible=0.05"
+    }
+  ]
+}
