@@ -20,6 +20,39 @@ POST /boards {"concept": "...", "cells": 3}
 
 Every agent commits under its own author name, so `git log` shows who did what.
 
+## Skills
+
+Agents take their instructions (and model) from `skills/<role>/SKILL.md` in the board repo; the seeds are
+in [`/skills`](../skills). Boards fork `storyboard-template`, which is created from the seeds on first use.
+
+```sh
+# Edit a role on one board; later takes on that board use it
+curl -X PUT $URL/boards/$REPO/skills/cinematographer -H "$AUTH" -H "x-message: Low camera, headroom for titles" \
+  --data-binary @my-cinematographer.md
+# Retake a cell with the board's current skills (optionally with a note for the cinematographer)
+curl -X POST $URL/boards/$REPO/cells/02/takes -H "$AUTH" -d '{"note": "she should be in the doorway"}'
+# Share it: new boards will start with this version
+curl -X POST $URL/boards/$REPO/skills/cinematographer/promote -H "$AUTH"
+```
+
+Tested 2026-10-07: after adding "camera low, leave the upper third as empty sky" to the cinematographer
+skill on one board, the retake of cell 02 recorded `cinematographer@844da01` (take 1: `@892fc29`), its prompt
+ended "the upper third of the frame empty sky", and the frame matched. Promote created a commit on the
+template with a `From: <board>@<commit>` trailer; promoting again was a no-op.
+
+## Review a board locally
+
+Critic and continuity output lives on the **take branches** of the board repo (`cell/NN/take-K`), not
+on main. This clones a board with every take as a local branch and prints a per-take summary:
+
+```sh
+STORYBOARD_URL=https://storyboard-spike.<subdomain>.workers.dev scripts/clone-board.sh <repo>
+#   TAKE               SKILL                      ADHERENCE CONTINUITY
+#   cell/02/take-1     cinematographer@892fc29    2.79      ok
+#   cell/02/take-2     cinematographer@844da01    2.81      ok
+cd boards/<repo> && git show cell/02/take-2:cells/02/continuity.json
+```
+
 ## Setup (uses the `cf` CLI, no wrangler)
 
 Needs the Workers Paid plan (Artifacts beta).

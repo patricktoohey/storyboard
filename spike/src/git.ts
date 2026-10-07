@@ -60,6 +60,24 @@ export class WorkingTree {
 		return (await this.fs.promises.readFile(`${DIR}/${path}`, "utf8")) as string;
 	}
 
+	async readBytes(path: string) {
+		return (await this.fs.promises.readFile(`${DIR}/${path}`)) as Uint8Array;
+	}
+
+	async exists(path: string) {
+		return this.fs.promises.stat(`${DIR}/${path}`).then(
+			() => true,
+			() => false,
+		);
+	}
+
+	/** Branch names on the remote under a prefix, e.g. "cell/03/" -> ["cell/03/take-1", ...] */
+	static async listBranches(remote: Remote, prefix: string) {
+		const auth = new WorkingTree(new MemoryFS(), remote).auth;
+		const refs = await git.listServerRefs({ http, url: remote.url, prefix: `refs/heads/${prefix}`, onAuth: auth });
+		return refs.map((r) => r.ref.replace(/^refs\/heads\//, ""));
+	}
+
 	async commit(agent: Agent, message: string, files: Files) {
 		for (const [path, data] of Object.entries(files)) {
 			await this.fs.promises.writeFile(`${DIR}/${path}`, data);

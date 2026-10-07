@@ -1,4 +1,7 @@
 // The model roles from docs/design.md: director, casting, cinematographer, renderer, critic, continuity.
+// Director, cinematographer and casting take their craft from a skill in the board repo (skills.ts);
+// what stays here is each role's output contract, which code depends on.
+import { type Skill, promptTemplate } from "./skills";
 
 export const SHOT_SIZES = {
 	EWS: "Extreme wide shot: location dominates, figures tiny",
@@ -100,17 +103,20 @@ function extractJson<T>(text: string): T {
 	return JSON.parse(text.slice(start, end + 1)) as T;
 }
 
-export async function direct(env: Env, concept: string, cellCount: number): Promise<Board> {
-	const system = `You are a film director planning a storyboard. Reply with ONLY a JSON object:
+export async function direct(env: Env, skill: Skill, concept: string, cellCount: number): Promise<Board> {
+	const system = `${skill.body}
+
+## Output contract
+Reply with ONLY a JSON object:
 {"title": string,
  "bible": string,  // markdown style bible with two sections: ## Look (format, palette, light, lenses) and ## Locations
  "characters": [{"name": string, "age_band": one of ${Object.keys(AGE_BANDS).join("|")},
                  "look": string}],  // under 30 words of visual facts only, starting with exact age and sex ("58-year-old woman, ..."), then face, hair, build, wardrobe
  "cells": [{"beat": string, "shot": one of ${SHOT_ORDER.join("|")}, "camera": string, "duration_s": number,
             "characters": [names of characters visible in the frame]}]}
-Write exactly ${cellCount} cells. A beat is one plain sentence of what happens. Vary shot sizes.`;
+Write exactly ${cellCount} cells.`;
 	const board = extractJson<Omit<Board, "cells"> & { cells: Omit<Cell, "id">[] }>(
-		await chat(env, env.DIRECTOR_MODEL, system, concept),
+		await chat(env, skill.metadata.model ?? env.DIRECTOR_MODEL, system, concept),
 	);
 	const characters = (board.characters ?? []).map((c) => {
 		const age_band = c.age_band in AGE_BANDS ? c.age_band : "young_adult";
@@ -155,23 +161,34 @@ export function insertLooks(prompt: string, cast: Character[]) {
 	return out.replace(/\{\{[^}]*\}\}/g, "");
 }
 
-export async function cinematograph(env: Env, bible: string, cast: Character[], cell: Cell, continuityNote?: string) {
+export async function cinematograph(
+	env: Env,
+	skill: Skill,
+	bible: string,
+	cast: Character[],
+	cell: Cell,
+	continuityNote?: string,
+) {
 	const castLines = cast.map((c) => `- {{${c.name}}}`).join("\n");
-	const system = `You are a cinematographer writing a text-to-image prompt for one storyboard frame.
-Lead with the framing (${cell.shot}: ${SHOT_SIZES[cell.shot]}), then lens, angle, subject and action, setting, light, palette, texture.
+	const system = `${skill.body}
+
+## Output contract
+This frame is a ${cell.shot}: ${SHOT_SIZES[cell.shot]}.
 ${
 	cast.length
 		? `Characters in this frame. Refer to each ONLY by its placeholder, exactly as written, never possessive; it is replaced with the full description:
 ${castLines}`
 		: "No characters are visible in this frame; do not add people."
 }
-Reply with ONLY the prompt, one paragraph, under 120 words.
+Reply with ONLY the prompt text.
 
-STYLE BIBLE:
+## Style bible
 ${bible}`;
 	const brief = [`Beat: ${cell.beat}`, `Camera: ${cell.camera}`];
 	if (continuityNote) brief.push(`The previous take was rejected: ${continuityNote}. Fix that.`);
-	const draft = (await chat(env, env.CINEMATOGRAPHER_MODEL, system, brief.join("\n"))).trim().replace(/^"|"$/g, "");
+	const draft = (await chat(env, skill.metadata.model ?? env.CINEMATOGRAPHER_MODEL, system, brief.join("\n")))
+		.trim()
+		.replace(/^"|"$/g, "");
 	return insertLooks(draft, cast);
 }
 
@@ -227,15 +244,19 @@ async function runImageModelOnce(env: Env, prompt: string, opts: RenderOptions &
 export const randomSeed = () => Math.floor(Math.random() * 2 ** 31);
 
 /** Casting agent: one neutral portrait per character, rendered before any cell. */
-export async function cast(env: Env, character: Character): Promise<Reference & { webp: Uint8Array }> {
-	const prompt = `Character reference portrait, head and shoulders, facing camera, neutral expression, plain mid-grey studio background, soft even light, photographic. ${character.look}.`;
+export async function cast(env: Env, skill: Skill, character: Character): Promise<Reference & { webp: Uint8Array }> {
+	const prompt = promptTemplate(skill).replace("{{look}}", character.look);
 	const { bytes: source } = await runImageModel(env, prompt, { width: 768, height: 768 });
-	const [webp, jpeg, preview] = await Promise.all([
-		encode(env, source, "image/webp"),
-		encode(env, source, "image/jpeg", 496),
-		encode(env, source, "image/webp", 384),
-	]);
-	return { character, path: `bible/refs/${slug(character.name)}.webp`, webp, jpeg, previewBase64: toBase64(preview) };
+	const [webp, reference] = await Promise.all([encode(env, source, "image/webp"), portraitReference(env, character, source)]);
+	return { ...reference, webp };
+}
+
+export const portraitPath = (character: Character) => `bible/refs/${slug(character.name)}.webp`;
+
+/** Turns a portrait (fresh from casting, or read back from the repo) into render and Clef inputs. */
+export async function portraitReference(env: Env, character: Character, image: Uint8Array): Promise<Reference> {
+	const [jpeg, preview] = await Promise.all([encode(env, image, "image/jpeg", 496), encode(env, image, "image/webp", 384)]);
+	return { character, path: portraitPath(character), jpeg, previewBase64: toBase64(preview) };
 }
 
 export async function render(env: Env, cell: Cell, prompt: string, references: Reference[]) {

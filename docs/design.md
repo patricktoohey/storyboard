@@ -97,6 +97,24 @@ User concept ──► Director ──► storyboard.csv + cells/*/beat.md + bib
 4. **Alternate cut**: fork the board; a second set of agents re-renders it in a new style,
    in parallel with the first.
 
+## 3b. Skills: roles that evolve with the board
+
+Each role's craft lives in the board as `skills/<role>/SKILL.md` ([Agent Skills](https://agentskills.io) format:
+YAML frontmatter + markdown, so the same files work in other agent tools). Markdown suits *behaviour*:
+prose the model follows, that a person can edit and review as a diff. JSON/CSV stay for *data* that
+code and Clef consume (`characters.json`, `review.json`, `continuity.json`).
+
+- **What a skill controls**: the role's instructions and its model (`metadata.model`), so choosing a model
+  and tuning a role are the same act, versioned together.
+- **What stays in code**: each role's output contract (JSON shape, `{{Name}}` placeholders), the look
+  insertion, and the continuity checks. A bad skill edit gives worse frames, never a broken pipeline.
+- **Provenance**: every agent commit carries a `Skill: cinematographer@<blob id>` trailer.
+- **Sharing**: `storyboard-template` is the skills library; every board is an Artifacts **fork** of it.
+  A skill edited on a board (`PUT /boards/:repo/skills/:role`) affects later takes on that board only;
+  `POST .../promote` copies it back to the template so new boards inherit it.
+- **Next**: a coach agent that proposes skill edits from recurring notes ("third note asking for more
+  headroom"), reviewed like a pull request; critic and continuity thresholds as skills too.
+
 ## 4. Where Clef / Clef-flash fit
 
 Clef doesn't generate anything. It returns **calibrated probabilities for typed questions**

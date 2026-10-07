@@ -25,3 +25,5 @@ on changes*, and the brief says not to build "GitHub with agents added on top". 
 - [docs/competition-plan.md](docs/competition-plan.md): scope and a day-by-day plan to Oct 14, plus the demo video script
 - [docs/cloudflare-notes.md](docs/cloudflare-notes.md): API facts gathered so far (Artifacts binding, Clef schema, model IDs)
 - [examples/lighthouse-keeper/](examples/lighthouse-keeper/): a hand-written sample storyboard repo showing the file layout
+- [skills/](skills/): the agent skills (director, cinematographer, casting) that seed every board
+- [spike/](spike/): the working Worker; see its README for routes, findings, and `scripts/clone-board.sh`
