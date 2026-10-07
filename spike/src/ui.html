@@ -92,6 +92,9 @@ table.lb th { color: var(--muted); font-weight: 500; font-size: 12px; }
 .bar > i { display: block; height: 100%; background: var(--accent); }
 .strip { display: flex; gap: 4px; margin-top: 6px; }
 .strip img, .strip .ph { width: 74px; aspect-ratio: 1344/576; object-fit: cover; border-radius: 3px; background: var(--panel-2); }
+.replay-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.85); z-index: 20; display: grid; place-items: center; padding: 16px; }
+.replay-box { width: min(1280px, 100%); display: grid; gap: 10px; }
+.replay-box canvas, .replay-box video { width: 100%; aspect-ratio: 16 / 9; background: #000; border-radius: 8px; }
 .teams { display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: 16px; margin-top: 16px; }
 dialog { background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: var(--radius); max-width: 520px; width: calc(100% - 32px); }
 dialog::backdrop { background: rgba(0,0,0,.6); }
@@ -306,7 +309,7 @@ function renderArena() {
   const rows = a.leaderboard.map((r, i) => {
     const t = team(r.team);
     const status = t.submission ? (t.submission.cut ? `submitted cut ${t.submission.cut}` : "no submission") : t.lastAction;
-    return `<tr><td>${i + 1}</td><td><b>${esc(r.team)}</b>${r.disqualified ? ` <span class="pill bad">${esc(r.disqualified)}</span>` : ""}<br><span class="small muted">${esc(t.showrunner)} · ${esc(t.cinematographer)}</span>${t.crew ? `<br><span class="small muted">crew: ${esc(Object.values(t.crew).join(" · "))}</span>` : `<br><span class="small muted">crew: drafting…</span>`}</td>
+    return `<tr><td>${i + 1}</td><td><b>${esc(r.team)}</b>${r.disqualified ? ` <span class="pill bad">${esc(r.disqualified)}</span>` : ""}<br><span class="small muted">${esc(t.showrunner)} · ${esc(t.cinematographer)}</span>${t.crew ? `<br><span class="small muted">crew: ${esc(Object.values(t.crew).join(" · "))}</span>` : `<br><span class="small muted">crew: ${t.turns ? "default (no draft)" : "drafting…"}</span>`}</td>
       <td><b>${r.score.toFixed(2)}</b></td>${judges.map((j) => `<td>${r.byJudge[j] != null ? r.byJudge[j].toFixed(2) : "–"}</td>`).join("")}
       <td>$${t.spent.toFixed(2)} / $${a.rules.budget_usd}<div class="bar"><i style="width:${Math.min(100, (t.spent / a.rules.budget_usd) * 100)}%"></i></div></td>
       <td>${t.turns}</td><td class="small">${esc(status)}${t.openJobs ? `<br><span class="muted">${t.openJobs} job(s) running</span>` : ""}</td></tr>`;
@@ -315,7 +318,8 @@ function renderArena() {
     <section class="panel">
       <div class="arena-head"><span class="clock">${esc(clock)}</span><h2 style="margin:0">${esc(a.rules.brief)}</h2></div>
       <div class="small muted">${a.teams.length} teams · $${a.rules.budget_usd} each · ${a.rules.cells} cells · video required · ${a.closed ? "final scores" : "live scores"} · <code>${esc(a.arena)}</code>
-        ${!a.closed && !left ? ` · <button id="closeArena">Close now</button>` : ""}</div>
+        ${!a.closed && !left ? ` · <button id="closeArena">Close now</button>` : ""}
+        · <button id="openReplay">Replay</button></div>
       <table class="lb" style="margin-top:12px"><tr><th>#</th><th>team</th><th>score</th>${judges.map((j) => `<th>${esc(j.replace("judge-", ""))}</th>`).join("")}<th>spent</th><th>turns</th><th>now</th></tr>${rows}</table>
     </section>
     <div class="layout" style="margin-top:16px">
@@ -327,8 +331,187 @@ function renderArena() {
     </div>`;
   document.querySelectorAll("img[data-repo]").forEach(async (el) => { const u = await frameOf(el.dataset.repo, "main", el.dataset.path); if (u) el.src = u; });
   document.querySelectorAll("[data-open]").forEach((el) => (el.onclick = (e) => { e.preventDefault(); clearInterval(arenaTimer); arena = null; $("#boards").value = el.dataset.open; openBoard(el.dataset.open); }));
+  $("#openReplay").onclick = () => openReplay(a.arena);
   const close = $("#closeArena");
   if (close) close.onclick = async () => { close.disabled = true; await api(`/arenas/${a.arena}/close`, { method: "POST", body: "{}" }).catch(console.error); };
+}
+
+// ── Replay: the arena rebuilt from Git history, drawn on a canvas, optionally recorded ─────────────
+async function openReplay(name) {
+  clearInterval(arenaTimer);
+  const tl = await api(`/arenas/${name}/timeline`);
+  const overlay = document.createElement("div");
+  overlay.className = "replay-overlay";
+  overlay.innerHTML = `<div class="replay-box">
+    <canvas id="rc" width="1280" height="720"></canvas>
+    <div class="row"><button class="primary" id="rplay">Play</button><button id="rrec">Record and save to the arena</button>
+      ${tl.replays.map((b) => `<button data-replay="${esc(b)}">Watch ${esc(b)}</button>`).join("")}
+      <span class="spacer"></span><span class="small muted" id="rstatus">${tl.events.length} events from ${tl.rules.teams.length} boards and the arena</span><button id="rclose">Close</button></div></div>`;
+  document.body.appendChild(overlay);
+  const status = (t) => ($("#rstatus").textContent = t);
+  $("#rclose").onclick = () => { overlay.remove(); openArena(name); };
+  overlay.querySelectorAll("[data-replay]").forEach((b) => (b.onclick = async () => {
+    const url = await frameOf(name, b.dataset.replay, "replay.webm") || await frameOf(name, b.dataset.replay, "replay.mp4");
+    const v = document.createElement("video"); v.src = url; v.controls = true; v.autoplay = true;
+    $("#rc").replaceWith(v); v.id = "rc";
+  }));
+  status("Loading frames…");
+  const player = await buildReplay(tl, $("#rc"));
+  status(`${tl.events.length} events · ~${Math.round(player.duration)}s`);
+  $("#rplay").onclick = () => player.play();
+  $("#rrec").onclick = async () => {
+    const type = ["video/mp4;codecs=avc1", "video/webm;codecs=vp9", "video/webm"].find((t) => MediaRecorder.isTypeSupported(t));
+    const rec = new MediaRecorder($("#rc").captureStream(30), { mimeType: type, videoBitsPerSecond: 1_500_000 });
+    const chunks = [];
+    rec.ondataavailable = (e) => e.data.size && chunks.push(e.data);
+    const done = new Promise((r) => (rec.onstop = r));
+    rec.start(1000);
+    status("Recording…");
+    await player.play();
+    rec.stop(); await done;
+    const blob = new Blob(chunks, { type: type.split(";")[0] });
+    status(`Uploading ${(blob.size / 1e6).toFixed(1)} MB…`);
+    const res = await fetch(`/arenas/${name}/replay`, { method: "POST", headers: { authorization: `Bearer ${key}`, "content-type": blob.type }, body: blob });
+    const out = await res.json();
+    status(res.ok ? `Saved to ${out.branch}/${out.file} in ${name}` : `Upload failed: ${out.error}`);
+  };
+}
+
+/** Loads every frame the timeline needs, then returns a player that draws it at a compressed pace. */
+async function buildReplay(tl, canvas) {
+  const ctx = canvas.getContext("2d");
+  const W = 1280, H = 720;
+  const teams = tl.rules.teams.map((t) => t.team);
+  const boardOf = Object.fromEntries(tl.rules.teams.map((t) => [t.team, t.board]));
+  const styleOf = Object.fromEntries(tl.rules.teams.map((t) => [t.team, `${t.showrunner.replace("showrunner-", "")} · ${t.cinematographer}`]));
+  const load = (url) => new Promise((r) => { if (!url) return r(null); const im = new Image(); im.onload = () => r(im); im.onerror = () => r(null); im.src = url; });
+  const images = {};
+  for (const e of tl.events.filter((x) => x.frames)) {
+    for (const f of e.frames) {
+      const k = `${e.team}|${f.ref}|${f.cell}`;
+      images[k] = await load(await frameOf(boardOf[e.team], f.ref, `cells/${f.cell}/frame.webp`));
+    }
+  }
+  // The winner's film for the finale: its submitted cut's clips, in EDL order
+  const finals = tl.events.filter((e) => e.kind === "final");
+  const submitted = new Set(tl.events.filter((e) => e.kind === "submit" && /\(cut /.test(e.text)).map((e) => e.team));
+  const total = (sc) => Object.values(sc || {}).reduce((a, b) => a + b, 0) / Math.max(1, Object.keys(sc || {}).length);
+  const ranked = finals.filter((f) => submitted.has(f.team)).sort((a, b) => total(b.scores) - total(a.scores));
+  const winner = ranked[0]?.team;
+  let clips = [];
+  if (winner) {
+    const cut = /\(cut (v\d+)\)/.exec(tl.events.find((e) => e.kind === "submit" && e.team === winner).text)[1];
+    const edl = await fetch(`/boards/${boardOf[winner]}/file?ref=cut/${cut}&path=video/edl.csv`, { headers: { authorization: `Bearer ${key}` } }).then((r) => r.text());
+    const files = edl.trim().split("\n").slice(1).map((l) => l.split(",")[5]);
+    for (const f of files) {
+      const url = await frameOf(boardOf[winner], `cut/${cut}`, f);
+      const v = document.createElement("video"); v.src = url; v.muted = true; v.playsInline = true; v.preload = "auto";
+      clips.push(v);
+    }
+  }
+
+  // Pace: quick for takes, longer for decisions, prints and scores
+  const hold = { take: 0.6, turn: 1.8, print: 2.2, score: 1.6, final: 2.2, submit: 1.8, cut: 1.6, plan: 1.2, draft: 1.6, failed: 2.2, start: 2.5, close: 2.0 };
+  const steps = tl.events.map((e) => ({ e, d: hold[e.kind] ?? 1 }));
+  const finaleBoard = 5;
+  const duration = steps.reduce((a, b) => a + b.d, 0) + finaleBoard + clips.length * 5;
+  const t0 = tl.events[0]?.t ?? 0;
+
+  function wrap(text, x, y, width, lineH, maxLines) {
+    const words = String(text).split(" "); let line = ""; let n = 0;
+    for (const w of words) {
+      const test = line ? `${line} ${w}` : w;
+      if (ctx.measureText(test).width > width && line) { ctx.fillText(line, x, y + n * lineH); line = w; if (++n >= maxLines) return; }
+      else line = test;
+    }
+    if (n < maxLines) ctx.fillText(line, x, y + n * lineH);
+  }
+
+  function drawState(st, upto, ticker) {
+    ctx.fillStyle = "#121214"; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = "#f2b544"; ctx.font = "600 26px system-ui"; ctx.fillText("STORYBOARD ARENA", 32, 48);
+    ctx.fillStyle = "#ececf1"; ctx.font = "20px system-ui"; wrap(tl.rules.brief, 300, 46, 760, 24, 1);
+    const el = Math.max(0, upto - t0);
+    ctx.fillStyle = "#f2b544"; ctx.font = "600 26px ui-monospace, monospace"; ctx.textAlign = "right";
+    ctx.fillText(`T+${Math.floor(el / 60)}:${String(el % 60).padStart(2, "0")}`, W - 32, 48); ctx.textAlign = "left";
+    const colW = (W - 64 - 2 * 24) / 3;
+    teams.forEach((team, i) => {
+      const x = 32 + i * (colW + 24), y = 80, s = st[team];
+      ctx.fillStyle = "#1b1b1f"; ctx.fillRect(x, y, colW, 520);
+      ctx.fillStyle = "#ececf1"; ctx.font = "600 22px system-ui"; ctx.fillText(team, x + 16, y + 34);
+      ctx.fillStyle = "#9a9aa6"; ctx.font = "14px system-ui"; wrap(styleOf[team], x + 16, y + 56, colW - 190, 16, 1);
+      const sc = s.scores; ctx.textAlign = "right";
+      ctx.fillStyle = sc ? "#ececf1" : "#9a9aa6"; ctx.font = "600 30px system-ui"; ctx.fillText(sc ? total(sc).toFixed(2) : "–", x + colW - 16, y + 40);
+      ctx.font = "13px system-ui"; ctx.fillStyle = "#9a9aa6";
+      ctx.fillText(sc ? Object.entries(sc).map(([k, v]) => `${k} ${v.toFixed(2)}`).join(" · ") : "not scored", x + colW - 16, y + 60); ctx.textAlign = "left";
+      // 2x2 printed frames
+      const fw = (colW - 48) / 2, fh = fw * 576 / 1344;
+      for (let k = 0; k < 4; k++) {
+        const fx = x + 16 + (k % 2) * (fw + 16), fy = y + 80 + Math.floor(k / 2) * (fh + 16);
+        const f = s.frames[k]; const im = f && images[`${team}|${f.ref}|${f.cell}`];
+        if (im) ctx.drawImage(im, fx, fy, fw, fh); else { ctx.fillStyle = "#24242a"; ctx.fillRect(fx, fy, fw, fh); }
+        if (f) { ctx.fillStyle = "rgba(0,0,0,.6)"; ctx.fillRect(fx, fy, 70, 20); ctx.fillStyle = "#ececf1"; ctx.font = "12px system-ui"; ctx.fillText(`${f.cell} · take ${f.take}`, fx + 6, fy + 14); }
+      }
+      const by = y + 80 + 2 * (fh + 16) + 8;
+      ctx.fillStyle = s.flash > 0 ? "#f2b544" : "#ececf1"; ctx.font = "15px system-ui"; wrap(s.last || "waiting for the brief", x + 16, by + 16, colW - 32, 20, 6);
+      ctx.fillStyle = "#9a9aa6"; ctx.font = "13px system-ui";
+      ctx.fillText(`turns ${s.turns} · takes ${s.takes} · prints ${s.prints}`, x + 16, y + 500);
+      if (s.badge) { ctx.textAlign = "right"; ctx.fillStyle = s.badge.color; ctx.font = "600 13px system-ui"; ctx.fillText(s.badge.text, x + colW - 16, y + 500); ctx.textAlign = "left"; }
+    });
+    ctx.fillStyle = "#1b1b1f"; ctx.fillRect(32, 616, W - 64, 80);
+    ctx.font = "14px system-ui";
+    ticker.slice(-3).forEach((line, i) => { ctx.fillStyle = i === ticker.slice(-3).length - 1 ? "#ececf1" : "#9a9aa6"; ctx.fillText(line.slice(0, 150), 48, 640 + i * 22); });
+  }
+
+  async function play() {
+    const st = Object.fromEntries(teams.map((t) => [t, { frames: [], scores: null, last: "", turns: 0, takes: 0, prints: 0, flash: 0, badge: null }]));
+    const ticker = [];
+    for (const { e, d } of steps) {
+      const s = e.team && st[e.team];
+      if (s) {
+        if (e.kind === "print") { s.frames = e.frames; s.prints++; }
+        if (e.kind === "score" || e.kind === "final") s.scores = e.scores;
+        if (e.kind === "turn") s.turns++;
+        if (e.kind === "take") s.takes++;
+        if (e.kind === "submit") s.badge = /\(cut /.test(e.text) ? { text: "SUBMITTED", color: "#5fc48a" } : { text: "NO VIDEO", color: "#ef6a5b" };
+        if (e.kind !== "take") { s.last = e.text; s.flash = 1; }
+      }
+      ticker.push(`${e.team ? e.team + ": " : ""}${e.text}`);
+      const until = performance.now() + d * 1000;
+      while (performance.now() < until) { drawState(st, e.t, ticker); await new Promise((r) => requestAnimationFrame(r)); }
+      if (s) s.flash = 0;
+    }
+    // Final leaderboard
+    const order = ranked.map((f) => f.team).concat(teams.filter((t) => !ranked.some((f) => f.team === t)));
+    let until = performance.now() + finaleBoard * 1000;
+    while (performance.now() < until) {
+      ctx.fillStyle = "#121214"; ctx.fillRect(0, 0, W, H);
+      ctx.fillStyle = "#f2b544"; ctx.font = "600 34px system-ui"; ctx.fillText("Final results", 80, 120);
+      order.forEach((team, i) => {
+        const sc = finals.find((f) => f.team === team)?.scores;
+        ctx.fillStyle = "#ececf1"; ctx.font = "600 30px system-ui"; ctx.fillText(`${i + 1}. ${team}`, 80, 210 + i * 80);
+        ctx.font = "22px system-ui"; ctx.fillStyle = submitted.has(team) ? "#ececf1" : "#ef6a5b";
+        ctx.fillText(submitted.has(team) ? `${total(sc).toFixed(2)}  (${Object.entries(sc || {}).map(([k, v]) => `${k} ${v.toFixed(2)}`).join(", ")})` : "disqualified: no video submitted", 420, 210 + i * 80);
+      });
+      await new Promise((r) => requestAnimationFrame(r));
+    }
+    // The winner's film
+    for (const [i, v] of clips.entries()) {
+      v.currentTime = 0; await v.play().catch(() => {});
+      until = performance.now() + Math.min(5, v.duration || 5) * 1000;
+      while (performance.now() < until && !v.ended) {
+        ctx.fillStyle = "#000"; ctx.fillRect(0, 0, W, H);
+        const r = (v.videoWidth / v.videoHeight) || 16 / 9, dh = W / r;
+        ctx.drawImage(v, 0, (H - dh) / 2, W, dh);
+        ctx.fillStyle = "rgba(0,0,0,.6)"; ctx.fillRect(24, 24, 420, 40);
+        ctx.fillStyle = "#f2b544"; ctx.font = "600 20px system-ui"; ctx.fillText(`${winner}'s film · shot ${i + 1}/${clips.length}`, 40, 51);
+        await new Promise((r) => requestAnimationFrame(r));
+      }
+      v.pause();
+    }
+  }
+  drawState(Object.fromEntries(teams.map((t) => [t, { frames: [], scores: null, last: "", turns: 0, takes: 0, prints: 0 }])), t0, [tl.rules.brief]);
+  return { play, duration };
 }
 
 async function openBoard(repo) {

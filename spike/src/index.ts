@@ -23,12 +23,14 @@
 //   POST /boards/:repo/token                   short-lived read token + remote URL, for `git clone`
 //   POST /arenas                               {"brief", "minutes"?, "budget"?, "cells"?, "teams"?} -> arena + team boards, first turns queued
 //   GET  /arenas, GET /arenas/:id/state        arenas; rules, teams, spend, scores, leaderboard, arena log
+//   GET  /arenas/:id/timeline                  the arena rebuilt from Git history (replay.ts); POST /arenas/:id/replay stores a recording
 //   POST /arenas/:id/close                     after the deadline: record submissions, queue the final round (cron does this too)
 //   POST /sweep                                mark jobs with no progress for 10 minutes failed (also runs every 5 minutes)
 //   POST /template[?reset=1]                   create the template / add newly bundled skills (reset: overwrite with bundled)
 // Every route except GET / requires `Authorization: Bearer $SPIKE_KEY`.
 import { addNote, boardState, chooseSkill, editSkill, listBoards, printTake, startBoard, startCut } from "./board";
 import { arenaState, closeArena, createArena, listArenas } from "./arena";
+import { arenaTimeline, saveReplay } from "./replay";
 import { consume } from "./consumer";
 import { ledger, submit, sweep } from "./coordinator";
 import { WorkingTree } from "./git";
@@ -88,6 +90,14 @@ export default {
 				}
 				if (method === "GET" && action === "state") return Response.json(await arenaState(env, repoName));
 				if (method === "POST" && action === "close") return Response.json(await closeArena(env, repoName));
+				if (method === "GET" && action === "timeline") return Response.json(await arenaTimeline(env, repoName));
+				if (method === "POST" && action === "replay") {
+					// The browser's recording of the replay, committed to the arena on replay/rN
+					const type = request.headers.get("content-type") ?? "video/webm";
+					const video = new Uint8Array(await request.arrayBuffer());
+					const timeline = await arenaTimeline(env, repoName);
+					return Response.json(await saveReplay(env, repoName, video, type, timeline.events));
+				}
 			}
 			// Checks one video model's adapter on an existing printed frame: renders, downloads, discards
 			if (method === "POST" && root === "debug" && repoName === "animate") {
@@ -170,7 +180,7 @@ export default {
 					if (!path) return Response.json({ error: "path is required" }, { status: 400 });
 					const blob = await repo.readFile({ ref, path });
 					if (!blob) return new Response("not found", { status: 404 });
-					const type = path.endsWith(".webp") ? "image/webp" : path.endsWith(".mp4") ? "video/mp4" : blob.type || "text/plain;charset=utf-8";
+					const type = path.endsWith(".webp") ? "image/webp" : path.endsWith(".mp4") ? "video/mp4" : path.endsWith(".webm") ? "video/webm" : blob.type || "text/plain;charset=utf-8";
 					// Never cache: main and in-progress take branches move, and a cached frame once showed the
 					// previous take under the new take's label
 					return new Response(blob, { headers: { "content-type": type, "cache-control": "no-store" } });

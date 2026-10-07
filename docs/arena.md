@@ -322,7 +322,9 @@ What it showed:
 - Skills alone produced three distinct behaviours from one brief and budget, and the deadline mandate
   worked: the auteur was forced to cut 7.5 minutes out, and its clips were assembled with 4 minutes to spare.
 - The auteur's notes didn't move its scores (2.16 live before, 2.15 after): it repeated a note that kept
-  failing continuity. See "Showrunners repeat notes" above.
+  failing continuity, and kept choosing "note" over "print" even after cell 04 had a passing take. Its
+  improvements (cell 04 take 20) reached main only when the deadline mandate forced a print, too late to
+  matter. See "Showrunners repeat notes" above.
 - A failure mode the design missed: a turn killed mid-run (cloning ~15 to 20 MB of video to create a
   submission ref) ended the team's turn chain. Fixed after the run: submissions read the cut's commit ID from
   the API, and a failed or interrupted turn still queues the next one.
@@ -330,3 +332,14 @@ What it showed:
   the same commits (Clef is deterministic). The rubric needs sharper criteria, or comparative judging (rank
   the boards side by side), to make the leaderboard meaningful.
 - Estimated total spend $7.43 for the three teams, about half of it video.
+
+## Replays
+
+An arena can be replayed from its Git history alone (`src/replay.ts`, `GET /arenas/:id/timeline`): turns and
+job outcomes from each team's `jobs` branch, plans and prints (with the frames printed at each commit) from
+each team's main, scores, submissions and the close from the arena. The arena page's **Replay** button
+draws the timeline on a 1280×720 canvas (three team columns with their printed frames, scores and latest
+decision; a ticker of events; the final leaderboard; then the winner's film) and can record it with the
+browser's MediaRecorder. The recording is committed to the arena on an orphan branch `replay/rN`.
+
+The first arena's replay is `replay/r1/replay.mp4` in `arena-2026-10-07-afb12e`: 129 s, 15.8 MB, 79 events.

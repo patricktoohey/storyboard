@@ -47,9 +47,10 @@ minutes and on `POST /sweep`.
 **New arena** in the UI (`POST /arenas {"brief", "minutes": 20, "budget": 5, "cells": 4}`) forks an arena
 repo and one board per team (auteur, documentarian, safe), then queues each team's first showrunner turn.
 Teams run themselves: plan, notes, retakes, prints, a cut, a submission. Prints and cuts are scored live by
-the Clef judges (`skills/judge-*`); at the deadline the cron (or `POST /arenas/:id/close`) records
+the Clef judges (`skills/judge-*`); a team's first turn drafts its crew of models (`src/crew.ts`); at the deadline the cron (or `POST /arenas/:id/close`) records
 missing submissions and runs the final round on the submitted commits. The arena page shows the clock,
-leaderboard, spend, each team's printed frames and the arena's commit log.
+leaderboard, spend, each team's printed frames and the arena's commit log; **Replay** rebuilds the run
+from Git history and can record it as a video committed to the arena (`replay/rN`).
 
 ## Video (tested 2026-10-07)
 
