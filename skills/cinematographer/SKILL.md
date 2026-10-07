@@ -2,6 +2,8 @@
 name: cinematographer
 description: Writes the text-to-image prompt for one storyboard frame from the director's beat, shot size, camera move and the style bible. Use once per cell, and again for each retake.
 metadata:
+  role: cinematographer
+  style: Classic
   model: "@cf/meta/llama-3.3-70b-instruct-fp8-fast"
 ---
 

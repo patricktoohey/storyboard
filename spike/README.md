@@ -20,6 +20,43 @@ POST /boards {"concept": "...", "cells": 3}
 
 Every agent commits under its own author name, so `git log` shows who did what.
 
+## Review UI
+
+Open the Worker URL (`https://storyboard-spike.<subdomain>.workers.dev/`) and paste `SPIKE_KEY` from
+`.env` when asked; it's kept in that browser's localStorage. The UI lists boards, creates new ones
+(with a cinematographer style), and for each cell shows the printed frame, every take as a thumbnail
+(green/red dot = continuity ok/break, ★ = printed), the prompt, continuity issues, and the cell's notes.
+Per cell you can **print** a take, **retake** in any style, or **send a note**. The sidebar is `main`'s
+git log, so you can watch the agents commit.
+
+## Notes, printing, styles (Day 2/3, tested 2026-10-07)
+
+- **Notes** (`POST /boards/:repo/cells/:id/notes`): the note is committed to `cells/NN/notes.md` on main,
+  then Clef-flash routes it: `reseed` (same prompt, new render), `rewrite_prompt` (cinematographer
+  redoes this cell), `edit_bible` (director revises bible/characters, casting recasts changed characters,
+  Clef-flash picks the affected cells, which re-shoot in parallel), or `no_op`. Every later take of a cell
+  is briefed with all of that cell's notes, so a bible change doesn't undo "shoot from the back seat".
+- **Printing** (`POST .../print {"take": 2}`) merges the take branch into main (cell files + the
+  `storyboard.csv` status). A new board ends with one octopus merge, "Print first cut".
+- **Styles**: several skills can fill a role (`metadata.role`); `cinematographer-noir` and
+  `cinematographer-documentary` ship alongside the classic one. `board.json` holds each board's choice
+  (`POST .../roles/:role`), and any take can use another style (`{"skill": "cinematographer-noir"}`).
+
+Run on the noir test board ("Night Drive"):
+
+| Action | Result |
+|---|---|
+| Two notes sent at once, on cells 04 and 02 | Both landed on main; no lost commits |
+| "Shoot this from the back seat, over the passenger's shoulder…" | `rewrite_prompt` p=0.89, new take in 8 s |
+| "The driver should be older, late fifties, grey hair in a bun" | `edit_bible` p=0.80; bible + characters revised; Driver recast; blast radius 02 (0.88), 04 (0.90); 04's first retake broke continuity, auto-retake passed |
+| Retake cell 04 in documentary style | Kept the back-seat framing from notes; new driver look |
+| "Love this one, the reflections are perfect" | `no_op` p=0.92, recorded, nothing re-shot |
+
+Found and fixed during the run: Clef-flash gave cell 03 only 0.33 even though the recast driver is in it,
+so any cell listing a changed character is now always re-shot (Clef decides the less obvious ones).
+
+`npm test` runs unit tests for the `{{Name}}` look insertion (`src/looks.ts`).
+
 ## Skills
 
 Agents take their instructions (and model) from `skills/<role>/SKILL.md` in the board repo; the seeds are

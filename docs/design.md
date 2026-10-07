@@ -112,6 +112,9 @@ code and Clef consume (`characters.json`, `review.json`, `continuity.json`).
 - **Sharing**: `storyboard-template` is the skills library; every board is an Artifacts **fork** of it.
   A skill edited on a board (`PUT /boards/:repo/skills/:role`) affects later takes on that board only;
   `POST .../promote` copies it back to the template so new boards inherit it.
+- **Styles**: several skills can fill one role (`metadata.role: cinematographer`, `style: Film noir`).
+  `board.json` picks each role's skill for the board; a single take can use another, so "this cell, but
+  noir" is just another take branch to compare and print.
 - **Next**: a coach agent that proposes skill edits from recurring notes ("third note asking for more
   headroom"), reviewed like a pull request; critic and continuity thresholds as skills too.
 

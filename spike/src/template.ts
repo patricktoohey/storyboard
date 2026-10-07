@@ -3,7 +3,7 @@
 // upstream). Boards evolve their own copies; a skill that proves itself is promoted back here, and
 // boards forked afterwards start with it.
 import { WorkingTree, type Remote } from "./git";
-import { type Role, seedSkills, skillPath } from "./skills";
+import { seedSkills, skillPath } from "./skills";
 
 export const TEMPLATE = "storyboard-template";
 
@@ -20,8 +20,9 @@ export async function repoRemote(env: Env, name: string): Promise<Remote> {
 /**
  * Creates the template on first use. On later calls it adds skills that were bundled after the template
  * was created, but never overwrites one: once created, the template's copies are the canonical library.
+ * `reset` overwrites every bundled skill with the bundled version (an ordinary commit, so revertable).
  */
-export async function ensureTemplate(env: Env) {
+export async function ensureTemplate(env: Env, reset = false) {
 	let tree: WorkingTree;
 	try {
 		tree = await WorkingTree.clone(await repoRemote(env, TEMPLATE), "main");
@@ -37,9 +38,11 @@ export async function ensureTemplate(env: Env) {
 		}
 	}
 	const missing: Record<string, string> = {};
-	for (const [path, text] of Object.entries(seedSkills)) if (!(await tree.exists(path))) missing[path] = text;
+	for (const [path, text] of Object.entries(seedSkills)) {
+		if (!(await tree.exists(path)) || (reset && (await tree.read(path)) !== text)) missing[path] = text;
+	}
 	if (!Object.keys(missing).length) return;
-	await tree.commit({ name: "skills-seed" }, `Seed skills: ${Object.keys(missing).join(", ")}`, missing);
+	await tree.commit({ name: "skills-seed" }, `${reset ? "Reset" : "Seed"} skills: ${Object.keys(missing).join(", ")}`, missing);
 	await tree.push("main");
 }
 
@@ -61,22 +64,22 @@ export async function forkBoard(env: Env, name: string, description: string): Pr
 }
 
 /** Copies a board's version of a skill up to the template. */
-export async function promoteSkill(env: Env, board: string, role: Role) {
+export async function promoteSkill(env: Env, board: string, name: string) {
 	using repo = await env.ARTIFACTS.get(board);
 	const [head] = await repo.log({ ref: "main", limit: 1 });
-	const blob = await repo.readFile({ ref: "main", path: skillPath(role) });
-	if (!blob) throw new Error(`${board} has no ${skillPath(role)}`);
+	const blob = await repo.readFile({ ref: "main", path: skillPath(name) });
+	if (!blob) throw new Error(`${board} has no ${skillPath(name)}`);
 
 	await ensureTemplate(env);
 	const tree = await WorkingTree.clone(await repoRemote(env, TEMPLATE), "main");
 	const text = await blob.text();
-	if ((await tree.exists(skillPath(role))) && (await tree.read(skillPath(role))) === text) {
+	if ((await tree.exists(skillPath(name))) && (await tree.read(skillPath(name))) === text) {
 		return { promoted: false, reason: "template already has this version" };
 	}
 	const sha = await tree.commit(
 		{ name: "skills-curator" },
-		`Promote ${role} skill from ${board}\n\nFrom: ${board}@${head?.hash.slice(0, 7) ?? "main"}`,
-		{ [skillPath(role)]: text },
+		`Promote ${name} skill from ${board}\n\nFrom: ${board}@${head?.hash.slice(0, 7) ?? "main"}`,
+		{ [skillPath(name)]: text },
 	);
 	await tree.push("main");
 	return { promoted: true, template: TEMPLATE, commit: sha };

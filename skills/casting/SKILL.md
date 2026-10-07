@@ -1,6 +1,9 @@
 ---
 name: casting
 description: Renders one neutral reference portrait per character before any frame is drawn. The portraits anchor identity for medium shots and close-ups and for continuity checks.
+metadata:
+  role: casting
+  style: Studio portrait
 ---
 
 # Casting

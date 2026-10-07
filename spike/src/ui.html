@@ -1,0 +1,328 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Storyboard</title>
+<style>
+:root {
+  --bg: #121214; --panel: #1b1b1f; --panel-2: #24242a; --line: #33333b;
+  --text: #ececf1; --muted: #9a9aa6; --accent: #f2b544; --ok: #5fc48a; --bad: #ef6a5b;
+  --radius: 10px;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+button, select, textarea, input { font: inherit; color: inherit; }
+button { background: var(--panel-2); border: 1px solid var(--line); border-radius: 7px; padding: 6px 12px; cursor: pointer; }
+button:hover:not(:disabled) { border-color: var(--accent); }
+button.primary { background: var(--accent); color: #1a1406; border-color: var(--accent); font-weight: 600; }
+button:disabled { opacity: .5; cursor: progress; }
+select, textarea, input { background: var(--panel-2); border: 1px solid var(--line); border-radius: 7px; padding: 6px 8px; }
+textarea { width: 100%; resize: vertical; }
+a { color: var(--accent); }
+header { display: flex; gap: 12px; align-items: center; padding: 12px 20px; border-bottom: 1px solid var(--line); position: sticky; top: 0; background: color-mix(in srgb, var(--bg) 92%, transparent); backdrop-filter: blur(6px); z-index: 5; flex-wrap: wrap; }
+header h1 { font-size: 16px; margin: 0 8px 0 0; letter-spacing: .04em; }
+header h1 span { color: var(--accent); }
+header select { max-width: 340px; }
+.spacer { flex: 1; }
+main { padding: 20px; max-width: 1500px; margin: 0 auto; }
+.muted { color: var(--muted); }
+.small { font-size: 12px; }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px; }
+.board-head { display: grid; grid-template-columns: 1fr auto; gap: 16px; margin-bottom: 18px; }
+.board-head h2 { margin: 0 0 4px; font-size: 22px; }
+.cast { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 10px; }
+.cast figure { margin: 0; display: flex; gap: 8px; align-items: center; max-width: 360px; }
+.cast img { width: 56px; height: 56px; object-fit: cover; border-radius: 50%; border: 2px solid var(--line); background: var(--panel-2); }
+.roles { display: grid; gap: 6px; align-content: start; min-width: 260px; }
+.roles label { display: grid; grid-template-columns: 110px 1fr; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); }
+.layout { display: grid; grid-template-columns: 1fr 300px; gap: 18px; align-items: start; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(380px, 1fr)); gap: 16px; }
+.cell { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; display: flex; flex-direction: column; }
+.cell.busy { border-color: var(--accent); }
+.frame { position: relative; aspect-ratio: 1344 / 576; background: #000; }
+.frame img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.frame .tag { position: absolute; left: 8px; top: 8px; background: rgba(0,0,0,.65); padding: 2px 8px; border-radius: 99px; font-size: 12px; }
+.frame .tag.right { left: auto; right: 8px; }
+.frame .empty { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); }
+.body { padding: 12px; display: grid; gap: 10px; }
+.beat { font-size: 15px; }
+.meta { display: flex; gap: 8px; flex-wrap: wrap; font-size: 12px; color: var(--muted); }
+.pill { border: 1px solid var(--line); border-radius: 99px; padding: 1px 8px; }
+.pill.ok { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 50%, transparent); }
+.pill.bad { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 50%, transparent); }
+.pill.printed { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 60%, transparent); }
+.takes { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 2px; }
+.take { flex: 0 0 auto; width: 92px; border: 2px solid transparent; border-radius: 6px; padding: 0; background: none; position: relative; }
+.take img, .take .ph { width: 100%; aspect-ratio: 1344/576; object-fit: cover; border-radius: 4px; display: block; background: var(--panel-2); }
+.take.sel { border-color: var(--text); }
+.take .n { position: absolute; left: 3px; bottom: 3px; font-size: 10px; background: rgba(0,0,0,.7); padding: 0 5px; border-radius: 4px; }
+.take .dot { position: absolute; right: 4px; top: 4px; width: 8px; height: 8px; border-radius: 50%; }
+.dot.ok { background: var(--ok); } .dot.bad { background: var(--bad); } .dot.wip { background: var(--accent); animation: pulse 1s infinite alternate; }
+@keyframes pulse { to { opacity: .3; } }
+.prompt { font-size: 12px; color: var(--muted); max-height: 7.5em; overflow: auto; border-left: 2px solid var(--line); padding-left: 8px; }
+.issues { font-size: 12px; color: var(--bad); }
+.row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.notes { font-size: 12px; color: var(--muted); white-space: pre-wrap; max-height: 6em; overflow: auto; }
+.status { font-size: 12px; color: var(--accent); min-height: 1.2em; }
+aside.log { position: sticky; top: 70px; max-height: calc(100vh - 90px); overflow: auto; }
+aside.log h3 { margin: 0 0 8px; font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+aside.log li { list-style: none; padding: 5px 0; border-bottom: 1px solid var(--line); font-size: 12px; }
+aside.log ul { padding: 0; margin: 0; }
+aside.log code { color: var(--accent); }
+aside.log b { color: var(--text); font-weight: 600; }
+.newboard { display: grid; gap: 10px; max-width: 720px; }
+dialog { background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: var(--radius); max-width: 520px; width: calc(100% - 32px); }
+dialog::backdrop { background: rgba(0,0,0,.6); }
+@media (max-width: 900px) { .layout { grid-template-columns: 1fr; } .board-head { grid-template-columns: 1fr; } .grid { grid-template-columns: 1fr; } main, header { padding-left: 16px; padding-right: 16px; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>STORY<span>BOARD</span></h1>
+  <select id="boards"><option value="">Loading boards…</option></select>
+  <button id="refresh" title="Reload board">Refresh</button>
+  <button id="new">New board</button>
+  <span class="spacer"></span>
+  <span id="busy" class="small muted"></span>
+  <button id="key" class="small">Key</button>
+</header>
+<main id="main"><p class="muted">Loading…</p></main>
+
+<dialog id="keydlg">
+  <form method="dialog" class="newboard">
+    <h3 style="margin:0">Access key</h3>
+    <p class="muted small" style="margin:0">The <code>SPIKE_KEY</code> from <code>spike/.env</code>. It's stored in this browser only.</p>
+    <input id="keyin" type="password" autocomplete="off" placeholder="SPIKE_KEY">
+    <div class="row"><button class="primary" value="save">Save</button></div>
+  </form>
+</dialog>
+
+<script type="module">
+const $ = (s, el = document) => el.querySelector(s);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+const store = { get: (k) => { try { return localStorage.getItem(k); } catch { return null; } }, set: (k, v) => { try { localStorage.setItem(k, v); } catch {} } };
+
+let key = store.get("storyboard.key") || "";
+let state = null;          // current board state from /state
+let inflight = 0;          // running operations; while > 0 we poll for new takes
+const selected = {};       // cell id -> selected take number
+const busyCells = new Set();
+const cellStatus = {};     // cell id -> status line
+const imgCache = new Map();
+
+async function api(path, opts = {}) {
+  const res = await fetch(path, { ...opts, headers: { authorization: `Bearer ${key}`, ...(opts.body ? { "content-type": "application/json" } : {}), ...(opts.headers || {}) } });
+  if (res.status === 401) { askKey(); throw new Error("unauthorized"); }
+  const type = res.headers.get("content-type") || "";
+  const body = type.includes("json") ? await res.json() : await res.text();
+  if (!res.ok) throw new Error(body?.error || body || res.statusText);
+  return body;
+}
+
+async function img(ref, path, cacheable = true) {
+  const k = `${state?.repo}|${ref}|${path}`;
+  if (cacheable && imgCache.has(k)) return imgCache.get(k);
+  const res = await fetch(`/boards/${state.repo}/file?ref=${encodeURIComponent(ref)}&path=${encodeURIComponent(path)}`, { headers: { authorization: `Bearer ${key}` } });
+  if (!res.ok) return null;
+  const url = URL.createObjectURL(await res.blob());
+  if (cacheable) imgCache.set(k, url);
+  return url;
+}
+
+function askKey() { $("#keyin").value = key; $("#keydlg").showModal(); }
+$("#keydlg").addEventListener("close", () => { key = $("#keyin").value.trim(); store.set("storyboard.key", key); loadBoards(); });
+$("#key").onclick = askKey;
+$("#refresh").onclick = () => state && openBoard(state.repo);
+$("#new").onclick = () => { history.replaceState(null, "", "#"); renderNew(); };
+$("#boards").onchange = (e) => e.target.value ? openBoard(e.target.value) : renderNew();
+
+function setBusy() { $("#busy").textContent = inflight ? `${inflight} operation${inflight > 1 ? "s" : ""} running…` : ""; }
+
+async function run(label, cellIds, fn) {
+  inflight++; setBusy();
+  cellIds.forEach((c) => { busyCells.add(c); cellStatus[c] = label; });
+  render();
+  const poll = setInterval(() => state && refresh(), 4000);
+  try {
+    const out = await fn();
+    return out;
+  } catch (err) {
+    cellIds.forEach((c) => (cellStatus[c] = `Error: ${err.message}`));
+    throw err;
+  } finally {
+    clearInterval(poll);
+    inflight--; setBusy();
+    cellIds.forEach((c) => busyCells.delete(c));
+    if (state) await refresh();
+  }
+}
+
+async function loadBoards() {
+  if (!key) return askKey();
+  const boards = await api("/boards");
+  const sel = $("#boards");
+  sel.innerHTML = `<option value="">— New board —</option>` + boards.map((b) => `<option value="${esc(b.name)}">${esc(b.name.replace("board-", ""))} · ${esc((b.description || "").slice(0, 50))}</option>`).join("");
+  const want = location.hash.slice(1) || boards[0]?.name;
+  if (want) { sel.value = want; openBoard(want); } else renderNew();
+}
+
+async function renderNew() {
+  state = null;
+  $("#boards").value = "";
+  const skills = await api("/skills").catch(() => []);
+  const opts = (role) => skills.filter((s) => s.role === role).map((s) => `<option value="${esc(s.name)}">${esc(s.style)}</option>`).join("");
+  $("#main").innerHTML = `
+    <div class="panel newboard">
+      <h2 style="margin:0">New board</h2>
+      <p class="muted" style="margin:0">A director agent plans the shots, casting renders the characters, then one agent chain per cell shoots in parallel on its own branch.</p>
+      <textarea id="concept" rows="4" placeholder="A lonely lighthouse keeper finds a message in a bottle written in her own handwriting…"></textarea>
+      <div class="row">
+        <label class="small muted">Cells <input id="ncells" type="number" min="1" max="8" value="4" style="width:64px"></label>
+        <label class="small muted">Cinematographer <select id="cine">${opts("cinematographer")}</select></label>
+        <button class="primary" id="create">Create board</button>
+      </div>
+      <div class="status" id="newstatus"></div>
+    </div>`;
+  $("#create").onclick = async () => {
+    const concept = $("#concept").value.trim();
+    if (!concept) return;
+    $("#create").disabled = true;
+    $("#newstatus").textContent = "Directing, casting and shooting… about 30 seconds.";
+    try {
+      const out = await api("/boards", { method: "POST", body: JSON.stringify({ concept, cells: Number($("#ncells").value), skills: { cinematographer: $("#cine").value } }) });
+      location.hash = out.repo;
+      await loadBoards();
+    } catch (err) { $("#newstatus").textContent = `Error: ${err.message}`; $("#create").disabled = false; }
+  };
+}
+
+async function openBoard(repo) {
+  location.hash = repo;
+  $("#main").innerHTML = `<p class="muted">Loading ${esc(repo)}…</p>`;
+  state = { repo };
+  await refresh();
+}
+
+async function refresh() {
+  const next = await api(`/boards/${state.repo}/state`);
+  state = next;
+  render();
+}
+
+function currentTake(cell) {
+  const n = selected[cell.id] ?? cell.printed ?? cell.takes.at(-1)?.take;
+  return cell.takes.find((t) => t.take === n);
+}
+
+const drafts = {};          // cell id -> unsent note text, kept across re-renders while polling
+
+function render() {
+  if (!state?.cells) return;
+  document.querySelectorAll(".cell").forEach((card) => (drafts[card.dataset.cell] = card.querySelector("[data-note]")?.value ?? ""));
+  const s = state;
+  const roleSelect = (role) => `<label>${role}<select data-role="${role}">${s.skills.available.filter((k) => k.role === role).map((k) => `<option value="${esc(k.name)}" ${k.name === s.skills.chosen[role] ? "selected" : ""}>${esc(k.style)} · ${esc(k.version)}</option>`).join("")}</select></label>`;
+  $("#main").innerHTML = `
+    <section class="board-head panel">
+      <div>
+        <h2>${esc(s.title)}</h2>
+        <div class="muted">${esc(s.concept)}</div>
+        <div class="cast">${s.characters.map((c) => `<figure><img data-ref="main" data-path="${esc(c.portrait)}" alt=""><figcaption><b>${esc(c.name)}</b><br><span class="small muted">${esc(c.look)}</span></figcaption></figure>`).join("")}</div>
+      </div>
+      <div class="roles"><span class="small muted">Skills on this board</span>${["director", "cinematographer", "casting"].map(roleSelect).join("")}</div>
+    </section>
+    <div class="layout">
+      <div class="grid">${s.cells.map(cellHtml).join("")}</div>
+      <aside class="log panel"><h3>main</h3><ul>${s.log.map((l) => `<li><code>${esc(l.hash)}</code> <b>${esc(l.author)}</b> ${esc(l.message)}</li>`).join("")}</ul></aside>
+    </div>`;
+  hydrate();
+}
+
+function cellHtml(cell) {
+  const t = currentTake(cell);
+  const printedHere = t && t.take === cell.printed;
+  const cont = t?.continuity ? (t.continuity.ok ? `<span class="pill ok">continuity ok</span>` : `<span class="pill bad">continuity break</span>`) : t ? `<span class="pill">shooting…</span>` : "";
+  const styleOpts = state.skills.available.filter((k) => k.role === "cinematographer").map((k) => `<option value="${esc(k.name)}" ${k.name === state.skills.chosen.cinematographer ? "selected" : ""}>${esc(k.style)}</option>`).join("");
+  return `
+  <article class="cell ${busyCells.has(cell.id) ? "busy" : ""}" data-cell="${cell.id}">
+    <div class="frame">
+      ${t ? `<img data-ref="${esc(t.branch)}" data-path="cells/${cell.id}/frame.webp" data-live="${t.done ? "" : "1"}" alt="">` : `<div class="empty">no takes yet</div>`}
+      <span class="tag">${cell.id} · ${esc(cell.shot)} · ${esc(cell.camera)}</span>
+      ${t ? `<span class="tag right">take ${t.take}${printedHere ? " · printed" : ""}</span>` : ""}
+    </div>
+    <div class="body">
+      <div class="beat">${esc(cell.beat)}</div>
+      <div class="meta">
+        ${cell.printed ? `<span class="pill printed">printed: take ${cell.printed}</span>` : `<span class="pill">not printed</span>`}
+        ${cont}
+        ${t?.adherence != null ? `<span class="pill">adherence ${t.adherence.toFixed(2)}</span>` : ""}
+        ${t?.skill ? `<span class="pill">${esc(t.skill)}</span>` : ""}
+        ${cell.characters.length ? `<span class="pill">${esc(cell.characters.join(", "))}</span>` : ""}
+      </div>
+      <div class="takes">${cell.takes.map((k) => `
+        <button class="take ${t && k.take === t.take ? "sel" : ""}" data-take="${k.take}" title="${esc(k.branch)}">
+          ${k.done ? `<img data-ref="${esc(k.branch)}" data-path="cells/${cell.id}/frame.webp" alt="">` : `<div class="ph"></div>`}
+          <span class="n">${k.take}${k.take === cell.printed ? " ★" : ""}</span>
+          <span class="dot ${!k.done ? "wip" : k.continuity?.ok ? "ok" : "bad"}"></span>
+        </button>`).join("")}</div>
+      ${t?.continuity && !t.continuity.ok ? `<div class="issues">${t.continuity.issues.map(esc).join("<br>")}</div>` : ""}
+      ${t?.prompt ? `<div class="prompt">${esc(t.prompt)}</div>` : ""}
+      <div class="row">
+        ${t && t.done && !printedHere ? `<button class="primary" data-act="print">Print take ${t.take}</button>` : ""}
+        <select data-style>${styleOpts}</select>
+        <button data-act="retake">Retake</button>
+      </div>
+      ${cell.notes ? `<div class="notes">${esc(cell.notes.replace(/^# Notes.*\n+/, ""))}</div>` : ""}
+      <div class="row"><textarea rows="2" data-note placeholder="Note on this shot, e.g. “her coat should be red” or “move the camera lower”">${esc(drafts[cell.id] || "")}</textarea></div>
+      <div class="row"><button data-act="note">Send note</button><span class="status">${esc(cellStatus[cell.id] || "")}</span></div>
+    </div>
+  </article>`;
+}
+
+async function hydrate() {
+  document.querySelectorAll("img[data-path]").forEach(async (el) => {
+    const url = await img(el.dataset.ref, el.dataset.path, !el.dataset.live);
+    if (url) el.src = url;
+  });
+  document.querySelectorAll("select[data-role]").forEach((el) => (el.onchange = async () => {
+    await run(`Switching ${el.dataset.role}…`, [], () => api(`/boards/${state.repo}/roles/${el.dataset.role}`, { method: "POST", body: JSON.stringify({ skill: el.value }) }));
+  }));
+  document.querySelectorAll(".cell").forEach((card) => {
+    const id = card.dataset.cell;
+    const cell = state.cells.find((c) => c.id === id);
+    card.querySelectorAll(".take").forEach((b) => (b.onclick = () => { selected[id] = Number(b.dataset.take); render(); }));
+    card.querySelectorAll("[data-act]").forEach((b) => (b.onclick = async () => {
+      b.disabled = true;
+      const act = b.dataset.act;
+      try {
+        if (act === "print") {
+          const t = currentTake(cell);
+          await run(`Printing take ${t.take}…`, [id], () => api(`/boards/${state.repo}/cells/${id}/print`, { method: "POST", body: JSON.stringify({ take: t.take }) }));
+          cellStatus[id] = `Printed take ${t.take} (merged into main)`;
+        } else if (act === "retake") {
+          const skill = card.querySelector("[data-style]").value;
+          const out = await run("Shooting a new take…", [id], () => api(`/boards/${state.repo}/cells/${id}/takes`, { method: "POST", body: JSON.stringify({ skill }) }));
+          selected[id] = Number(out.takes.at(-1).branch.split("take-")[1]);
+          cellStatus[id] = `New take ${selected[id]} with ${out.takes.at(-1).skill}`;
+        } else if (act === "note") {
+          const note = card.querySelector("[data-note]").value.trim();
+          if (!note) return;
+          drafts[id] = "";
+          card.querySelector("[data-note]").value = "";
+          const out = await run("Routing note…", [id], () => api(`/boards/${state.repo}/cells/${id}/notes`, { method: "POST", body: JSON.stringify({ note }) }));
+          const p = out.route.probabilities[out.route.action] ?? 0;
+          cellStatus[id] = `Routed → ${out.route.action} (p=${p.toFixed(2)})` + (out.blast_radius ? ` · bible changed, re-shot cells ${[id, ...out.blast_radius.affected].filter((v, i, a) => a.indexOf(v) === i).join(", ")}` : "");
+          const mine = Array.isArray(out.takes) ? out.takes.flat().filter((t) => t.branch?.startsWith(`cell/${id}/`)).at(-1) : null;
+          if (mine) selected[id] = Number(mine.branch.split("take-")[1]);
+        }
+      } catch (err) { console.error(err); }
+      finally { render(); }
+    }));
+  });
+}
+
+loadBoards().catch((err) => ($("#main").innerHTML = `<p class="muted">${esc(err.message)}</p>`));
+</script>
+</body>
+</html>

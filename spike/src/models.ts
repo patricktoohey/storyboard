@@ -1,6 +1,7 @@
 // The model roles from docs/design.md: director, casting, cinematographer, renderer, critic, continuity.
 // Director, cinematographer and casting take their craft from a skill in the board repo (skills.ts);
 // what stays here is each role's output contract, which code depends on.
+import { insertLooks } from "./looks";
 import { type Skill, promptTemplate } from "./skills";
 
 export const SHOT_SIZES = {
@@ -138,36 +139,13 @@ Write exactly ${cellCount} cells.`;
 	};
 }
 
-const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-
-/**
- * The image model knows nothing about names, so every character in the frame must be described
- * with its bible `look`, word for word. The LLM writes {{Name}} placeholders; code does the pasting.
- */
-export function insertLooks(prompt: string, cast: Character[]) {
-	let out = prompt;
-	for (const c of cast) {
-		// First mention gets the full look ("{{Maren}}'s face" -> "<look>, whose face"); later ones
-		// stay grammatical without repeating it
-		let first = true;
-		out = out.replace(new RegExp(`\\{\\{\\s*${escapeRegExp(c.name)}\\s*\\}\\}(['’]s\\b)?`, "gi"), (_m, possessive) => {
-			const text = first ? `${c.look}${possessive ? ", whose" : ""}` : `the same person${possessive ? "'s" : ""}`;
-			first = false;
-			return text;
-		});
-		// The model ignored the placeholder: append the look rather than trusting a bare name
-		if (!out.includes(c.look)) out = `${out.replace(/[.\s]+$/, "")}. Featuring ${c.look}.`;
-	}
-	return out.replace(/\{\{[^}]*\}\}/g, "");
-}
-
 export async function cinematograph(
 	env: Env,
 	skill: Skill,
 	bible: string,
 	cast: Character[],
 	cell: Cell,
-	continuityNote?: string,
+	direction?: string,
 ) {
 	const castLines = cast.map((c) => `- {{${c.name}}}`).join("\n");
 	const system = `${skill.body}
@@ -185,7 +163,7 @@ Reply with ONLY the prompt text.
 ## Style bible
 ${bible}`;
 	const brief = [`Beat: ${cell.beat}`, `Camera: ${cell.camera}`];
-	if (continuityNote) brief.push(`The previous take was rejected: ${continuityNote}. Fix that.`);
+	if (direction) brief.push(direction);
 	const draft = (await chat(env, skill.metadata.model ?? env.CINEMATOGRAPHER_MODEL, system, brief.join("\n")))
 		.trim()
 		.replace(/^"|"$/g, "");
@@ -290,16 +268,16 @@ export async function render(env: Env, cell: Cell, prompt: string, references: R
 
 type ClefAnswer = { noul?: number; choice?: string; score?: number; probabilities?: Record<string, number> };
 
-async function clef(env: Env, state: unknown, images: string[], questions: Record<string, unknown>) {
+async function clef(env: Env, state: unknown, images: string[], questions: Record<string, unknown>, model: string = env.CLEF_MODEL) {
 	const started = Date.now();
 	const input = {
-		model: env.CLEF_MODEL,
+		model,
 		state,
 		images: images.map((base64) => ({ content_type: "image/webp", base64 })),
 		questions,
 	};
 	const out = (await withRetry(() =>
-		env.AI.run(`@cf/cloudflare/${env.CLEF_MODEL}` as keyof AiModels, input as never),
+		env.AI.run(`@cf/cloudflare/${model}` as keyof AiModels, input as never),
 	)) as unknown as { answers: Record<string, ClefAnswer> };
 	return { answers: out.answers, elapsed_ms: Date.now() - started };
 }
@@ -384,4 +362,81 @@ export async function checkContinuity(
 		}
 	}
 	return { ok: issues.length === 0, issues, identity_checked: faces, model: env.CLEF_MODEL, elapsed_ms, answers };
+}
+
+export const NOTE_ACTIONS = {
+	reseed: "The shot is right as described; only this particular render is off (a glitch, odd face, bad hands). Render the same prompt again",
+	rewrite_prompt: "Change this shot only: framing, angle, action, light, props, or what is in the frame",
+	edit_bible: "Change something shared across shots: a character's look, age or wardrobe, the palette, time of day, or a location",
+	no_op: "Praise, a question, or nothing to change",
+} as const;
+export type NoteAction = keyof typeof NOTE_ACTIONS;
+
+/** Notes router (Clef-flash): which agent should act on a note. Probabilities are kept for the commit. */
+export async function routeNote(env: Env, note: string, cell: Cell, prompt: string | undefined, characters: Character[]) {
+	const { answers, elapsed_ms } = await clef(
+		env,
+		{ note, shot: { beat: cell.beat, size: cell.shot, prompt: prompt ?? "(not shot yet)" }, characters },
+		[],
+		{ action: { type: "choice", instructions: "What change does the director's `note` ask for?", criteria: NOTE_ACTIONS } },
+		env.CLEF_ROUTER_MODEL,
+	);
+	const a = answers.action;
+	return {
+		action: (a?.choice ?? "rewrite_prompt") as NoteAction,
+		probabilities: a?.probabilities ?? {},
+		model: env.CLEF_ROUTER_MODEL,
+		elapsed_ms,
+	};
+}
+
+/** Director, revising: applies a note to the shared bible and characters. Returns the full new versions. */
+export async function editBible(env: Env, skill: Skill, bible: string, characters: Character[], note: string) {
+	const system = `${skill.body}
+
+## Task
+You are revising an existing plan, not starting over. Apply the director's note to the style bible and
+characters. Change only what the note asks for and keep everything else word for word.
+
+## Output contract
+Reply with ONLY a JSON object:
+{"summary": string,   // one sentence: what changed
+ "bible": string,     // the full markdown style bible: ## Look and ## Locations sections only
+ "characters": [{"name": string, "age_band": one of ${Object.keys(AGE_BANDS).join("|")}, "look": string}]}`;
+	const user = `NOTE: ${note}
+
+CURRENT BIBLE:
+${bible}
+
+CURRENT CHARACTERS:
+${JSON.stringify(characters, null, 2)}`;
+	const out = extractJson<{ summary: string; bible: string; characters: Character[] }>(
+		await chat(env, skill.metadata.model ?? env.DIRECTOR_MODEL, system, user),
+	);
+	const known = new Map(characters.map((c) => [c.name, c]));
+	return {
+		summary: out.summary,
+		bible: out.bible,
+		// Names are keys across the repo (portraits, cells); the director may not add or rename characters here
+		characters: characters.map((c) => {
+			const next = out.characters?.find((n) => n.name === c.name);
+			return next && known.has(next.name)
+				? { ...c, look: next.look || c.look, age_band: next.age_band in AGE_BANDS ? next.age_band : c.age_band }
+				: c;
+		}),
+	};
+}
+
+/** Blast radius (Clef-flash): one yes/no per cell, in a single call. */
+export async function blastRadius(env: Env, change: string, cells: Cell[]) {
+	const state = { change, shots: Object.fromEntries(cells.map((c) => [c.id, { beat: c.beat, characters: c.characters }])) };
+	const questions = Object.fromEntries(
+		cells.map((c) => [
+			`affects.${c.id}`,
+			{ type: "noul", instructions: `Would \`change\` alter what should be visible in shot \`shots.${c.id}\`?` },
+		]),
+	);
+	const { answers, elapsed_ms } = await clef(env, state, [], questions, env.CLEF_ROUTER_MODEL);
+	const p = Object.fromEntries(cells.map((c) => [c.id, answers[`affects.${c.id}`]?.noul ?? 0]));
+	return { affected: cells.filter((c) => p[c.id] >= 0.5).map((c) => c.id), probabilities: p, elapsed_ms };
 }

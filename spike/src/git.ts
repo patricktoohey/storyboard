@@ -71,6 +71,56 @@ export class WorkingTree {
 		);
 	}
 
+	async list(path: string) {
+		return this.fs.promises.readdir(`${DIR}/${path}`).catch(() => [] as string[]);
+	}
+
+	async head() {
+		return git.resolveRef({ fs: this.fs, dir: DIR, ref: "HEAD" });
+	}
+
+	/** Shallow-fetch another branch's tip into this tree's object store; returns its commit id. */
+	async fetchBranch(ref: string) {
+		const { fetchHead } = await git.fetch({
+			fs: this.fs,
+			http,
+			dir: DIR,
+			url: this.remote.url,
+			ref,
+			singleBranch: true,
+			depth: 1,
+			tags: false,
+			onAuth: this.auth,
+		});
+		if (!fetchHead) throw new Error(`branch ${ref} not found`);
+		return fetchHead;
+	}
+
+	/** Files under `prefix` in a commit (e.g. a fetched take), as path -> bytes. */
+	async filesAt(oid: string, prefix: string) {
+		const paths = (await git.listFiles({ fs: this.fs, dir: DIR, ref: oid })).filter((p) => p.startsWith(prefix));
+		const blobs = await Promise.all(paths.map((filepath) => git.readBlob({ fs: this.fs, dir: DIR, oid, filepath })));
+		return Object.fromEntries(paths.map((p, i) => [p, blobs[i].blob]));
+	}
+
+	/**
+	 * Commits with extra parents: a merge. Printing a take merges its branch into main, so the history
+	 * shows which take was printed; printing several takes at once is an octopus merge.
+	 */
+	async merge(agent: Agent, message: string, parents: string[], files: Files) {
+		for (const [path, data] of Object.entries(files)) {
+			await this.fs.promises.writeFile(`${DIR}/${path}`, data);
+			await git.add({ fs: this.fs, dir: DIR, filepath: path });
+		}
+		return git.commit({
+			fs: this.fs,
+			dir: DIR,
+			message,
+			parent: [await this.head(), ...parents],
+			author: { name: agent.name, email: agent.email ?? `${agent.name}@agents.storyboard` },
+		});
+	}
+
 	/** Branch names on the remote under a prefix, e.g. "cell/03/" -> ["cell/03/take-1", ...] */
 	static async listBranches(remote: Remote, prefix: string) {
 		const auth = new WorkingTree(new MemoryFS(), remote).auth;

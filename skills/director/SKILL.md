@@ -2,6 +2,8 @@
 name: director
 description: Turns a short video concept into a storyboard plan with a title, a style bible, a cast of characters, and a shot list. Use at the start of a board, or when the board needs restructuring.
 metadata:
+  role: director
+  style: Classic
   model: "@cf/meta/llama-3.3-70b-instruct-fp8-fast"
 ---
 

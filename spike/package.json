@@ -7,7 +7,8 @@
     "build": "cf build",
     "deploy": "cf deploy",
     "types": "cf workers types",
-    "check": "tsc --noEmit"
+    "check": "tsc --noEmit",
+    "test": "node --experimental-strip-types --test \"test/*.test.ts\""
   },
   "devDependencies": {
     "@cloudflare/vite-plugin": "^2.0.0-beta.sha-52b0dc0e9",
