@@ -418,6 +418,28 @@ final cut, with its provenance in the commit).
 
 Tests: `test/process.test.ts`.
 
+## D35: several ideas for one shot, side by side
+
+The original idea for Artifacts here was advancing several ideas in parallel on branches. The pieces were
+there (every take is its own branch, and a print merges one per shot), but a take was only ever a retry or
+a note's rewrite: nobody could say "shoot shot 3 three different ways". In Season 1, Opus got there by hand:
+its second comparison differed from the saved version only in shot 1, a one-shot test of two ideas.
+
+- **`ideas`**: a lead names two or three ideas for one shot (`{"name", "idea"}`); each becomes a take on its
+  own branch (`cell/03/take-N`), shot in parallel. The idea goes to the cinematographer ("the idea wins
+  where it changes the staging or framing") and onto the branch as `cells/03/idea.md`; the commit says
+  `idea "mirror"`. Retakes keep the idea; a print brings `idea.md` to main, so main says which idea won.
+  Branch names stay `take-N`, so printing, restoring and the board views work unchanged.
+- **Comparing two ideas**: `compare` accepts take branches (`cell/03/take-3`), each judged on a sheet of the
+  shot before, the take and the shot after: the idea in its place.
+- **Hidden from rivals**: the public move is "shot 2 ideas for cell 03"; what they are stays with the team,
+  so rivals don't know which reaches the judges until it prints.
+- **Judged as process**: `ideas` counts as a Git move, and the creative criterion names it.
+- **Season 2's finale**: no elimination and no wildcard. With one team per lab, a Sonnet wildcard could
+  have left two Claude teams in a three-team finale; all three labs now reach it, with protect and steal.
+
+Tests: `test/ideas.test.ts`.
+
 ## Backlog: staging continuity and non-human characters
 
 Observed on the boards so far, not yet addressed:

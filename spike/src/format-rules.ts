@@ -47,6 +47,9 @@ export function publicMove(action: string, args: Record<string, unknown>): strin
 			return `gave a note on cell ${args.cell}`;
 		case "retake":
 			return `re-shot cell ${args.cell}`;
+		case "ideas":
+			// That a team is trying ideas is public; what they are isn't
+			return `shot ${((args.ideas as unknown[]) ?? []).length} ideas for cell ${args.cell}`;
 		case "print":
 			return `printed ${((args.picks as { branch: string }[]) ?? []).map((p) => p.branch).join(", ") || "takes"}`;
 		case "cut":

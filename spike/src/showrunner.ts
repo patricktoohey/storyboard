@@ -44,6 +44,8 @@ Your board is a Git repository, and its history is yours to use. Every take is i
 commit that brings the old content back; nothing is lost, and you can restore forward again), and have the
 judges compare two versions side by side before you choose. Use this: try a bolder direction after saving
 a safe one, compare, keep the better; print an earlier take if a later one is worse; submit the better cut.
+Where one shot isn't coming together, shoot two or three different ideas for it at once (ideas): each is
+its own take branch, compare two of them, and print the one that works.
 
 ## Sound
 A cut is mixed into one film with whatever sound the board has: a score (one music bed for the whole film)
@@ -300,6 +302,7 @@ export async function runTurnJob(env: Env, job: TurnJob, progress: Progress) {
 							: !t.done
 								? "shooting"
 								: t.stale ? "stale (a character changed since)" : t.continuity?.ok ? "continuity ok" : `continuity: ${(t.continuity?.issues ?? []).join("; ")}`,
+						...(t.idea ? { idea: t.idea } : {}),
 						prompt: t.prompt?.slice(0, 300),
 					})),
 			})),
@@ -395,6 +398,13 @@ export async function runTurnJob(env: Env, job: TurnJob, progress: Progress) {
 				await submit(env, board, [{ kind: "take", cell: args.cell as string }]);
 				detail += ` on cell ${args.cell}`;
 				break;
+			case "ideas": {
+				// One take branch per idea, shot in parallel; the lead prints one
+				const ideas = args.ideas as { name: string; text: string }[];
+				await submit(env, board, ideas.map((idea) => ({ kind: "take" as const, cell: args.cell as string, opts: { idea } })));
+				detail += ` on cell ${args.cell}: ${ideas.map((i) => `"${i.name}"`).join(", ")}`;
+				break;
+			}
 			case "print": {
 				const picks = args.picks as { cell: string; branch: string }[];
 				await submit(env, board, [{ kind: "print", picks, message: `Print (showrunner turn ${acted + 1})` }]);

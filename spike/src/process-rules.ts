@@ -5,8 +5,8 @@
 // network note arrives mid-round to give a saved version a reason to exist. Pure: test/process.test.ts.
 import type { Criterion } from "./arena-rules.ts";
 
-/** The moves that use the history; anything else makes or changes the film. */
-export const GIT_MOVES = ["save", "restore", "compare"] as const;
+/** The moves that use the history (ideas: parallel branches for one shot); anything else makes or changes the film. */
+export const GIT_MOVES = ["save", "restore", "compare", "ideas"] as const;
 
 // The process's share of the final ranking: the film still decides most of it
 export const PROCESS_SHARE = 0.25;
@@ -24,7 +24,7 @@ export const PROCESS_RUBRIC: Criterion[] = [
 	{
 		id: "creative",
 		question:
-			"Did the team use its history in a way that shows in the film or that others didn't think of: an earlier take or a rival's version put to work, one branch per idea, a comparison against a rival?",
+			"Did the team use its history in a way that shows in the film or that others didn't think of: several ideas for a shot shot side by side and the best one chosen, an earlier take or a rival's version put to work, a comparison against a rival?",
 		levels: ["None", "Routine", "Some", "Inventive", "Remarkable"],
 	},
 ];

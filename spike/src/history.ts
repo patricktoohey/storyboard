@@ -16,6 +16,7 @@ type Log = { hash: string; authoredAt: number; author: { name: string }; message
 
 export const SAVED = "alt/";
 export const COMPARISONS = "reviews/comparisons.json";
+const TAKE_BRANCH = /^cell\/(\d+)\/take-\d+$/;
 
 async function logOf(env: Env, repo: string, ref: string, limit: number): Promise<Log> {
 	using handle = await env.ARTIFACTS.get(repo);
@@ -34,6 +35,12 @@ export async function resolveVersion(env: Env, board: string, version: string): 
 		const [head] = await logOf(env, board, "main", 1);
 		return { commit: head.hash, label: `main@${head.hash.slice(0, 7)}` };
 	}
+	// A take branch: the board as it was, with that take in its shot (D35)
+	if (TAKE_BRANCH.test(v)) {
+		const [head] = await logOf(env, board, v, 1);
+		if (head) return { commit: head.hash, label: `${v}@${head.hash.slice(0, 7)}` };
+		throw new Error(`no take "${v}"`);
+	}
 	const name = v.startsWith(SAVED) ? v : `${SAVED}${v}`;
 	const [saved] = await logOf(env, board, name, 1);
 	if (saved) return { commit: saved.hash, label: `${name}@${saved.hash.slice(0, 7)}` };
@@ -41,7 +48,7 @@ export async function resolveVersion(env: Env, board: string, version: string): 
 		const found = (await logOf(env, board, "main", 300)).find((c) => c.hash.startsWith(v.toLowerCase()));
 		if (found) return { commit: found.hash, label: found.hash.slice(0, 7) };
 	}
-	throw new Error(`no version "${version}": use a commit from your history, a saved name, or main`);
+	throw new Error(`no version "${version}": use a commit from your history, a saved name, a take (cell/03/take-2), or main`);
 }
 
 /** What the showrunner sees of its history each turn. */
@@ -140,8 +147,18 @@ export async function compareVersions(
 		return { ...found, repo, label: on ? `${on.team_name ?? on.team}:${found.label}` : found.label };
 	};
 	const [va, vb] = await Promise.all([sideOf(a), sideOf(b)]);
-	const sheetOf = async ({ repo, commit }: { repo: string; commit: string }) => {
-		const rows = parseCsv((await (await readAt(env, repo, commit, "storyboard.csv"))?.text()) ?? "").filter((r) => r.take);
+	const sheetOf = async ({ repo, commit, label }: { repo: string; commit: string; label: string }) => {
+		const all = parseCsv((await (await readAt(env, repo, commit, "storyboard.csv"))?.text()) ?? "");
+		// A take is judged in its place: the shot before it, the take, and the shot after
+		const shot = TAKE_BRANCH.exec(label.split("@")[0])?.[1];
+		if (shot) {
+			const at = all.findIndex((r) => r.id === shot);
+			const around = all.slice(Math.max(0, at - 1), at + 2);
+			const sheet = await contactSheet(env, repo, commit, around.map((r) => r.id));
+			if (!sheet) throw new Error(`take ${label} has no frame`);
+			return { sheet, shots: around.map((r) => r.beat) };
+		}
+		const rows = all.filter((r) => r.take);
 		if (!rows.length) throw new Error(`version ${commit.slice(0, 7)} has nothing printed to compare`);
 		const sheet = await contactSheet(env, repo, commit, sampleCells(rows, 4).map((r) => r.id));
 		if (!sheet) throw new Error(`version ${commit.slice(0, 7)} has no frames`);

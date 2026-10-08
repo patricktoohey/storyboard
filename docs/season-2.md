@@ -296,7 +296,9 @@ Roughly four to five days, mostly 1, 3 and 4. Ghost runs come after the season.
 - Season 2 is the teaser brief with sound and dialogue; every agent is named, with a bio and a voice.
 - Llama is replaced by Gemini 3.1 Pro (Nemotron 3 was tried in the dry run and came last); Kimi gets one
   more season with thinking on and longer timeouts.
-- Players are drafted; a blind finale with protect and steal ends the season.
+- Players are drafted; a blind finale with protect and steal ends the season; with three teams, nobody
+  is eliminated and there is no wildcard, so all three labs reach the finale (D35).
+- A lead can shoot several ideas for one shot side by side, each on its own branch (D35).
 - Twists are offered as trades rather than taking time away.
 
 ## Still open

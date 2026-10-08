@@ -17,6 +17,8 @@ export const ACTIONS = {
 		'{"direction": string} Plan the whole board again, in a new direction you describe (a different idea, structure or tone). The current board is saved first as a branch, so you can compare the two and restore either',
 	note: '{"cell": "02", "note": string} Give a director\'s note on one cell, so it is re-shot with the note. Any cell, not only broken ones',
 	retake: '{"cell": "02"} Re-shoot one cell as it is, for a different render',
+	ideas:
+		'{"cell": "03", "ideas": [{"name": "mirror", "idea": "..."}, {"name": "profile", "idea": "..."}]} Two or three different ideas for one shot, shot at the same time, each on its own take branch. Use it where a shot isn\'t coming together or you want options. Rivals see that you tried ideas, not what they are. Print the one you want; compare two takes first ("a": "cell/03/take-3", "b": "cell/03/take-4") to see which plays better beside its neighbours. A take each',
 	print:
 		'{"takes"?: {"02": 1, ...}} Print takes onto the board (a merge). Default: the best finished take of each cell. Name a take per cell to print a specific one, including an earlier take: every take is kept on its own branch',
 	cut: "Make the video: animate every printed frame and assemble a new cut (cut/v1, cut/v2, ...), mixed with whatever sound the board has",
@@ -136,6 +138,8 @@ export function allowedActions(s: BoardSummary): Action[] {
 	// Work may never eat the money the required video needs (a further cut, when one exists)
 	const affordWork = s.spent + s.prices.take + s.prices.turn + videoCost <= s.budget;
 	if (affordWork && s.cells.length) actions.push("note", "retake");
+	// Two ideas at once cost two takes
+	if (s.cells.length && s.spent + 2 * s.prices.take + s.prices.turn + videoCost <= s.budget) actions.push("ideas");
 	// A new plan needs a plan, a take per cell and a cut, and the time to shoot and cut them
 	const replanCost = (s.prices.board ?? 0) + s.cells.length * s.prices.take + videoCost;
 	if (s.prices.board !== undefined && s.spent + replanCost <= s.budget && timeLeft > cutTime + 240) actions.push("replan");
@@ -171,6 +175,18 @@ const str = (v: unknown, max = 400) => (typeof v === "string" && v.trim() ? v.tr
  * Parses and validates a decision. Anything malformed or not allowed is an error, which the caller records
  * (the turn waits): a model never gets to run a tool it wasn't offered, or on a cell that doesn't exist.
  */
+/** Two or three named ideas for a shot; names become short slugs, and a repeated name gets a number. */
+export function parseIdeas(v: unknown): { name: string; text: string }[] {
+	const out: { name: string; text: string }[] = [];
+	for (const x of Array.isArray(v) ? v.slice(0, 3) : []) {
+		const text = str((x as { idea?: unknown })?.idea, 400);
+		let name = (str((x as { name?: unknown })?.name, 30) ?? "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || `idea-${out.length + 1}`;
+		if (out.some((o) => o.name === name)) name = `${name}-${out.length + 1}`;
+		if (text) out.push({ name, text });
+	}
+	return out;
+}
+
 export function parseDecision(text: string, allowed: Action[], s: BoardSummary): Decision | { error: string } {
 	const parsed = decisionOf(text, allowed, s);
 	if ("error" in parsed) return parsed;
@@ -213,6 +229,12 @@ function decisionOf(text: string, allowed: Action[], s: BoardSummary): Decision 
 			const cell = cellOf(a.cell);
 			if (!cell) return { error: `retake needs a cell (${cellIds.join(", ")})` };
 			return { action, args: { cell }, reason };
+		}
+		case "ideas": {
+			const cell = cellOf(a.cell);
+			const ideas = parseIdeas(a.ideas);
+			if (!cell || ideas.length < 2) return { error: `ideas needs a cell (${cellIds.join(", ")}) and two or three ideas, each {"name", "idea"}` };
+			return { action, args: { cell, ideas }, reason };
 		}
 		case "print": {
 			const asked = typeof a.takes === "object" && a.takes !== null ? Object.entries(a.takes as Record<string, unknown>) : [];

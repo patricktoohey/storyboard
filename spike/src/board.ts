@@ -163,7 +163,7 @@ async function castCharacters(env: Env, remote: Remote, characters: Character[],
 }
 
 /** Files a take writes for its cell. A new take branch deletes main's copies first (see shootCell). */
-export const TAKE_OUTPUTS = ["frame.webp", "render.json", "review.json", "continuity.json"];
+export const TAKE_OUTPUTS = ["frame.webp", "render.json", "review.json", "continuity.json", "idea.md"];
 
 /** Reports what a job is doing now, to the coordinator's live feed. */
 export type Progress = (detail: string) => Promise<unknown>;
@@ -206,6 +206,9 @@ interface Take {
  * One take of one cell, branched from main as it is now, so it picks up the board's current bible and
  * skills. Each stage is a separate agent and a separate commit on the take branch.
  */
+/** A take that is one of several ideas for its shot says which, in cells/<id>/idea.md on its branch. */
+const ideaFile = (dir: string, opts: TakeOptions): Record<string, string> => (opts.idea ? { [`${dir}/idea.md`]: `# ${opts.idea.name}\n\n${opts.idea.text}\n` } : {});
+
 async function shootCell(
 	env: Env,
 	remote: Remote,
@@ -240,23 +243,28 @@ async function shootCell(
 		prompt = opts.prompt;
 		await tree.commit(
 			{ name: `cinematographer-${cell.id}` },
-			`Cell ${cell.id} take ${take}: reseed (same prompt)`,
-			{ [`${dir}/prompt.md`]: `${prompt}\n` },
+			`Cell ${cell.id} take ${take}: reseed (same prompt)${opts.idea ? `, idea "${opts.idea.name}"` : ""}`,
+			{ [`${dir}/prompt.md`]: `${prompt}\n`, ...ideaFile(dir, opts) },
 			inherited,
 		);
 	} else {
 		await progress(`cinematographer (${skill.style}) writing the shot`);
 		// Every note on this cell so far still applies; a bible change shouldn't undo "shoot from the back seat"
 		const earlier = noteHistory(history).map((n) => `- ${n}`);
-		const brief = [earlier.length ? `Director's notes on this shot so far (all still apply):\n${earlier.join("\n")}` : "", opts.note ?? ""]
+		const idea = opts.idea
+			? `This take is one of several different ideas for this shot, shot side by side; the director will print one. This take's idea ("${opts.idea.name}"): ${opts.idea.text}\nShoot this idea. Where it changes the staging or the framing, the idea wins over the notes above.`
+			: "";
+		const brief = [earlier.length ? `Director's notes on this shot so far${opts.idea ? "" : " (all still apply)"}:\n${earlier.join("\n")}` : "", opts.note ?? "", idea]
 			.filter(Boolean)
 			.join("\n\n");
 		prompt = await cinematograph(env, skill, bible, castList, cell, brief || undefined, staging || undefined);
-		const subject = `Cell ${cell.id} take ${take}: shot prompt${opts.note ? ` (with notes)\n\n${opts.note}` : ""}`;
+		const subject = opts.idea
+			? `Cell ${cell.id} take ${take}: idea "${opts.idea.name}"\n\n${opts.idea.text}`
+			: `Cell ${cell.id} take ${take}: shot prompt${opts.note ? ` (with notes)\n\n${opts.note}` : ""}`;
 		await tree.commit(
 			{ name: `cinematographer-${cell.id}` },
 			`${subject}\n\n${skillTrailer(skill)}`,
-			{ [`${dir}/prompt.md`]: `${prompt}\n` },
+			{ [`${dir}/prompt.md`]: `${prompt}\n`, ...ideaFile(dir, opts) },
 			inherited,
 		);
 	}
@@ -653,13 +661,14 @@ export async function boardState(env: Env, repoName: string) {
 	const takes = await Promise.all(
 		branches.map(async (branch) => {
 			const cell = branch.split("/")[1];
-			const [prompt, renderMeta, critic, continuity, characters] = await Promise.all([
+			const [prompt, renderMeta, critic, continuity, characters, idea] = await Promise.all([
 				repo.readFile({ ref: branch, path: `cells/${cell}/prompt.md` }).then((b) => b?.text()),
 				readJson(repo, branch, `cells/${cell}/render.json`),
 				readJson(repo, branch, `cells/${cell}/review.json`),
 				readJson(repo, branch, `cells/${cell}/continuity.json`),
 				// The bible's characters as they were when this take branched from main
 				repo.readFile({ ref: branch, path: "characters.json" }).then((b) => b?.text()),
+				repo.readFile({ ref: branch, path: `cells/${cell}/idea.md` }).then((b) => b?.text()),
 			]);
 			return {
 				cell,
@@ -668,6 +677,8 @@ export async function boardState(env: Env, repoName: string) {
 				done: Boolean(continuity),
 				skill: renderMeta?.skill,
 				prompt: prompt?.trim(),
+				// One of several ideas for the shot: its name (the first line of idea.md)
+				idea: idea ? idea.split("\n")[0].replace(/^#\s*/, "").trim() : undefined,
 				adherence: critic?.adherence?.score,
 				framing: critic?.framing?.choice,
 				continuity: continuity && { ok: continuity.ok, issues: continuity.issues },

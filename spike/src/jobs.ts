@@ -7,6 +7,8 @@ export interface TakeOptions {
 	skill?: string;
 	// Reseed: reuse this exact prompt instead of asking the cinematographer
 	prompt?: string;
+	// One of several ideas for this shot, shot side by side on their own take branches (D35)
+	idea?: { name: string; text: string };
 }
 
 interface JobBase {

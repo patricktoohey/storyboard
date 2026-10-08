@@ -4,7 +4,7 @@ import { parseCsv } from "./csv.ts";
 // What a version of the board is: its plan, bible and cells. Not board.json (the arena's limits and the
 // crew), the skills, the lessons, or the comparisons, which belong to the team, not to a version.
 const BOARD_FILES = ["concept.md", "bible.md", "storyboard.csv", "characters.json", "locations.json"];
-const CELL_FILES = ["beat.md", "prompt.md", "notes.md", "frame.webp", "render.json", "review.json", "continuity.json"];
+const CELL_FILES = ["beat.md", "prompt.md", "notes.md", "frame.webp", "render.json", "review.json", "continuity.json", "idea.md"];
 const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 
 /** The content paths a version holds, from its own plan (which cells, characters and locations it has). */
