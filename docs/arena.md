@@ -373,3 +373,35 @@ Brief "A 30-second story about a small act of kindness between strangers", 3 tea
 - **The deadline mandate waited on running retakes**: the auteur printed with 3.5 minutes left because
   "wait while jobs run" came before the clock check. Fixed after the run (the clock now comes first; tested).
 - Judges again separated the teams only narrowly (2.33 to 2.68).
+
+## Comparative judging (D23)
+
+Absolute scores barely separated teams (2.15 to 2.53, then 2.33 to 2.68 of 4). Judges now also compare
+boards side by side: each board's printed frames become one 2x2 contact sheet (Images binding `draw`), and
+for every pair of teams, in both orders (cancelling any preference for the first image), each judge picks
+the better board on each rubric criterion. A team's win rate is its mean probability of winning its
+matchups; the leaderboard ranks by it, with absolute scores as detail. Results are
+`scores/comparative[.final].json`; a comparison runs live after each team's scoring and in the final round.
+
+Re-judging the crew arena's submissions this way reversed the absolute order: **auteur 71%, safe 43%,
+documentarian 36%** (absolute: 2.33, 2.65, 2.68). The spread is far wider, and the premium crew's boards
+won when seen next to the others.
+
+## Seasons (built 2026-10-08)
+
+`POST /seasons {"briefs", "rounds", "minutes", "budget", "cells"}` creates a season repo and one repo per
+team (`team-<team>-<id>`: its showrunner skill, `team.json`, `lessons.md`). Each round is an arena whose
+boards fork from the team repos. Arenas close early once every team has submitted. When a round's final
+judging finishes, its group follow-up runs a `season_step`: record the round (win rates, 3/2/1 points),
+run every team's retrospective (an LLM reads its result per criterion, spend, its turns, its rivals' crews
+and strategies; writes three lessons, rewrites only its skill's `## Strategy` section, and may adopt a
+rival's cinematographer, with a `Learned-From` trailer), then start the next round. The season page shows
+standings per round and each team's strategy as it changed, read from its repo's history.
+
+## Next: continuity across frames
+
+Only characters are anchored across frames today (casting portraits, MS/CU). Sets, light and staging drift
+between shots because each cell renders from text plus portraits, in parallel. Planned, keeping cells
+parallel: location reference images (a "scouting" step like casting), blocking per cell in the plan (location,
+positions, screen direction), a Clef check of each frame against its printed neighbour, and later chained
+video (the next frame as a clip's last frame where the model supports it).

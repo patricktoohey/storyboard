@@ -24,6 +24,8 @@
 //   POST /arenas                               {"brief", "minutes"?, "budget"?, "cells"?, "teams"?} -> arena + team boards, first turns queued
 //   GET  /arenas, GET /arenas/:id/state        arenas; rules, teams, spend, scores, leaderboard, arena log
 //   GET  /arenas/:id/timeline                  the arena rebuilt from Git history (replay.ts); POST /arenas/:id/replay stores a recording
+//   POST /arenas/:id/compare {"final"?}         queue comparative judging (every pair of boards, both ways)
+//   POST /seasons, GET /seasons, GET /seasons/:id/state   seasons: rounds of arenas with retrospectives between
 //   POST /arenas/:id/close                     after the deadline: record submissions, queue the final round (cron does this too)
 //   POST /sweep                                mark jobs with no progress for 10 minutes failed (also runs every 5 minutes)
 //   POST /template[?reset=1]                   create the template / add newly bundled skills (reset: overwrite with bundled)
@@ -31,6 +33,7 @@
 import { addNote, boardState, chooseSkill, editSkill, listBoards, printTake, startBoard, startCut } from "./board";
 import { arenaState, closeArena, createArena, listArenas } from "./arena";
 import { arenaTimeline, saveReplay } from "./replay";
+import { createSeason, listSeasons, seasonState } from "./season";
 import { consume } from "./consumer";
 import { ledger, submit, sweep } from "./coordinator";
 import { WorkingTree } from "./git";
@@ -73,6 +76,25 @@ export default {
 				await ensureTemplate(env, url.searchParams.get("reset") === "1");
 				return Response.json({ template: TEMPLATE });
 			}
+			if (root === "seasons") {
+				if (method === "GET" && !repoName) return Response.json(await listSeasons(env));
+				if (method === "POST" && !repoName) {
+					const body = await json<{ brief?: string; briefs?: string[]; rounds?: number; minutes?: number; budget?: number; cells?: number; teams?: string[] }>(request);
+					const briefs = body.briefs?.length ? body.briefs : body.brief ? [body.brief] : [];
+					if (!briefs.length) return Response.json({ error: "brief or briefs is required" }, { status: 400 });
+					const created = await createSeason(env, {
+						briefs,
+						rounds: Math.min(Math.max(body.rounds ?? 3, 2), 6),
+						minutes: Math.min(Math.max(body.minutes ?? 20, 5), 120),
+						budget: Math.min(Math.max(body.budget ?? 5, 1), 50),
+						cells: Math.min(Math.max(body.cells ?? 4, 2), 8),
+						teams: body.teams,
+						origin: url.origin,
+					});
+					return Response.json(created, { status: 202 });
+				}
+				if (method === "GET" && action === "state") return Response.json(await seasonState(env, repoName));
+			}
 			if (root === "arenas") {
 				if (method === "GET" && !repoName) return Response.json(await listArenas(env));
 				if (method === "POST" && !repoName) {
@@ -91,6 +113,11 @@ export default {
 				if (method === "GET" && action === "state") return Response.json(await arenaState(env, repoName));
 				if (method === "POST" && action === "close") return Response.json(await closeArena(env, repoName));
 				if (method === "GET" && action === "timeline") return Response.json(await arenaTimeline(env, repoName));
+				if (method === "POST" && action === "compare") {
+					// Re-run comparative judging, e.g. on an arena that closed before it existed
+					const { final = true } = await json<{ final?: boolean }>(request);
+					return Response.json({ jobs: await submit(env, repoName, [{ kind: "compare", final }]) }, { status: 202 });
+				}
 				if (method === "POST" && action === "replay") {
 					// The browser's recording of the replay, committed to the arena on replay/rN
 					const type = request.headers.get("content-type") ?? "video/webm";

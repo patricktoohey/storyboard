@@ -31,6 +31,10 @@ export type Job = JobBase &
 		| { kind: "turn"; arena: string; team: string; origin: string }
 		// Arena: score a team's board at its current main (or its submission, in the final round)
 		| { kind: "judge"; team: string; board: string; final: boolean }
+		// Arena: judges compare every pair of boards, side by side, both ways round
+		| { kind: "compare"; final: boolean }
+		// Season: after a round's final judging, record it, run retrospectives, start the next round
+		| { kind: "season_step"; season: string; round: number; origin: string }
 	);
 
 /** A job as submitted, before the coordinator assigns an id (and, for takes, a take number). */
@@ -42,7 +46,9 @@ export type JobRequest =
 	| { kind: "video"; cell: string; cut: string; origin: string; seconds: number }
 	| { kind: "assemble"; cut: string; cells: string[] }
 	| { kind: "turn"; arena: string; team: string; origin: string }
-	| { kind: "judge"; team: string; board: string; final: boolean };
+	| { kind: "judge"; team: string; board: string; final: boolean }
+	| { kind: "compare"; final: boolean }
+	| { kind: "season_step"; season: string; round: number; origin: string };
 
 /** A team board's limits, from its board.json; absent on boards outside an arena. */
 export interface Limits {

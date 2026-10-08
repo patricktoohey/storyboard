@@ -23,6 +23,8 @@ export function estimate(req: JobRequest, crew: Crew = DEFAULT_CREW): number {
 		case "print":
 		case "assemble":
 		case "judge":
+		case "compare":
+		case "season_step":
 			return 0;
 	}
 }

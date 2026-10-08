@@ -142,6 +142,8 @@ export interface JudgeScore {
 
 export interface LeaderboardRow {
 	team: string;
+	// Comparative win rate (0..1), the ranking when judges have compared the boards (D23)
+	winRate?: number;
 	score: number;
 	byJudge: Record<string, number>;
 	disqualified?: string;
@@ -156,13 +158,131 @@ export function leaderboard(
 	scores: Record<string, JudgeScore[]>,
 	weights: Record<string, number>,
 	final: boolean,
+	rates?: Record<string, number>,
 ): LeaderboardRow[] {
 	const rows = teams.map(({ team, hasCut }) => {
 		const mine = scores[team] ?? [];
 		const byJudge = Object.fromEntries(mine.map((s) => [s.judge, s.total]));
 		const weight = mine.reduce((w, s) => w + (weights[s.judge] ?? 1), 0);
 		const score = weight ? mine.reduce((sum, s) => sum + s.total * (weights[s.judge] ?? 1), 0) / weight : 0;
-		return { team, score: Number(score.toFixed(3)), byJudge, ...(final && !hasCut ? { disqualified: "no video" } : {}) };
+		return {
+			team,
+			...(rates?.[team] !== undefined ? { winRate: rates[team] } : {}),
+			score: Number(score.toFixed(3)),
+			byJudge,
+			...(final && !hasCut ? { disqualified: "no video" } : {}),
+		};
 	});
-	return rows.sort((a, b) => Number(Boolean(a.disqualified)) - Number(Boolean(b.disqualified)) || b.score - a.score);
+	return rows.sort(
+		(a, b) =>
+			Number(Boolean(a.disqualified)) - Number(Boolean(b.disqualified)) ||
+			(b.winRate ?? -1) - (a.winRate ?? -1) ||
+			b.score - a.score,
+	);
+}
+
+// ── Comparative judging ────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Every pair of teams, in both orders. Judges see two contact sheets as "first" and "second"; asking each
+ * pair both ways cancels a preference for either position.
+ */
+export function matchups(teams: string[]): [string, string][] {
+	const out: [string, string][] = [];
+	for (let i = 0; i < teams.length; i++) for (let j = 0; j < teams.length; j++) if (i !== j) out.push([teams[i], teams[j]]);
+	return out;
+}
+
+/** One judge's verdict on one matchup: for each criterion, the probability that `first` is better. */
+export interface Comparison {
+	judge: string;
+	first: string;
+	second: string;
+	pFirst: Record<string, number>;
+}
+
+export interface WinRates {
+	// team -> judge -> mean probability of winning its matchups, over criteria (0..1)
+	byJudge: Record<string, Record<string, number>>;
+	// team -> criterion -> mean win probability, across judges
+	byCriterion: Record<string, Record<string, number>>;
+	// team -> weighted mean over judges
+	overall: Record<string, number>;
+}
+
+/** Turns pairwise comparisons into each team's win rate: 0.5 means even, 1 means it won every matchup. */
+export function winRates(comparisons: Comparison[], weights: Record<string, number>): WinRates {
+	const wins: Record<string, Record<string, number[]>> = {};
+	const crit: Record<string, Record<string, number[]>> = {};
+	const add = (store: Record<string, Record<string, number[]>>, team: string, key: string, p: number) => {
+		((store[team] ??= {})[key] ??= []).push(p);
+	};
+	for (const c of comparisons) {
+		for (const [criterion, p] of Object.entries(c.pFirst)) {
+			add(wins, c.first, c.judge, p);
+			add(wins, c.second, c.judge, 1 - p);
+			add(crit, c.first, criterion, p);
+			add(crit, c.second, criterion, 1 - p);
+		}
+	}
+	const mean = (xs: number[]) => xs.reduce((a, b) => a + b, 0) / xs.length;
+	const round = (x: number) => Number(x.toFixed(3));
+	const byJudge = Object.fromEntries(Object.entries(wins).map(([t, js]) => [t, Object.fromEntries(Object.entries(js).map(([j, ps]) => [j, round(mean(ps))]))]));
+	const byCriterion = Object.fromEntries(Object.entries(crit).map(([t, cs]) => [t, Object.fromEntries(Object.entries(cs).map(([c, ps]) => [c, round(mean(ps))]))]));
+	const overall = Object.fromEntries(
+		Object.entries(byJudge).map(([t, js]) => {
+			const w = Object.keys(js).reduce((sum, j) => sum + (weights[j] ?? 1), 0);
+			return [t, round(Object.entries(js).reduce((sum, [j, v]) => sum + v * (weights[j] ?? 1), 0) / w)];
+		}),
+	);
+	return { byJudge, byCriterion, overall };
+}
+
+// ── Seasons ────────────────────────────────────────────────────────────────────────────────────────
+
+/** Points per finishing place in a round; a team without video scores nothing. */
+export const PLACE_POINTS = [3, 2, 1];
+
+export interface RoundResult {
+	round: number;
+	// teams in finishing order, disqualified last
+	ranking: { team: string; winRate: number; disqualified?: string }[];
+}
+
+export function seasonStandings(rounds: RoundResult[]) {
+	const points: Record<string, number> = {};
+	const history: Record<string, number[]> = {};
+	for (const r of rounds) {
+		r.ranking.forEach((row, place) => {
+			const p = row.disqualified ? 0 : (PLACE_POINTS[place] ?? 0);
+			points[row.team] = (points[row.team] ?? 0) + p;
+			(history[row.team] ??= []).push(row.winRate);
+		});
+	}
+	return Object.keys(points)
+		.map((team) => ({ team, points: points[team], winRates: history[team] }))
+		.sort((a, b) => b.points - a.points || (b.winRates.at(-1) ?? 0) - (a.winRates.at(-1) ?? 0));
+}
+
+/**
+ * A retrospective may rewrite only the skill's "## Strategy" section; the rest (role, notes style, output
+ * rules) stays as it was. Returns the new skill text, or the old one if the section is missing or the
+ * rewrite is empty or oversized.
+ */
+export function replaceStrategy(skillText: string, strategy: string, maxChars = 2000) {
+	const body = strategy.replace(/^#+\s*Strategy\s*\n/i, "").trim();
+	if (!body || body.length > maxChars) return skillText;
+	const start = skillText.search(/^## Strategy\s*$/m);
+	if (start < 0) return skillText;
+	const next = skillText.indexOf("\n## ", start + 1);
+	const end = next < 0 ? skillText.length : next + 1;
+	return `${skillText.slice(0, start)}## Strategy\n\n${body}\n\n${skillText.slice(end)}`.replace(/\n{3,}/g, "\n\n");
+}
+
+/** A showrunner skill's "## Strategy" section, for showing rivals' strategies to a retrospective. */
+export function strategyOf(skillText: string) {
+	const start = skillText.search(/^## Strategy\s*$/m);
+	if (start < 0) return "";
+	const next = skillText.indexOf("\n## ", start + 1);
+	return skillText.slice(start, next < 0 ? undefined : next).replace(/^## Strategy\s*/, "").trim();
 }

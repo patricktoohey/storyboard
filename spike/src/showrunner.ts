@@ -4,7 +4,7 @@
 // probabilities are recorded with the turn (D22). It acts through the same functions the UI uses, then
 // queues its next turn with a delay. Turns never overlap: a turn queues the next one only as it ends.
 import { ACTIONS, type Action, type BoardSummary, allowedActions, printPicks, weakCells } from "./arena-rules.ts";
-import { readRules, recordSubmission } from "./arena";
+import { closeArena, readRules, recordSubmission } from "./arena";
 import { addNote, boardState, onMain, startCut } from "./board";
 import { type Crew, DEFAULT_CREW, MENU, SLOTS, clipCost, crewCosts, draftOptions, fitToBudget, isCrew } from "./crew.ts";
 import { LimitError } from "./ledger.ts";
@@ -99,6 +99,8 @@ export async function runTurnJob(env: Env, job: TurnJob, progress: Progress) {
 		minutes_left: Math.round((deadline - Date.now()) / 60000),
 		budget: { spent: Number(summary.spent.toFixed(2)), total: summary.budget, video_cost: Number(summary.prices.cut.toFixed(2)) },
 		crew,
+		// In a season, what this team has learned in earlier rounds (its repo's lessons.md)
+		lessons: (await readText(env, board, "lessons.md")) ?? null,
 		cells: summary.cells.map((c) => {
 			const shown = c.takes.find((t) => t.take === c.printed) ?? c.takes[c.takes.length - 1];
 			return { cell: c.id, printed: c.printed ?? null, takes: c.takes.length, continuity: shown ? (shown.stale ? "stale" : shown.ok ? "ok" : shown.issues.join("; ")) : "no take" };
@@ -130,7 +132,7 @@ export async function runTurnJob(env: Env, job: TurnJob, progress: Progress) {
 							return [key, `${o.label} (a minimal ${rules.cells}-shot film with this choice: ~$${film.toFixed(2)})`];
 						}),
 					);
-					const draftState = { strategy: skill.body, budget_usd: summary.budget, shots: rules.cells, minutes_left: brief.minutes_left };
+					const draftState = { strategy: skill.body, lessons: brief.lessons, budget_usd: summary.budget, shots: rules.cells, minutes_left: brief.minutes_left };
 					picks[slot] = (await clefChoice(env, draftState, `Following \`strategy\` and within \`budget_usd\`, which ${slot} should the team hire?`, options)).choice;
 				}
 				const fit = fitToBudget(picks as Crew, planned, summary.budget);
@@ -198,6 +200,8 @@ export async function runTurnJob(env: Env, job: TurnJob, progress: Progress) {
 				const commit = head.hash;
 				await recordSubmission(env, job.arena, job.team, board, commit, summary.cut!, `submitted on turn ${acted + 1}`);
 				detail += `: ${cutBranch}@${commit.slice(0, 7)}`;
+				// The last team in closes the arena early; otherwise this is a no-op until the deadline
+				await closeArena(env, job.arena).catch((e) => console.error("early close", e));
 				return { detail, result };
 			}
 			case "wait":

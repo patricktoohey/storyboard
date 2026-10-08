@@ -366,3 +366,36 @@ Reply with ONLY the note: one or two sentences, addressed to the cinematographer
 	const text = (await chat(env, llmFor(env, skill.metadata.model, env.DIRECTOR_MODEL), system, context)).trim().replace(/^"|"$/g, "");
 	return text.split("\n")[0].slice(0, 400);
 }
+
+export interface Retrospective {
+	lessons: string[];
+	strategy: string;
+	adopt_cinematographer: string | null;
+}
+
+/**
+ * A showrunner's retrospective after a season round: what it learned, its rewritten strategy, and
+ * optionally a rival's cinematographer to adopt. The caller applies it with guardrails (replaceStrategy).
+ */
+export async function retrospect(env: Env, skill: Skill, context: string): Promise<Retrospective> {
+	const system = `${skill.body}
+
+## Task
+You lead a team in a season of storyboard competitions. A round has just ended. Study your result, the
+judges' comparisons, how you spent your budget and turns, and what your rivals did. Decide what to keep
+doing and what to change, then rewrite your strategy for the next round. You may adopt a rival's
+cinematographer if theirs clearly worked better; a different brief comes next round, so learn principles,
+not this round's story.
+
+## Output contract
+Reply with ONLY a JSON object:
+{"lessons": [string, string, string],      // three short, concrete lessons from this round
+ "strategy": string,                       // your new "## Strategy" section body: 3 to 6 markdown bullets
+ "adopt_cinematographer": string | null}  // a cinematographer skill name from the rivals, or null`;
+	const out = extractJson<Retrospective>(await chat(env, llmFor(env, skill.metadata.model, env.DIRECTOR_MODEL), system, context));
+	return {
+		lessons: (out.lessons ?? []).map(String).slice(0, 5),
+		strategy: String(out.strategy ?? ""),
+		adopt_cinematographer: out.adopt_cinematographer ? String(out.adopt_cinematographer) : null,
+	};
+}

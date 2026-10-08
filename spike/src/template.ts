@@ -46,10 +46,10 @@ export async function ensureTemplate(env: Env, reset = false) {
 	await tree.push("main");
 }
 
-/** Forks the template into a new board repo and waits until it can be cloned. */
-export async function forkBoard(env: Env, name: string, description: string): Promise<Remote> {
-	await ensureTemplate(env);
-	using template = await env.ARTIFACTS.get(TEMPLATE);
+/** Forks the template (or a season team's repo) into a new board repo and waits until it can be cloned. */
+export async function forkBoard(env: Env, name: string, description: string, from = TEMPLATE): Promise<Remote> {
+	if (from === TEMPLATE) await ensureTemplate(env);
+	using template = await env.ARTIFACTS.get(from);
 	const fork = await template.fork(name, { description, defaultBranchOnly: true });
 	for (let attempt = 0; ; attempt++) {
 		try {

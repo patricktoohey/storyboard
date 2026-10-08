@@ -16,7 +16,8 @@ export type LedgerRow = Record<(typeof LEDGER_HEADER)[number], string>;
 
 // A group is a row too (kind "group"); its detail says what to do when its jobs are all finished.
 // "cut:<name>" groups a cut's video jobs; when they finish, the videos are assembled into cut/<name>.
-export type GroupKind = "first_cut" | "bible" | `cut:${string}`;
+// "final:<season>:<round>:<origin>" groups an arena's final judging; when it finishes, the season moves on.
+export type GroupKind = "first_cut" | "bible" | `cut:${string}` | "final" | `final:${string}`;
 
 export const parseLedger = (text: string) => parseCsv<LedgerRow>(text);
 export const ledgerCsv = (rows: LedgerRow[]) => toCsv(rows, LEDGER_HEADER);
@@ -35,7 +36,7 @@ export class LimitError extends Error {
 }
 
 // After the deadline only judging continues (the arena's own jobs, which have no limits anyway)
-const AFTER_DEADLINE: JobRequest["kind"][] = ["judge"];
+const AFTER_DEADLINE: JobRequest["kind"][] = ["judge", "compare", "season_step"];
 
 /**
  * Appends jobs for `requests`, numbering takes after the highest take of that cell in the ledger or in
@@ -117,6 +118,11 @@ export function recordProgress(
 	const members = rows.filter((r) => r.group === group.id);
 	if (group.detail === "first_cut") return { followUps: firstCut(members) };
 	if (group.detail.startsWith("cut:")) return { followUps: assembleCut(group.detail.slice(4), members) };
+	if (group.detail.startsWith("final:")) {
+		// final:<season>:<round>:<origin>, where origin is a URL and so contains colons itself
+		const [, season, round, ...origin] = group.detail.split(":");
+		return { followUps: [{ kind: "season_step", season, round: Number(round), origin: origin.join(":") }] };
+	}
 	return { followUps: [] };
 }
 

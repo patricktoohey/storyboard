@@ -1,7 +1,8 @@
 // The storyboard-jobs queue consumer. One job per invocation: run it, reporting each stage to the jobs
 // ledger, and queue whatever it leads to (a board's takes, a continuity retake, a bible edit's takes).
 import { printTakes, retakeOptions, runAssembleJob, runBibleJob, runBoardJob, runTakeJob, runVideoJob } from "./board";
-import { queueLiveJudging, runJudgeJob } from "./arena";
+import { queueLiveComparison, queueLiveJudging, runCompareJob, runJudgeJob } from "./arena";
+import { runSeasonStep } from "./season";
 import { limitsOf, report, submit } from "./coordinator";
 import { withCrew } from "./crew-env";
 import { LimitError } from "./ledger.ts";
@@ -64,8 +65,22 @@ async function run(env: Env, job: Job) {
 		}
 		case "turn":
 			return runTurnJob(env, job, progress);
+		case "compare": {
+			const out = await runCompareJob(env, job.repo, job.final, progress);
+			return {
+				detail: out.compared
+					? `${job.final ? "final: " : ""}${Object.entries(out.overall ?? {}).sort((a, b) => b[1] - a[1]).map(([t, r]) => `${t} ${(r * 100).toFixed(0)}%`).join(", ")}`
+					: out.reason,
+			};
+		}
+		case "season_step": {
+			const out = await runSeasonStep(env, job.repo, job.season, job.round, progress);
+			return { detail: out.detail };
+		}
 		case "judge": {
 			const judged = await runJudgeJob(env, job.repo, job.team, job.board, job.final, progress);
+			// Live: with a new score in, compare the boards again
+			if (!job.final && judged.judged) await queueLiveComparison(env, job.repo).catch((e) => console.error("live comparison", e));
 			return {
 				detail: judged.judged
 					? `${job.final ? "final " : ""}${job.team}@${judged.commit.slice(0, 7)}: ${Object.entries(judged.totals ?? {}).map(([k, v]) => `${k.replace("judge-", "")} ${v.toFixed(2)}`).join(", ")}`
