@@ -4,6 +4,7 @@
 // budget, never more (D19).
 import { type Crew, DEFAULT_CREW, clipCost, crewCosts } from "./crew.ts";
 import type { JobRequest } from "./jobs.ts";
+import { LINES_ESTIMATE, scoreEstimate } from "./sound-rules.ts";
 
 export function estimate(req: JobRequest, crew: Crew = DEFAULT_CREW): number {
 	const c = crewCosts(crew);
@@ -19,9 +20,14 @@ export function estimate(req: JobRequest, crew: Crew = DEFAULT_CREW): number {
 		case "video":
 			// Billed at the provider's clip length, which can exceed the plan (Hailuo bills at least 6 s)
 			return clipCost(crew, req.seconds).usd;
-		// Merges, and judging (the arena pays for judges, not the teams)
+		case "score":
+			return scoreEstimate(req.seconds);
+		case "lines":
+			return LINES_ESTIMATE;
+		// Merges, the mix (a Container for a few seconds), and judging (the arena pays for judges, not the teams)
 		case "print":
 		case "assemble":
+		case "mix":
 		case "judge":
 		case "compare":
 		case "season_step":

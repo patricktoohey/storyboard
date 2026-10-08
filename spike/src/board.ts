@@ -687,8 +687,9 @@ export async function boardState(env: Env, repoName: string) {
 			.filter((b) => /^cut\/v\d+$/.test(b))
 			.sort((a, b) => Number(b.slice(5)) - Number(a.slice(5)))
 			.map(async (b) => {
-				const edl = await repo.readFile({ ref: b, path: "video/edl.csv" }).then((x) => x?.text());
-				return { name: b.slice(4), branch: b, edl: edl ? parseCsv<Record<string, string>>(edl) : [] };
+				const [edl, mix] = await Promise.all(["video/edl.csv", "video/mix.json"].map((path) => repo.readFile({ ref: b, path }).then((x) => x?.text()).catch(() => undefined)));
+				// A mixed cut has video/teaser.mp4: the whole film with its sound (sound.ts)
+				return { name: b.slice(4), branch: b, edl: edl ? parseCsv<Record<string, string>>(edl) : [], mix: mix ? JSON.parse(mix) : null };
 			}),
 	);
 
@@ -697,6 +698,11 @@ export async function boardState(env: Env, repoName: string) {
 		title: board.title,
 		cuts,
 		concept: (await tree.read("concept.md")).replace(/^# Concept\s*/, "").trim(),
+		// The board's sound on main: the score's brief and the lines, each with its voice and file
+		sound: {
+			score: (await tree.exists("sound/score.json")) ? JSON.parse(await tree.read("sound/score.json")) : null,
+			lines: (await tree.exists("sound/lines.csv")) ? parseCsv<Record<string, string>>(await tree.read("sound/lines.csv")) : [],
+		},
 		bible: board.bible,
 		characters: board.characters.map((c) => ({ ...c, portrait: portraitPath(c) })),
 		locations: (board.locations ?? []).map((l) => ({ ...l, image: locationPath(l) })),

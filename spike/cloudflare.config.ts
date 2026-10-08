@@ -1,8 +1,17 @@
-import { bindings, defineConfig, triggers } from "cf/config";
+import { bindings, defineConfig, defineContainer, exports, triggers } from "cf/config";
 import type { Job } from "./src/jobs.ts";
 
 const WORKER = "storyboard-spike";
 const JOBS_QUEUE = "storyboard-jobs";
+
+// The mixer: ffmpeg in a Container (mixer/), behind the Mixer Durable Object (src/mixer.ts). A Worker can't
+// run ffmpeg; a cut's clips, score and lines go in, teaser.mp4 comes out. Billed per 10 ms while running.
+const mixer = defineContainer({
+	name: "storyboard-mixer",
+	image: { dockerfile: "./mixer/Dockerfile" },
+	instanceType: "standard-1",
+	maxInstances: 4,
+});
 
 export default defineConfig({
 	worker: {
@@ -12,6 +21,9 @@ export default defineConfig({
 			"nodejs_compat",
 		],
 		entrypoint: "src/index.ts",
+		exports: {
+			Mixer: exports.durableObject({ storage: "sqlite", container: mixer }),
+		},
 		limits: {
 			cpuMs: 300000,
 		},
@@ -57,6 +69,7 @@ export default defineConfig({
 				},
 			}),
 			JOBS: bindings.queue<Job>({ name: JOBS_QUEUE }),
+			MIXER: bindings.durableObject({ worker: WORKER, exportName: "Mixer" }),
 			AI: bindings.ai({
 				dev: {
 					remote: true,
@@ -64,4 +77,5 @@ export default defineConfig({
 			}),
 		},
 	},
+	containers: [mixer],
 });

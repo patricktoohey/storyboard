@@ -34,6 +34,8 @@ export interface VideoOption {
 	// Seconds the provider will bill for a clip planned at `seconds`
 	billedSeconds: (seconds: number) => number;
 	usd: (billed: number) => number;
+	// The clip comes with its own soundtrack (ambience, effects), which the mix lays under the score
+	audio?: boolean;
 }
 
 const LLMS = {
@@ -119,6 +121,24 @@ export const MENU = {
 			usd: (billed) => billed * 0.12,
 			imageAs: "url",
 			unavailable: "refuses first frames that may show a real person (InputImageSensitiveContentDetected); our frames are photoreal",
+		},
+		"flux-3-video": {
+			id: "black-forest-labs/flux-3-video",
+			label: "FLUX.3 Video: clips with their own sound (ambience, effects), 5-20 s, keeps the wide 21:9 frame; ~2 minutes a clip",
+			billedSeconds: (s) => Math.max(5, Math.min(20, Math.round(s))),
+			// Per clip at hd, any length (Cloudflare's model page, 2026-10-08); checked live with sound (114 s for 5 s)
+			usd: () => 0.17,
+			imageAs: "url",
+			audio: true,
+		},
+		"grok-imagine-video": {
+			id: "xai/grok-imagine-video",
+			label: "Grok Imagine Video: clips with dialogue, effects and music of their own",
+			billedSeconds: (s) => Math.max(1, Math.min(15, Math.round(s))),
+			usd: (billed) => billed * 0.07,
+			imageAs: "url",
+			audio: true,
+			unavailable: "every request fails with 7003, including the catalog's own text-to-video example (2026-10-08)",
 		},
 	} satisfies Record<string, VideoOption>,
 };
@@ -254,6 +274,10 @@ export function videoRequest(
 				};
 			case "wan-2.7-i2v":
 				return { ...base, image: imageUrl, duration: billed, resolution: "720P", seed: opts.seed, watermark: false };
+			case "flux-3-video":
+				return { mode: "i2v", prompt, keyframes: imageUrl, duration: billed, aspect_ratio: "21:9", resolution: "hd", generate_audio: true };
+			case "grok-imagine-video":
+				return { ...base, image: { url: imageUrl }, duration: billed, aspect_ratio: "16:9", resolution: "720p" };
 		}
 	})();
 	return { model: video.id, input, billed, usd: video.usd(billed) };

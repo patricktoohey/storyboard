@@ -7,6 +7,7 @@ import { limitsOf, report, submit } from "./coordinator";
 import { withCrew } from "./crew-env";
 import { LimitError } from "./ledger.ts";
 import { runTurnJob } from "./showrunner";
+import { runLinesJob, runMixJob, runScoreJob } from "./sound";
 import type { Job } from "./jobs";
 
 async function run(env: Env, job: Job) {
@@ -61,8 +62,16 @@ async function run(env: Env, job: Job) {
 		case "assemble": {
 			const cut = await runAssembleJob(env, job.repo, job.cut, job.cells, progress);
 			await queueLiveJudging(env, job.repo).catch((e) => console.error("live judging", e));
+			// Every cut is mixed into one teaser.mp4, with whatever sound the board has
+			await submit(env, job.repo, [{ kind: "mix", cut: job.cut }]).catch((e) => console.error("mix", e));
 			return { detail: `${cut.branch}: ${cut.clips} clips, ${cut.seconds}s` };
 		}
+		case "score":
+			return runScoreJob(env, job.repo, job.direction, job.seconds, progress);
+		case "lines":
+			return runLinesJob(env, job.repo, job.direction, progress);
+		case "mix":
+			return runMixJob(env, job.repo, job.cut, progress);
 		case "turn":
 			return runTurnJob(env, job, progress);
 		case "compare": {

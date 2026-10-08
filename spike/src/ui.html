@@ -496,10 +496,15 @@ async function buildReplay(tl, canvas) {
   const ranked = finals.filter((f) => submitted.has(f.team)).sort((a, b) => total(b.scores) - total(a.scores));
   const winner = ranked[0]?.team;
   let clips = [];
+  // A mixed film plays whole; separate clips get 5 s each
+  let teaserSeconds = 0;
   if (winner) {
     const cut = /\(cut (v\d+)\)/.exec(tl.events.find((e) => e.kind === "submit" && e.team === winner).text)[1];
     const edl = await fetch(`/boards/${boardOf[winner]}/file?ref=cut/${cut}&path=video/edl.csv`, { headers: { authorization: `Bearer ${key}` } }).then((r) => r.text());
-    const files = edl.trim().split("\n").slice(1).map((l) => l.split(",")[5]);
+    // A mixed cut is one file (the replay records the canvas, so its sound isn't in the recording)
+    const mixed = await fetch(`/boards/${boardOf[winner]}/file?ref=cut/${cut}&path=video/mix.json`, { headers: { authorization: `Bearer ${key}` } }).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+    teaserSeconds = mixed?.seconds ?? 0;
+    const files = mixed ? ["video/teaser.mp4"] : edl.trim().split("\n").slice(1).map((l) => l.split(",")[5]);
     for (const f of files) {
       const url = await frameOf(boardOf[winner], `cut/${cut}`, f);
       const v = document.createElement("video"); v.src = url; v.muted = true; v.playsInline = true; v.preload = "auto";
@@ -511,7 +516,7 @@ async function buildReplay(tl, canvas) {
   const hold = { take: 0.6, turn: 1.8, git: 2.6, print: 2.2, score: 1.6, final: 2.2, submit: 1.8, cut: 1.6, plan: 1.2, draft: 1.6, failed: 2.2, start: 2.5, close: 2.0 };
   const steps = tl.events.map((e) => ({ e, d: hold[e.kind] ?? 1 }));
   const finaleBoard = 5;
-  const duration = steps.reduce((a, b) => a + b.d, 0) + finaleBoard + clips.length * 5;
+  const duration = steps.reduce((a, b) => a + b.d, 0) + finaleBoard + (teaserSeconds || clips.length * 5);
   const t0 = tl.events[0]?.t ?? 0;
 
   function wrap(text, x, y, width, lineH, maxLines) {
@@ -599,13 +604,13 @@ async function buildReplay(tl, canvas) {
     // The winner's film
     for (const [i, v] of clips.entries()) {
       v.currentTime = 0; await v.play().catch(() => {});
-      until = performance.now() + Math.min(5, v.duration || 5) * 1000;
+      until = performance.now() + (teaserSeconds || Math.min(5, v.duration || 5)) * 1000;
       while (performance.now() < until && !v.ended) {
         ctx.fillStyle = "#000"; ctx.fillRect(0, 0, W, H);
         const r = (v.videoWidth / v.videoHeight) || 16 / 9, dh = W / r;
         ctx.drawImage(v, 0, (H - dh) / 2, W, dh);
         ctx.fillStyle = "rgba(0,0,0,.6)"; ctx.fillRect(24, 24, 420, 40);
-        ctx.fillStyle = "#f2b544"; ctx.font = "600 20px system-ui"; ctx.fillText(`${winner}'s film · shot ${i + 1}/${clips.length}`, 40, 51);
+        ctx.fillStyle = "#f2b544"; ctx.font = "600 20px system-ui"; ctx.fillText(teaserSeconds ? `${winner}'s film` : `${winner}'s film · shot ${i + 1}/${clips.length}`, 40, 51);
         await new Promise((r) => requestAnimationFrame(r));
       }
       v.pause();
@@ -679,6 +684,7 @@ function render() {
         ${makeVideoButton(s)}</div>
     </section>
     ${cutHtml(s)}
+    ${soundHtml(s)}
     <div class="layout">
       <div class="grid">${s.cells.map(cellHtml).join("")}</div>
       <aside class="log panel">${jobsHtml()}<h3>main</h3><ul>${s.log.map((l) => `<li><code>${esc(l.hash)}</code> <b>${esc(l.author)}</b> ${esc(l.message)}</li>`).join("")}</ul></aside>
@@ -700,23 +706,52 @@ function makeVideoButton(s) {
     ${running ? "Rendering video…" : `Make video · ${printed.length} clips, ${seconds}s, ≈$${(seconds * VIDEO_PRICE_PER_S).toFixed(2)}`}</button>`;
 }
 
+/** The board's sound on main: the score's brief and every line, each playable. */
+function soundHtml(s) {
+  const { score, lines } = s.sound || {};
+  if (!score && !lines?.length) return "";
+  const play = (path, label) => `<button class="small" data-play="${esc(path)}">▶ ${esc(label)}</button>`;
+  return `<section class="panel" style="margin-bottom:12px"><h3 style="margin:0 0 6px">Sound</h3>
+    ${score ? `<p style="margin:0 0 6px">${play("sound/score.mp3", `score · ${score.seconds}s`)} <span class="muted">${esc(score.by)}: ${esc(score.prompt)}</span></p>` : ""}
+    ${lines?.length ? `<ol style="margin:0;padding-left:20px">${lines.map((l) => `<li>${play(l.file, `${l.cell}`)} <b>${esc(l.speaker)}</b> <span class="small muted">(${esc(l.voice)})</span> ${esc(l.text)}</li>`).join("")}</ol>` : ""}
+    <audio id="soundplayer"></audio></section>`;
+}
+
 function cutHtml(s) {
   const cut = s.cuts?.[0];
   if (!cut?.edl?.length) return "";
   const total = cut.edl.reduce((n, e) => n + Number(e.seconds), 0);
-  return `<section class="cut panel" id="cutpanel" data-key="${esc(cut.branch)}:${cut.edl.length}">
+  const m = cut.mix;
+  const mixed = m ? ` · mixed: ${[m.score ? "score" : "", m.lines?.length ? `${m.lines.length} lines` : "", m.clips?.some((c) => c.own_sound) ? "clips' own sound" : ""].filter(Boolean).join(", ") || "no sound"}` : " · not mixed yet";
+  return `<section class="cut panel" id="cutpanel" data-key="${esc(cut.branch)}:${cut.edl.length}:${m ? m.sound_signature || "m" : ""}">
     <div><video id="player" controls playsinline></video></div>
-    <div><h3 style="margin:0 0 4px">Cut ${esc(cut.name)} <span class="small muted">${cut.edl.length} clips · ${total}s · branch ${esc(cut.branch)}</span></h3>
+    <div><h3 style="margin:0 0 4px">Cut ${esc(cut.name)} <span class="small muted">${cut.edl.length} clips · ${total}s${mixed} · branch ${esc(cut.branch)}</span></h3>
       <ol id="edl">${cut.edl.map((e, i) => `<li data-i="${i}"><b>${esc(e.cell)}</b> · ${esc(e.shot)} · ${esc(e.seconds)}s · take ${esc(e.frame_take)}<br><span class="muted">${esc(e.beat)}</span></li>`).join("")}</ol>
       <div class="row" style="margin-top:8px"><button id="playall">Play all</button></div></div>
   </section>`;
 }
 
-/** Plays a cut's clips in EDL order. Clips are fetched with the key and played from blob URLs. */
+/**
+ * Plays a cut: its mixed teaser.mp4 when there is one (clicking a clip seeks to it), else the clips in EDL
+ * order. Files are fetched with the key and played from blob URLs.
+ */
 async function hydrateCut() {
   const cut = state.cuts?.[0];
   const player = $("#player");
   if (!cut?.edl?.length || !player) return;
+  if (cut.mix) {
+    const starts = cut.edl.map((_, i) => cut.edl.slice(0, i).reduce((n, e) => n + Number(e.seconds), 0));
+    const url = await img(cut.branch, "video/teaser.mp4");
+    if (url && !player.src) player.src = url;
+    const mark = () => {
+      const i = starts.findLastIndex((t) => t <= player.currentTime + 0.01);
+      document.querySelectorAll("#edl li").forEach((li) => li.classList.toggle("now", Number(li.dataset.i) === i));
+    };
+    player.ontimeupdate = mark;
+    document.querySelectorAll("#edl li").forEach((li) => (li.onclick = () => { player.currentTime = starts[Number(li.dataset.i)]; player.play().catch(() => {}); }));
+    $("#playall").onclick = () => { player.currentTime = 0; player.play().catch(() => {}); };
+    return;
+  }
   const clipUrl = (i) => img(cut.branch, cut.edl[i].file);
   let i = 0;
   const play = async (n) => {
@@ -778,6 +813,11 @@ function cellHtml(cell) {
 
 async function hydrate(cutKept = false) {
   if (!cutKept) hydrateCut();
+  document.querySelectorAll("[data-play]").forEach((b) => (b.onclick = async () => {
+    const url = await img("main", b.dataset.play, false);
+    const a = $("#soundplayer");
+    if (url && a) { a.src = url; a.play().catch(() => {}); }
+  }));
   const cutButton = document.querySelector("[data-board-act=cut]");
   if (cutButton) cutButton.onclick = async () => {
     cutButton.disabled = true;

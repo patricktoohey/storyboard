@@ -5,6 +5,7 @@
 import { type Judge, type LlmKey, type Persona, type Player, SEAT_JOB, lastTalk, parseNoteReply, parsePersona } from "./cast-rules.ts";
 import { onMain } from "./board";
 import { MENU } from "./crew.ts";
+import { VOICES, type VoiceKey } from "./sound-rules.ts";
 import { WorkingTree } from "./git";
 import { ask } from "./models";
 import { repoRemote } from "./template";
@@ -56,15 +57,17 @@ crew room and in confessionals. Never admit this direction. Your actual work sho
  * A character, created by the model that will play it: a name, a short bio in its own voice, and how its
  * voice sounds. One correction on a bad answer, then an error (the caller falls back).
  */
-export async function createCharacter(env: Env, model: LlmKey, role: string, opts: { undersold?: boolean; teamName?: boolean; taken: string[] }) {
+export async function createCharacter(env: Env, model: LlmKey, role: string, opts: { undersold?: boolean; teamName?: boolean; taken: string[]; voice?: VoiceKey }) {
+	const heard = opts.voice ? VOICES[opts.voice].about : undefined;
 	const system = `${SHOW}
 
-You are joining as ${role}. Create the character you'll be for the whole season:
+You are joining as ${role}.${heard ? ` You'll be heard all season in this voice: ${heard}. Build the person this
+voice belongs to: their age, sex, where they're from and how they carry themselves should fit it.` : ""} Create the character you'll be for the whole season:
 - name: a first name, or first and last; not a real, famous person's name, and not the name of any AI model,
   company or lab. Your first name must differ from all of these, already taken: ${opts.taken.length ? opts.taken.join(", ") : "(none yet)"}.
 - bio: two or three sentences in your own voice: where you come from, what you're good at, what you care
   about in a film. Believable, not a joke.
-- voice: how you sound, in a few words (pitch, pace, texture, accent if any), for casting a voice later.
+- voice: how you sound, in a few words (pitch, pace, texture, accent if any)${heard ? ", in your own terms" : ""}.
 ${opts.teamName ? "- team_name: a name for the team you lead (two or three words).\n" : ""}${opts.undersold ? `\n${UNDERSELL}\n` : ""}
 ${IN_CHARACTER}
 
@@ -82,7 +85,7 @@ Reply with ONLY a JSON object: {"name": string, "bio": string, "voice": string${
 				user = `The first name "${parsed.name.split(/\s+/)[0]}" is taken. Create your character again, with another name.`;
 				continue;
 			}
-			return { persona: parsed, cost };
+			return { persona: { ...parsed, ...(opts.voice ? { voice_id: opts.voice } : {}) }, cost };
 		}
 		user = `Your last answer was rejected: ${parsed.error}. Reply again with ONLY the JSON object.`;
 	}
@@ -93,7 +96,7 @@ Reply with ONLY a JSON object: {"name": string, "bio": string, "voice": string${
 export async function createPlayerRepo(env: Env, player: Player, season: string) {
 	const created = await env.ARTIFACTS.create(player.repo, { description: `${player.name}, ${player.seat}, ${season}` });
 	const tree = await WorkingTree.init({ url: created.remote, token: created.token });
-	const profile = { name: player.name, seat: player.seat, bio: player.bio, voice: player.voice, season };
+	const profile = { name: player.name, seat: player.seat, bio: player.bio, voice: player.voice, voice_id: player.voice_id, season };
 	await tree.commit({ name: player.name }, `${player.name} joins the pool as a ${player.seat}\n\n${player.bio}`, {
 		"profile.json": JSON.stringify(profile, null, 2) + "\n",
 		"memory.md": `# ${player.name}: memory\n`,

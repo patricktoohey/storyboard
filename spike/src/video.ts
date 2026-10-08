@@ -1,7 +1,7 @@
 // Image-to-video: each printed frame becomes the first frame of its shot's clip. The video models live in
 // Cloudflare's unified catalog (env.AI.run with a provider/model id) and take the image as an HTTPS URL, so
 // the Worker signs a short-lived URL for one frame (frameUrl/verifyFrame) that needs no access key.
-import { MENU, videoRequest } from "./crew.ts";
+import { MENU, type VideoOption, videoRequest } from "./crew.ts";
 import { crewOf } from "./crew-env.ts";
 import type { Cell } from "./vocab.ts";
 
@@ -48,6 +48,8 @@ export function motionPrompt(cell: Pick<Cell, "beat" | "camera" | "shot">) {
 	return `${cell.beat} ${camera} Keep the framing, people, wardrobe and lighting exactly as in the image. Subtle, natural motion; cinematic.`;
 }
 
+export const SOUND_HINT = "Sound: the natural ambience and effects of the scene only; no music, no speech.";
+
 export const NEGATIVE_PROMPT = "morphing faces, extra people, text, watermark, flicker, distorted hands";
 
 /** Seconds for a cell's clip: its planned duration, within the model's range and the configured cap. */
@@ -70,7 +72,9 @@ export async function animate(
 	const crew = crewOf(env);
 	// Veo takes the frame as raw base64; the others fetch the signed URL themselves
 	const base64 = MENU.video[crew.video].imageAs === "base64" ? toBase64(await frame.jpeg()) : undefined;
-	const req = videoRequest(crew, { url: frame.url, base64 }, prompt, seconds, { seed, staticCamera });
+	// A clip with its own sound gets the scene's ambience only: music and voices are the score's and the lines'
+	const audio = Boolean((MENU.video[crew.video] as VideoOption).audio);
+	const req = videoRequest(crew, { url: frame.url, base64 }, audio ? `${prompt} ${SOUND_HINT}` : prompt, seconds, { seed, staticCamera });
 	if (crew.video === "wan-2.7-i2v") req.input.negative_prompt = NEGATIVE_PROMPT;
 	type Out = { video?: string; state?: string; result?: { video?: string } } | undefined;
 	const out = (await env.AI.run(req.model as keyof AiModels, req.input as never).catch(async (err) => {
@@ -88,7 +92,7 @@ export async function animate(
 	const mp4 = new Uint8Array(await res.arrayBuffer());
 	return {
 		mp4,
-		meta: { model: req.model, prompt: req.input.prompt as string, planned_seconds: seconds, seconds: req.billed, usd: req.usd, seed, input: { ...req.input, image: undefined, image_uri: undefined, image_input: undefined, first_frame_image: undefined }, bytes: mp4.byteLength, elapsed_ms: Date.now() - started },
+		meta: { model: req.model, audio, prompt: req.input.prompt as string, planned_seconds: seconds, seconds: req.billed, usd: req.usd, seed, input: { ...req.input, image: undefined, image_uri: undefined, image_input: undefined, first_frame_image: undefined }, bytes: mp4.byteLength, elapsed_ms: Date.now() - started },
 	};
 }
 

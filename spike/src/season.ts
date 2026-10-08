@@ -30,6 +30,7 @@ import {
 	speak,
 	personaSystem,
 } from "./cast";
+import { dealVoices } from "./sound-rules.ts";
 import {
 	type Cast,
 	DEFAULT_POOL,
@@ -185,17 +186,21 @@ export async function runCastJob(env: Env, season: string, origin: string, progr
 	const taken: string[] = [];
 	let cost = 0;
 	const fallback = (i: number) => ({ name: `Player ${i + 1}`, bio: "Keeps their own counsel.", voice: "even, quiet" });
+	// Every character is dealt a stock voice first, all different (22 voices for 4 leads, 16 players and 2
+	// judges), and builds its personality to fit it: leads, then players, then judges
+	const voices = dealVoices(s.teams.length + s.casting.pool.length + Object.keys(JUDGE_ROLES).length);
+	const voiceOf = { lead: (i: number) => voices[i], player: (i: number) => voices[s.teams.length + i], judge: (i: number) => voices[s.teams.length + s.casting!.pool.length + i] };
 
 	await progress("leads creating their characters");
 	const leads: Lead[] = [];
 	for (const t of s.teams) {
 		const model = leadModel(t.lead);
-		const made = await createCharacter(env, model, "the lead (showrunner) of a team: you decide what your team does, and you'll draft your crew", { teamName: true, taken }).catch(
-			(err) => ({ persona: { ...fallback(leads.length), team_name: t.team, error: String(err) }, cost: 0 }),
+		const made = await createCharacter(env, model, "the lead (showrunner) of a team: you decide what your team does, and you'll draft your crew", { teamName: true, taken, voice: voiceOf.lead(leads.length) }).catch(
+			(err) => ({ persona: { ...fallback(leads.length), team_name: t.team, voice_id: voiceOf.lead(leads.length), error: String(err) }, cost: 0 }),
 		);
 		cost += made.cost;
 		taken.push(made.persona.name);
-		leads.push({ team: t.team, name: made.persona.name, bio: made.persona.bio, voice: made.persona.voice, team_name: made.persona.team_name ?? t.team });
+		leads.push({ team: t.team, name: made.persona.name, bio: made.persona.bio, voice: made.persona.voice, voice_id: made.persona.voice_id, team_name: made.persona.team_name ?? t.team });
 	}
 
 	await progress(`${s.casting.pool.length} players creating their characters`);
@@ -209,7 +214,8 @@ export async function runCastJob(env: Env, season: string, origin: string, progr
 				createCharacter(env, p.model, `a ${p.seat} in the player pool: you ${SEAT_JOB[p.seat]}. The team leads will draft you onto their teams`, {
 					undersold: s.casting!.undersold.includes(i + j),
 					taken,
-				}).catch(() => ({ persona: fallback(i + j), cost: 0 })),
+					voice: voiceOf.player(i + j),
+				}).catch(() => ({ persona: { ...fallback(i + j), voice_id: voiceOf.player(i + j) }, cost: 0 })),
 			),
 		);
 		made.forEach((m, j) => {
@@ -223,6 +229,7 @@ export async function runCastJob(env: Env, season: string, origin: string, progr
 				name,
 				bio: m.persona.bio,
 				voice: m.persona.voice,
+				voice_id: m.persona.voice_id,
 				seat: group[j].seat,
 				model: group[j].model,
 				undersold: s.casting!.undersold.includes(i + j),
@@ -234,10 +241,11 @@ export async function runCastJob(env: Env, season: string, origin: string, progr
 	await progress("judges creating their characters");
 	const judges: Judge[] = [];
 	for (const judge of Object.keys(JUDGE_ROLES)) {
-		const made = await createCharacter(env, JUDGE_VOICE, JUDGE_ROLES[judge], { taken }).catch(() => ({ persona: { ...fallback(90), name: judge }, cost: 0 }));
+		const voice = voiceOf.judge(judges.length);
+		const made = await createCharacter(env, JUDGE_VOICE, JUDGE_ROLES[judge], { taken, voice }).catch(() => ({ persona: { ...fallback(90), name: judge, voice_id: voice }, cost: 0 }));
 		cost += made.cost;
 		taken.push(made.persona.name);
-		judges.push({ judge, name: made.persona.name, bio: made.persona.bio, voice: made.persona.voice });
+		judges.push({ judge, name: made.persona.name, bio: made.persona.bio, voice: made.persona.voice, voice_id: made.persona.voice_id });
 	}
 
 	await progress("opening the players' repos");
@@ -247,7 +255,7 @@ export async function runCastJob(env: Env, season: string, origin: string, progr
 			const t = s.teams.find((x) => x.team === l.team)!;
 			await onMain(await repoRemote(env, t.repo), (tree) =>
 				tree.commit({ name: l.name }, `${l.name} leads ${l.team_name}\n\n${l.bio}`, {
-					"cast/lead.json": json({ name: l.name, bio: l.bio, voice: l.voice, team_name: l.team_name }),
+					"cast/lead.json": json({ name: l.name, bio: l.bio, voice: l.voice, voice_id: l.voice_id, team_name: l.team_name }),
 				}),
 			);
 		}),
@@ -503,12 +511,18 @@ async function roundTalk(env: Env, s: Season, arena: string, state: ArenaState, 
 			];
 			// What each speaker really did, so nobody claims work that wasn't theirs (round 1 of the first cast
 			// season: a writer with no tools yet confessed to writing the characters)
-			const turns = me ? (await ledger(env, me.board)).filter((r) => r.kind === "turn" && r.result === "acted").reverse().map((r) => r.detail.slice(0, 200)) : [];
+			const rows = me ? (await ledger(env, me.board)).reverse() : [];
+			const turns = rows.filter((r) => r.kind === "turn" && r.result === "acted").map((r) => r.detail.slice(0, 200));
+			// The writer's lines and the sound designer's scores and casting, from the board's finished sound jobs
+			const work = (kind: string) => rows.filter((r) => r.kind === kind && r.status === "done").map((r) => r.detail.slice(0, 300));
 			const didOf = (sp: (typeof speakers)[number]) => {
 				const said = context.crew_room.filter((l) => l.includes(`**${sp.who.name}**:`) || l.includes(`**${sp.who.name}** →`));
 				if (!sp.player) return { your_turns: turns, you_said: said };
 				if (sp.player.seat === "cinematographer") return { you: "wrote the image prompt for every take, from the director's cells and your lead's notes", you_said: said };
-				return { you: `nothing on this film yet: the ${sp.player.seat}'s tools arrive later in the season, so you only had what you said in the crew room`, you_said: said };
+				const did = sp.player.seat === "writer" ? work("lines") : [...work("score"), ...work("lines").map((l) => `voices you cast: ${l.split("voices ")[1] ?? l}`)];
+				return did.length
+					? { you: did, you_said: said }
+					: { you: `nothing on this film: your lead never asked for ${sp.player.seat === "writer" ? "lines" : "a score or voices"}, so you only had what you said in the crew room`, you_said: said };
 			};
 			const said = await Promise.all(
 				speakers.map((sp) => confess(env, sp.who, sp.model, sp.role, sp.memory, { ...context, what_you_did: didOf(sp) }, Boolean(sp.player)).catch(() => undefined)),

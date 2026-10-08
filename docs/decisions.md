@@ -243,6 +243,32 @@ budget (`budget_tokens`) is refused with 7003 on Opus and Sonnet 5.5; adaptive t
 (checked 2026-10-08). Workers AI's reasoning models (Kimi, Nemotron, Gemma) think by default. Players
 don't think hard: they talk inside someone else's turn.
 
+## D30: sound is the crew's work, and the mix runs in a Container
+
+A film needs sound, and a show needs the cast heard. Three pieces, each committed like everything else:
+
+- **Score and lines are tools the lead directs** (`score`, `lines`), and in a cast season the players do
+  the work in character: the sound designer writes the music prompt and casts voices, the writer writes the
+  lines. Both live on main (`sound/score.mp3`, `sound/lines/*.mp3`, `sound/lines.csv`,
+  `sound/voices.json`), so the next cut carries them, and `remix` puts new sound under an existing cut
+  without rendering video again. Music is ElevenLabs Music v2, speech Eleven v3, each answering in about
+  4 s through the AI binding (checked 2026-10-08).
+- **Voices come first.** Every character in a season is dealt one of 22 stock ElevenLabs voices, all
+  different, and builds its personality to fit it: the bio follows the voice, not the other way round, so
+  a character never sounds wrong for who it says it is. A film's own characters are cast from the same list
+  by the sound designer and keep their voice in `sound/voices.json`.
+- **The mix is ffmpeg in a Cloudflare Container** (`mixer/`, behind the `Mixer` Durable Object), since a
+  Worker can't run it. The Worker writes ffmpeg's arguments (`mixPlan` in sound-rules.ts, unit-tested): clips
+  in EDL order fitted to 1280x544, each clip's own sound or silence, the score under it, lines on cue with
+  the bed ducked beneath them. Every cut is mixed after assembly; `video/teaser.mp4` and `video/mix.json`
+  (cues, levels, sources and a signature of the sound used) go onto the cut branch with the sound, so a
+  cut is the whole film on its own.
+
+Video with its own sound: FLUX.3 Video (5-20 s, 21:9, an AAC track) animated a two-person medium shot
+with ambience in 94 s and joins the draft at $0.17 a clip. Grok Imagine Video refuses every request with
+7003, including the catalog's text-to-video example, and stays off the draft. Wan 2.7 and Hailuo have no
+sound option.
+
 ## Backlog: staging continuity and non-human characters
 
 Observed on the boards so far, not yet addressed:

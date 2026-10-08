@@ -7,7 +7,7 @@
 import { ACTIONS, type Action, type BoardSummary, COMPARE_USD, type Decision, allowedActions, parseDecision } from "./arena-rules.ts";
 import { closeArena, readRules, recordSubmission } from "./arena";
 import { addNote, boardState, onMain, startCut } from "./board";
-import { type Crew, DEFAULT_CREW, MENU, SLOTS, type Slot, clipCost, crewCosts, crewFrom, draftOptions, fitToBudget } from "./crew.ts";
+import { type Crew, DEFAULT_CREW, MENU, SLOTS, type Slot, type VideoOption, clipCost, crewCosts, crewFrom, draftOptions, fitToBudget } from "./crew.ts";
 import { withCrew } from "./crew-env";
 import { LimitError } from "./ledger.ts";
 import { ledger, submit } from "./coordinator";
@@ -15,7 +15,9 @@ import { WorkingTree } from "./git";
 import { boardHistory, compareVersions, restoreVersion, saveVersion } from "./history";
 import { COMMONS, CREW_ROOM, type TeamCast, appendTalk, noteReply, personaSystem, readTalk, talkReply } from "./cast";
 import { type Player, talkLine } from "./cast-rules.ts";
-import type { Job } from "./jobs";
+import type { Job, JobRequest } from "./jobs";
+import { filmSeconds, soundState } from "./sound";
+import { LINES_ESTIMATE, scoreEstimate } from "./sound-rules.ts";
 import { ask } from "./models";
 import { loadSkill } from "./skills";
 import { repoRemote } from "./template";
@@ -39,14 +41,22 @@ Your board is a Git repository, and its history is yours to use. Every take is i
 (cut/v1, cut/v2). You can save the board as it is (a named branch), restore any earlier version (a new
 commit that brings the old content back; nothing is lost, and you can restore forward again), and have the
 judges compare two versions side by side before you choose. Use this: try a bolder direction after saving
-a safe one, compare, keep the better; print an earlier take if a later one is worse; submit the better cut.`;
+a safe one, compare, keep the better; print an earlier take if a later one is worse; submit the better cut.
+
+## Sound
+A cut is mixed into one film with whatever sound the board has: a score (one music bed for the whole film)
+and lines (dialogue and voiceover on cells, each in its speaker's voice), laid over the clips' own sound if
+your video model makes any. Sound lives on main like everything else; a new cut carries it, and a remix
+puts the current sound under an existing cut without rendering its video again. A film without sound is
+allowed, and judged as such.`;
 
 // Where a held note waits: the cinematographer pushed back, and the lead hasn't noted that cell again
 const HELD = "talk/held.json";
 type Held = Record<string, { note: string; reply: string; alternative?: string; by: string }>;
 
 const crewWorks = (cast: TeamCast, blind: boolean) => `## Your crew and the room
-You lead people, not tools: ${cast.players.map((p) => `${p.name} (${p.seat})`).join(", ")}. Your
+You lead people, not tools: ${cast.players.map((p) => `${p.name} (${p.seat})`).join(", ")}. Your writer
+writes the lines and your sound designer the score and the voices, each from your direction. Your
 cinematographer reads every note before shooting it and may push back; a note that's pushed back is held,
 not shot, until you note that cell again (your note, their suggestion, or a new one), which is then shot as
 given. Use the crew room (talk) when it helps the film: ask for ideas, argue a choice, settle a
@@ -145,6 +155,7 @@ export async function runTurnJob(env: Env, job: TurnJob, progress: Progress) {
 	const cuts = state && "cuts" in state ? (state.cuts ?? []).map((c) => c.name) : [];
 	// A take that failed never finishes: it must read as failed, not "shooting" (Opus waited on one)
 	const failedTakes = new Map(rows.filter((r) => r.kind === "take" && r.status === "failed").map((r) => [`${r.cell}#${r.take}`, r.detail]));
+	const sound = planned ? await soundState(env, board, cuts) : undefined;
 	const summary: BoardSummary = {
 		drafted: Boolean(drafted),
 		planned,
@@ -158,7 +169,7 @@ export async function runTurnJob(env: Env, job: TurnJob, progress: Progress) {
 		})),
 		cut: cuts[0],
 		cuts,
-		cutRunning: open(["video", "assemble"]) > 0,
+		cutRunning: open(["video", "assemble", "mix"]) > 0,
 		submitted,
 		openJobs: open(),
 		spent: rows.reduce((sum, r) => sum + (Number(r.cost_est) || 0), 0),
@@ -166,7 +177,15 @@ export async function runTurnJob(env: Env, job: TurnJob, progress: Progress) {
 		now: Date.now(),
 		deadline,
 		cutSeconds: clips.reduce((a, b) => a + b, 0),
-		prices: { take: costs.take, turn: costs.turn, cut: clips.reduce((sum, sec) => sum + clipCost(crew, sec).usd, 0), board: costs.board },
+		prices: {
+			take: costs.take,
+			turn: costs.turn,
+			cut: clips.reduce((sum, sec) => sum + clipCost(crew, sec).usd, 0),
+			board: costs.board,
+			score: scoreEstimate(clips.reduce((a, b) => a + b, 0)),
+			lines: LINES_ESTIMATE,
+		},
+		...(sound ? { sound: { score: Boolean(sound.score), lines: sound.lines.length, current: sound.current } } : {}),
 		...(cast ? { talk: { names: cast.players.map((p) => p.name), commons: !blind } } : {}),
 	};
 
@@ -216,7 +235,14 @@ export async function runTurnJob(env: Env, job: TurnJob, progress: Progress) {
 			budget: {
 				spent: Number(summary.spent.toFixed(2)),
 				total: summary.budget,
-				prices: { take: Number(costs.take.toFixed(3)), cut: Number(summary.prices.cut.toFixed(2)), replan: Number((costs.board + summary.cells.length * costs.take).toFixed(2)), compare: COMPARE_USD },
+				prices: {
+					take: Number(costs.take.toFixed(3)),
+					cut: Number(summary.prices.cut.toFixed(2)),
+					replan: Number((costs.board + summary.cells.length * costs.take).toFixed(2)),
+					compare: COMPARE_USD,
+					score: Number(summary.prices.score!.toFixed(2)),
+					lines: Number(LINES_ESTIMATE.toFixed(2)),
+				},
 			},
 			crew: cinematographer ? { ...crew, llm: `${cinematographer.name} (your cinematographer)` } : crew,
 			...(cfg.bonus_usd ? { producer_bonus_usd: cfg.bonus_usd } : {}),
@@ -229,6 +255,12 @@ export async function runTurnJob(env: Env, job: TurnJob, progress: Progress) {
 					}
 				: {}),
 			lessons,
+			sound: sound && {
+				score: sound.score ?? "none yet",
+				lines: sound.lines.length ? sound.lines : "none yet",
+				cuts_mixed_with_this_sound: sound.current,
+				video_model_has_its_own_sound: Boolean((MENU.video[crew.video] as VideoOption).audio),
+			},
 			cells: (state?.cells ?? []).map((c) => ({
 				cell: c.id,
 				shot: `${c.shot}, ${c.camera}`,
@@ -350,6 +382,18 @@ export async function runTurnJob(env: Env, job: TurnJob, progress: Progress) {
 				detail += `: ${cut.cut}, ${summary.cutSeconds}s`;
 				break;
 			}
+			case "score":
+			case "lines": {
+				const direction = args.direction as string;
+				const req: JobRequest = action === "score" ? { kind: "score", direction, seconds: await filmSeconds(env, board) } : { kind: "lines", direction };
+				await submit(env, board, [req]);
+				detail += `: "${direction}"`;
+				break;
+			}
+			case "remix":
+				await submit(env, board, [{ kind: "mix", cut: args.cut as string }]);
+				detail += `: cut ${args.cut}`;
+				break;
 			case "talk": {
 				if (!cast) break;
 				const to = args.to as string;

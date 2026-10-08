@@ -33,9 +33,10 @@ test("a 4-cell film: ~$0.85 with the budget crew, ~$2.30 with the premium one", 
 	assert.ok(Math.abs(cheapestFilm(premium, clips) - 2.3) < 0.2, String(cheapestFilm(premium, clips)));
 });
 
-test("the draft only offers video models that work on photoreal people: LTX, Seedance and Veo are out", () => {
-	// Checked live: LTX's provider is out of funds; Seedance and Veo refuse frames that show realistic people
-	assert.deepEqual(draftOptions("video").sort(), ["hailuo-2.3-fast", "wan-2.7-i2v"]);
+test("the draft only offers video models that work on photoreal people: LTX, Seedance, Veo and Grok are out", () => {
+	// Checked live: LTX's provider is out of funds; Seedance and Veo refuse frames that show realistic people;
+	// Grok refuses every request (7003); FLUX.3 animated a two-person medium shot with its own sound
+	assert.deepEqual(draftOptions("video").sort(), ["flux-3-video", "hailuo-2.3-fast", "wan-2.7-i2v"]);
 	assert.equal(draftOptions("renderer").length, 3);
 });
 

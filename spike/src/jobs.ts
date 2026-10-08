@@ -27,6 +27,10 @@ export type Job = JobBase &
 		| { kind: "video"; cell: string; cut: string; origin: string; seconds: number }
 		// Merge a cut's video branches into cut/<cut> with an edit decision list
 		| { kind: "assemble"; cut: string; cells: string[] }
+		// Sound (sound.ts): the score at the film's length, the lines in their voices, and the mix of a cut
+		| { kind: "score"; direction: string; seconds: number }
+		| { kind: "lines"; direction: string }
+		| { kind: "mix"; cut: string }
 		// Arena: one showrunner turn on a team's board (showrunner.ts)
 		| { kind: "turn"; arena: string; team: string; origin: string }
 		// Arena: score a team's board at its current main (or its submission, in the final round)
@@ -49,6 +53,9 @@ export type JobRequest =
 	| { kind: "print"; picks: { cell: string; branch: string }[]; message: string }
 	| { kind: "video"; cell: string; cut: string; origin: string; seconds: number }
 	| { kind: "assemble"; cut: string; cells: string[] }
+	| { kind: "score"; direction: string; seconds: number }
+	| { kind: "lines"; direction: string }
+	| { kind: "mix"; cut: string }
 	| { kind: "turn"; arena: string; team: string; origin: string }
 	| { kind: "judge"; team: string; board: string; final: boolean }
 	| { kind: "compare"; final: boolean }

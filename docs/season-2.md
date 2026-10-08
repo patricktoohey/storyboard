@@ -144,18 +144,20 @@ Everything needed is in Cloudflare's catalog, billed through AI Gateway like the
 | Piece | Model | Price | For a 30 s teaser |
 |---|---|---|---|
 | Music bed | `elevenlabs/music-v2` (instrumental, exact length in ms) | $0.0025 / s | ~$0.08 |
-| Alternative music | `minimax/music-2.6` | to check | |
 | Dialogue and voiceover | `elevenlabs/eleven-v3` (expressive, voice IDs, audio tags) | $0.0001 / character | ~$0.03 |
-| Cheap voice | `@cf/deepgram/aura-2-en` (Workers AI) | to check | |
-| Clips with their own sound | `xai/grok-imagine-video` (image-to-video, dialogue, effects, music) | $0.05-0.07 / s | ~$1.50-2.10 |
-| | `black-forest-labs/flux-3-video` (i2v, 5-20 s, `generate_audio`) | from $0.17 (to check per clip or per second) | |
+| Clips with their own sound | `black-forest-labs/flux-3-video` (i2v, 5-20 s, 21:9, `generate_audio`) | $0.17 a clip at hd | ~$1.00 |
+| | `xai/grok-imagine-video` | refuses every request (7003) | |
+
+Checked live through the AI binding (2026-10-08): music and speech answer in about 4 s; FLUX.3 animated a
+two-person medium shot with its own ambience in 94 s; all 22 stock voices speak. Aura answers with a
+stream rather than a file and wasn't needed.
 
 Sound is cheap next to video: a whole score and voiceover cost less than one Hailuo clip.
 
-**Every character gets a voice.** At the start of the season each agent picks a voice from the ElevenLabs
-voice list (stock voices only, no clones of real people), so the same character sounds the same in every
-team's teaser. A teaser can then quote what really happened, in the speaker's own voice: the season's
-transcripts are the footage.
+**Every character gets a voice, first.** At casting each agent is dealt one of 22 stock ElevenLabs voices
+(no clones of real people), all different, and builds its personality to fit it: age, sex, origin and
+manner follow the voice. The same character sounds the same in every team's teaser, and a teaser can quote
+what really happened in the speaker's own voice: the season's transcripts are the footage.
 
 **Mixing** needs ffmpeg, which a Worker can't run. A **Cloudflare Container** can (Cloudflare has an
 ffmpeg Worker example; billing is per 10 ms running). The cut's clips are concatenated in EDL order. Each
@@ -165,13 +167,17 @@ in-browser recording that the replays use is the fallback.
 
 New tools:
 
-- `score {"prompt": string}`: the music bed, generated at the cut's length. Committed as
-  `sound/score.mp3` with its prompt; a score is a version like any other.
-- `lines {"lines": [{"cell": "03", "speaker": string, "text": string}]}`: dialogue and voiceover on cells,
-  each in its speaker's voice; cue times come from the EDL. Committed as `sound/lines/*.mp3`.
-- Video models with native audio join the `video` menu; the team decides whether clips carry their own
-  sound or the score carries the film.
-- `cut` mixes whatever sound exists. A cut without sound is allowed, and judged as such.
+New tools (built):
+
+- `score {"direction": string}`: the sound designer turns the direction into a music prompt; the bed is
+  made at the film's length. Committed as `sound/score.mp3` with `sound/score.json`.
+- `lines {"direction": string}`: the writer writes dialogue and voiceover on cells (speakers are the
+  film's characters or the narrator), the sound designer casts a voice for each new speaker, and each line
+  is spoken. Committed as `sound/lines/*.mp3`, `sound/lines.csv`, `sound/voices.json`; cues come from the EDL.
+- `remix {"cut"?}`: the current sound under an existing cut, free, without rendering video again.
+- FLUX.3 Video joins the `video` menu with its own sound; the team decides whether clips carry ambience or
+  the score carries the film.
+- Every cut is mixed after assembly. A cut without sound is allowed, and judged as such.
 
 ## Seeing the rivals
 
@@ -241,15 +247,15 @@ it.
 
 ## Build plan
 
-1. **Cast and talk**: agents name themselves and write bios (secret instructions to undersell for one or two),
+1. **Cast and talk** (built, D28): agents name themselves and write bios (secret instructions to undersell for one or two),
    crew room replies to notes, the commons repo, confessionals, judges' remarks. Players become repos.
-2. **Sound**: `score`, `lines`, voices per character, native-audio video models (live-checked), costs in
+2. **Sound** (built, D30): `score`, `lines`, voices per character, native-audio video models (live-checked), costs in
    the menu.
-3. **The mixer**: a Container with ffmpeg, a `mix` job after `assemble`, `teaser.mp4` on the cut branch,
+3. **The mixer** (built, D30): a Container with ffmpeg, a `mix` job after `assemble`, `teaser.mp4` on the cut branch,
    the UI and replays playing it.
 4. **The season format**: the draft, rivals in the turn view (with public messages and private reasons), twists as offers, elimination, the blind
    finale's protect and steal, the wildcard, chained seasons.
-5. **Thinking levels and Nemotron**: live checks through the binding; longer timeouts for Kimi.
+5. **Thinking levels and Nemotron** (built, D29): live checks through the binding; longer timeouts for Kimi.
 6. **The teaser judge** (after a live test of video input), rubric skill `judge-teaser`.
 7. **A dry run** (2 teams, 1 round, small budget), then the real season.
 

@@ -19,7 +19,12 @@ export const ACTIONS = {
 	retake: '{"cell": "02"} Re-shoot one cell as it is, for a different render',
 	print:
 		'{"takes"?: {"02": 1, ...}} Print takes onto the board (a merge). Default: the best finished take of each cell. Name a take per cell to print a specific one, including an earlier take: every take is kept on its own branch',
-	cut: "Make the video: animate every printed frame and assemble a new cut (cut/v1, cut/v2, ...)",
+	cut: "Make the video: animate every printed frame and assemble a new cut (cut/v1, cut/v2, ...), mixed with whatever sound the board has",
+	score:
+		'{"direction": string} A score for the whole film: your sound designer (or you, without one) writes the music from your direction, at the film\'s length. A new score replaces the old; the next cut or remix carries it',
+	lines:
+		'{"direction": string} Dialogue and voiceover: your writer (or you) writes lines on the cells, each spoken in a stock voice its character keeps. New lines replace the old; the next cut or remix carries them',
+	remix: '{"cut"?: "v1"} Mix a cut again with the board\'s sound as it is now (score, lines), without rendering its video again. Default: the latest cut. Free',
 	submit: '{"cut"?: "v1"} Submit a cut; the team stops working. Default: the latest cut; any earlier cut can be submitted instead',
 	save: '{"name": string} Save the board as it is now under a name (a branch), to compare against or come back to later. Free',
 	restore:
@@ -56,8 +61,10 @@ export interface BoardSummary {
 	deadline: number;
 	// Video seconds a cut of the whole board would need (each cell's clip, capped)
 	cutSeconds: number;
-	// The crew's prices: one take, one turn, the whole cut at its video model's billing, and a new plan
-	prices: { take: number; turn: number; cut: number; board?: number };
+	// The crew's prices: one take, one turn, the whole cut at its video model's billing, a new plan, and sound
+	prices: { take: number; turn: number; cut: number; board?: number; score?: number; lines?: number };
+	// The board's sound: a score, how many lines, and which cuts are mixed with the sound as it is now
+	sound?: { score: boolean; lines: number; current: string[] };
 	// A cast team: its players' names (for talk), and whether the commons is open (not in a blind round)
 	talk?: { names: string[]; commons: boolean };
 }
@@ -137,6 +144,11 @@ export function allowedActions(s: BoardSummary): Action[] {
 	if (s.cut) actions.push("submit");
 	actions.push("save", "restore");
 	if (s.spent + COMPARE_USD + videoCost <= s.budget) actions.push("compare");
+	// Sound may never eat the video's money either
+	if (s.prices.score !== undefined && s.spent + s.prices.score + videoCost <= s.budget) actions.push("score");
+	if (s.prices.lines !== undefined && s.cells.length && s.spent + s.prices.lines + videoCost <= s.budget) actions.push("lines");
+	// A remix is worth it when the sound has changed since the latest cut was mixed
+	if (s.cut && s.sound && (s.sound.score || s.sound.lines) && !s.sound.current.includes(s.cut)) actions.push("remix");
 	if (s.talk?.names.length && s.spent + s.prices.turn + videoCost <= s.budget) actions.push("talk");
 	if (s.talk?.commons) actions.push("post");
 	actions.push("wait");
@@ -232,6 +244,17 @@ export function parseDecision(text: string, allowed: Action[], s: BoardSummary):
 			const message = str(a.message, 600);
 			if (!message) return { error: "post needs a message" };
 			return { action, args: { message }, reason };
+		}
+		case "score":
+		case "lines": {
+			const direction = str(a.direction, 600);
+			if (!direction) return { error: `${action} needs a direction` };
+			return { action, args: { direction }, reason };
+		}
+		case "remix": {
+			const cut = str(a.cut, 20)?.replace(/^cut\//, "") ?? s.cut;
+			if (!cut || !(s.cuts ?? [s.cut]).includes(cut)) return { error: `no cut "${String(a.cut)}" (cuts: ${(s.cuts ?? []).join(", ")})` };
+			return { action, args: { cut }, reason };
 		}
 		case "replan": {
 			const direction = str(a.direction, 600);

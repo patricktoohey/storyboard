@@ -9,6 +9,8 @@
 //   GET  /boards                               list boards
 //   POST /boards                               {"concept", "cells"?, "skills"?: {"cinematographer": "cinematographer-noir"}} -> 202, queued
 //   POST /boards/:repo/cut                     animate every printed frame (image-to-video), then assemble cut/vN
+//   POST /boards/:repo/score|lines             {"direction"}  the score at the film's length, or the film's lines in their voices
+//   POST /boards/:repo/mix                     {"cut": "v1"}  mix a cut (clips, score, lines) into cut/v1:video/teaser.mp4
 //   GET  /public/frame.jpg?...&sig=            one frame via a signed, expiring URL (for the video provider; no key)
 //   GET  /boards/:repo/jobs                    the jobs ledger (jobs.csv on the board's `jobs` branch), newest first
 //   GET  /boards/:repo/state                   everything the UI shows: cells, takes, notes, skills, main log
@@ -36,10 +38,11 @@ import { type TeamSpec, arenaState, closeArena, createArena, listArenas, teamSpe
 import { arenaTimeline, saveReplay } from "./replay";
 import { createSeason, listSeasons, seasonState } from "./season";
 import { consume } from "./consumer";
+import { filmSeconds } from "./sound";
 import { ledger, submit, sweep } from "./coordinator";
 import { WorkingTree } from "./git";
 import { LimitError } from "./ledger.ts";
-import type { Job } from "./jobs";
+import type { Job, JobRequest } from "./jobs";
 import { isRole, listSkills } from "./skills";
 import { TEMPLATE, ensureTemplate, promoteSkill, repoRemote } from "./template";
 import ui from "./ui.html?raw";
@@ -58,6 +61,9 @@ import { withCrew } from "./crew-env";
 import { probeLlm } from "./models";
 
 const json = async <T>(request: Request) => (await request.json().catch(() => ({}))) as T;
+
+// The ffmpeg Container's Durable Object (cloudflare.config.ts)
+export { Mixer } from "./mixer";
 
 export default {
 	async fetch(request, env) {
@@ -172,6 +178,26 @@ export default {
 				const clip = await animate(withCrew(env, crew), frame, "Subtle natural motion; the camera stays still.", seconds, true);
 				return Response.json({ ...clip.meta, input: undefined });
 			}
+			// Any catalog model with a raw input, for checking what a provider accepts: "$FRAME" in the input becomes a
+			// signed URL for a printed frame ({board, cell}); a returned audio or video URL is downloaded and measured
+			if (method === "POST" && root === "debug" && repoName === "run") {
+				const { model, input, board, cell } = await json<{ model: string; input: Record<string, unknown>; board?: string; cell?: string }>(request);
+				let body = JSON.stringify(input);
+				if (board && cell) {
+					using handle = await env.ARTIFACTS.get(board);
+					const [head] = await handle.log({ ref: "main", limit: 1 });
+					body = body.replaceAll('"$FRAME"', JSON.stringify(await frameUrl(env, url.origin, board, head.hash, `cells/${cell}/frame.webp`)));
+				}
+				const started = Date.now();
+				try {
+					const out = (await env.AI.run(model as keyof AiModels, JSON.parse(body) as never)) as unknown as Record<string, unknown>;
+					const media = JSON.stringify(out).match(/"(?:audio|video)":"(https:[^"]+)"/)?.[1];
+					const bytes = media ? (await (await fetch(media)).arrayBuffer()).byteLength : undefined;
+					return Response.json({ model, ms: Date.now() - started, bytes, media, raw: JSON.stringify(out).slice(0, 1500) });
+				} catch (e) {
+					return Response.json({ model, ms: Date.now() - started, error: String(e) });
+				}
+			}
 			if (method === "POST" && root === "sweep") {
 				return Response.json({ swept: await sweep(env, (await listBoards(env)).map((b) => b.name)) });
 			}
@@ -199,6 +225,18 @@ export default {
 					// One image-to-video job per printed cell; the ledger assembles the cut when they finish
 					const { cut, requests, group } = await startCut(env, repoName, url.origin);
 					return Response.json({ cut, jobs: await submit(env, repoName, requests, group) }, { status: 202 });
+				}
+				// Sound: a score at the film's length, the film's lines, or a (re)mix of a cut with the board's sound now
+				if (method === "POST" && (action === "score" || action === "lines")) {
+					const { direction } = await json<{ direction?: string }>(request);
+					if (!direction) return Response.json({ error: "direction is required" }, { status: 400 });
+					const req: JobRequest = action === "score" ? { kind: "score", direction, seconds: await filmSeconds(env, repoName) } : { kind: "lines", direction };
+					return Response.json({ jobs: await submit(env, repoName, [req]) }, { status: 202 });
+				}
+				if (method === "POST" && action === "mix") {
+					const { cut } = await json<{ cut?: string }>(request);
+					if (!cut) return Response.json({ error: "cut is required (v1, v2, ...)" }, { status: 400 });
+					return Response.json({ jobs: await submit(env, repoName, [{ kind: "mix", cut: cut.replace(/^cut\//, "") }]) }, { status: 202 });
 				}
 				if (method === "POST" && action === "cells" && id) {
 					if (sub === "takes") {

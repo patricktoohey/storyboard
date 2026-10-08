@@ -60,8 +60,9 @@ Working and deployed (Workers, Artifacts, Queues, Workers AI, AI Gateway, Images
 Next: [Season 2](docs/season-2.md), a 30-second teaser about the show itself, with sound and dialogue.
 Built so far: the cast (every agent a named character; players drafted, their models hidden), the crew
 room, the commons, confessionals and judges' remarks, all committed to the repos (D28), and leads that
-think hard (D29). Still to build: sound, the mixer, the season format (twists, elimination, protect and
-steal), the teaser judge. Then the demo video.
+think hard (D29), and sound: a score and lines written by the players in their dealt voices, video with
+its own sound, and every cut mixed into `teaser.mp4` by ffmpeg in a Container (D30). Still to build: the
+season format (rivals, twists, elimination, protect and steal), the teaser judge. Then the demo video.
 
 ## Try it
 

@@ -4,6 +4,7 @@
 // a budget bonus to cover what the stronger model costs. Talk (the crew room, the commons, confessionals,
 // judges' remarks) is plain markdown committed to the repos. Pure: unit-tested in test/cast.test.ts.
 import { MENU } from "./crew.ts";
+import type { VoiceKey } from "./sound-rules.ts";
 
 export const SEATS = ["cinematographer", "writer", "sound"] as const;
 export type Seat = (typeof SEATS)[number];
@@ -18,8 +19,10 @@ export const SEAT_JOB: Record<Seat, string> = {
 export interface Persona {
 	name: string;
 	bio: string;
-	// How the character sounds, in a few words: for casting a stock voice later
+	// How the character sounds, in its own words
 	voice: string;
+	// The stock voice it speaks in (sound-rules.ts VOICES): dealt first, and the character built to fit it
+	voice_id?: VoiceKey;
 }
 
 export interface Player extends Persona {
