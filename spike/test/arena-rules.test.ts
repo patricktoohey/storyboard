@@ -66,6 +66,9 @@ test("near the deadline the clock decides: print what's finished, then cut", () 
 	const unprinted = board({ deadline: late, cells: [{ id: "01", takes: [take(1)] }, { id: "02", printed: 1, takes: [take(1)] }] });
 	assert.deepEqual(allowedActions(unprinted), ["print"]);
 	assert.deepEqual(allowedActions(board({ deadline: late })), ["cut"]);
+	// Running retakes don't hold up the clock's mandate
+	assert.deepEqual(allowedActions(board({ deadline: late, openJobs: 2 })), ["cut"]);
+	assert.deepEqual(allowedActions(unprinted.openJobs === 0 ? { ...unprinted, openJobs: 2 } : unprinted), ["print"]);
 });
 
 test("print picks the latest passing, current take, and fills unprinted cells even without one", () => {

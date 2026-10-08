@@ -79,7 +79,7 @@ export function allowedActions(s: BoardSummary): Action[] {
 	if (s.submitted) return [];
 	if (!s.drafted) return ["draft"];
 	if (!s.planRequested) return ["plan"];
-	if (!s.planned || s.openJobs > 0 || s.cutRunning) return ["wait"];
+	if (!s.planned || s.cutRunning) return ["wait"];
 	// Video is required: a finished cut is submitted at once
 	if (s.cut) return ["submit"];
 
@@ -89,11 +89,14 @@ export function allowedActions(s: BoardSummary): Action[] {
 	const picks = printPicks(s);
 	const canCut = allPrinted && s.spent + videoCost <= s.budget;
 
-	// Out of time: finish the board and cut now, or the team has nothing to submit
+	// Out of time: finish the board and cut now, or the team has nothing to submit. This comes before
+	// waiting on running work: slow retakes must not hold up the cut (the crew arena's auteur printed with
+	// 3.5 minutes left because it waited on two retakes)
 	if (timeLeft < CUT_WALL_S + CUT_MARGIN_S) {
 		if (picks.length) return ["print"];
 		return canCut ? ["cut"] : ["wait"];
 	}
+	if (s.openJobs > 0) return ["wait"];
 
 	const actions: Action[] = [];
 	// Notes and retakes may never eat the money the required video needs

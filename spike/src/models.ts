@@ -43,11 +43,18 @@ async function chat(env: Env, model: string, system: string, user: string) {
 		{ role: "system", content: system },
 		{ role: "user", content: user },
 	];
+	// Reasoning models (Gemma 4, Kimi) think before answering, in the same token budget: at 2048 the director's
+	// plan came back empty, all of it spent on reasoning
 	const out = (await withRetry(() =>
-		env.AI.run(model as keyof AiModels, { messages, max_tokens: 2048 } as never),
-	)) as { response?: unknown };
-	// Some models return already-parsed JSON in `response`
-	return typeof out.response === "string" ? out.response : JSON.stringify(out.response);
+		env.AI.run(model as keyof AiModels, { messages, max_tokens: 8192 } as never),
+	)) as { response?: unknown; choices?: { message?: { content?: string } }[] };
+	// Workers AI models answer in `response` (sometimes already-parsed JSON); OpenAI-style ones (Gemma 4,
+	// Kimi, Nemotron) in choices[0].message.content
+	if (typeof out.response === "string") return out.response;
+	if (out.response !== undefined && out.response !== null) return JSON.stringify(out.response);
+	const content = out.choices?.[0]?.message?.content;
+	if (typeof content === "string") return content;
+	throw new Error(`${model} returned no text: ${JSON.stringify(out).slice(0, 200)}`);
 }
 
 function extractJson<T>(text: string): T {

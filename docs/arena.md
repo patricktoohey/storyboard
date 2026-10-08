@@ -348,3 +348,28 @@ decision; a ticker of events; the final leaderboard; then the winner's film) and
 browser's MediaRecorder. The recording is committed to the arena on an orphan branch `replay/rN`.
 
 The first arena's replay is `replay/r1/replay.mp4` in `arena-2026-10-07-afb12e`: 129 s, 15.8 MB, 79 events.
+
+## The crew arena (2026-10-08)
+
+Brief "A 30-second story about a small act of kindness between strangers", 3 teams, 20 minutes, $5 each,
+4 cells, crews drafted on turn 1.
+
+| Team | Drafted crew | Spent | Submitted | Final (craft / story) |
+|---|---|---|---|---|
+| **documentarian** | Gemma 4 · klein-9b · Clef · Hailuo | $1.07 | 01:23 | **2.68** (2.62 / 2.74) |
+| safe | Gemma 4 · klein-9b · Clef · Hailuo | $1.10 | 01:22 | 2.65 (2.55 / 2.74) |
+| auteur | Kimi K2.6 · klein-9b · Clef · Wan | $2.43 | 01:28 | 2.33 (2.30 / 2.36) |
+
+- **The drafts diverged as the skills intended**: the auteur bought the most capable writer (Kimi) and the
+  exact-length video model; the other two went cheap on writer and video. All three kept the better renderer
+  and critic. The cheap crews won at less than half the cost; the auteur's premium crew scored lowest.
+- **Reasoning models broke planning**, and each team lost ~5 minutes and ~$0.15 to it. Gemma 4 and Kimi
+  answer in `choices[0].message.content` (not `response`), and think in `reasoning_content` within the same
+  token budget: at `max_tokens: 2048` the director's plan came back empty (`finish_reason: "length"`). Fixed
+  mid-run (both formats handled, 8192 tokens). A failed plan also left the showrunner waiting forever (it
+  counted as requested); now a failed plan is retried.
+- **Wan rendered in ~64 s per clip** here versus ~300 s in the first arena: render times vary a lot, so the
+  deadline margin (`CUT_WALL_S`) is conservative for now.
+- **The deadline mandate waited on running retakes**: the auteur printed with 3.5 minutes left because
+  "wait while jobs run" came before the clock check. Fixed after the run (the clock now comes first; tested).
+- Judges again separated the teams only narrowly (2.33 to 2.68).

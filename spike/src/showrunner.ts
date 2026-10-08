@@ -53,7 +53,8 @@ export async function runTurnJob(env: Env, job: TurnJob, progress: Progress) {
 	}
 
 	// What the showrunner sees
-	const planRequested = rows.some((r) => r.kind === "board");
+	// A failed plan doesn't count: the showrunner plans again rather than waiting forever
+	const planRequested = rows.some((r) => r.kind === "board" && r.status !== "failed");
 	const state = planRequested ? await boardState(env, board) : undefined;
 	const planned = Boolean(state && !("pending" in state && state.pending));
 	const cap = Number(env.VIDEO_MAX_SECONDS);

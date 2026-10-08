@@ -290,12 +290,13 @@ async function openArena(name) {
   state = null;
   clearInterval(arenaTimer);
   $("#main").innerHTML = `<p class="muted">Loading ${esc(name)}…</p>`;
-  const tick = async () => {
-    if (!location.hash.includes(name) || document.hidden) return;
+  // Polls only while visible, but always loads once, even in a background tab
+  const tick = async (first = false) => {
+    if (!location.hash.includes(name) || (document.hidden && !first)) return;
     arena = await api(`/arenas/${name}/state`).catch(() => arena);
     renderArena();
   };
-  await tick();
+  await tick(true);
   arenaTimer = setInterval(tick, 4000);
 }
 
