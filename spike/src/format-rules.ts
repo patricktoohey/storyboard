@@ -15,6 +15,8 @@ export interface Format {
 	// A team that joins for the finale, drafting from the free agents: a newcomer lead model (the wildcard),
 	// or the better of the eliminated leads, back for a second chance (the misfits)
 	entrant?: { kind: "wildcard"; lead: LlmKey } | { kind: "returning" };
+	// Mid-round, the network sends every team a note (process-rules.ts, D34)
+	network_note?: boolean;
 }
 
 /** Something that happened between rounds, for the season page and its talk. */

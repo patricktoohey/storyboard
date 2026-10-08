@@ -423,6 +423,10 @@ export interface RoundResult {
 	round: number;
 	// teams in finishing order, disqualified last
 	ranking: { team: string; winRate: number; disqualified?: string }[];
+	// When a panel ranked it (D34): the film and process parts of each team's win rate, and its Git moves
+	film?: Record<string, number>;
+	process?: Record<string, number>;
+	git_moves?: Record<string, number>;
 }
 
 export function seasonStandings(rounds: RoundResult[]) {

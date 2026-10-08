@@ -410,7 +410,7 @@ function renderSeason(s) {
         ${s.standings.map((st, i) => {
           const t = s.teams.find((x) => x.team === st.team);
           return `<tr${t.out ? ' class="muted"' : ""}><td>${i + 1}</td><td><b>${esc(st.team)}</b>${t.out ? ` <span class="pill bad">out after round ${t.out}</span>` : ""}${t.entrant ? ` <span class="pill">back for the finale</span>` : ""}<br><span class="small muted">${esc(t.repo)}</span></td><td><b>${st.points}</b></td>
-            ${s.results.map((r) => { const row = r.ranking.find((x) => x.team === st.team); return `<td>${row?.disqualified ? `<span class="pill bad">no video</span>` : pct(row?.winRate)}</td>`; }).join("")}
+            ${s.results.map((r) => { const row = r.ranking.find((x) => x.team === st.team); const parts = r.film ? `<br><span class="small muted">film ${pct(r.film[st.team])} · process ${pct(r.process?.[st.team])} · ${r.git_moves?.[st.team] ?? 0} Git moves</span>` : ""; return `<td>${row?.disqualified ? `<span class="pill bad">no video</span>` : pct(row?.winRate)}${parts}</td>`; }).join("")}
             <td class="small">${esc(t.team_json.cinematographer || "")}</td></tr>`;
         }).join("") || `<tr><td colspan="4" class="muted">No round finished yet</td></tr>`}
       </table>

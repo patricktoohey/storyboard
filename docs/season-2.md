@@ -32,19 +32,19 @@ Proposed brief (what every team's lead and players read):
 | | Season 1 (comparison season) | Season 2 |
 |---|---|---|
 | Film | 3 cells, ~15 s, silent | 8 to 10 cells, ~30 s, **with sound and dialogue** |
-| Round | 30 min, $2.50 a team | 60 min, $12 a team (to be tuned) |
+| Round | 30 min, $2.50 a team | 60 min, $16 a team, and the network's note at the midpoint |
 | Team | a lead model and a crew of tools | a named lead and **drafted, named players** who talk |
 | Talk | the lead's reasons, in the ledger | crew room, commons, confessionals, judges' remarks |
 | What a team sees | its own board; rivals at retrospective | rivals' moves every turn, except in the **blind finale** |
-| Leads | Opus 5.5, GPT-6.1 Sol, Kimi K2.6, Llama 3.3 | Opus 5.5, GPT-6.1 Sol, Kimi K2.6, **Gemini 3.1 Pro** |
+| Leads | Opus 5.5, GPT-6.1 Sol, Kimi K2.6, Llama 3.3 | Opus 5.5, GPT-6.1 Sol, **Gemini 3.1 Pro** |
 | Judging | Clef on contact sheets | the final ranked by a panel: Claude, GPT and Gemini on the finished teaser |
 | Seasons | standalone | **chained**: teams and players keep their repos and memory |
 
 Llama is dropped: it has no thinking mode, so a rerun would only repeat Season 1. Nemotron 3 took its
-seat in the format dry run and finished last in both rounds (32%, 27%), so Gemini 3.1 Pro takes it for
-Season 2: all four big labs' models, with Kimi K2.6 as the open-weights lead. Gemini 3.8 Flash is also
-the teaser judge; the lead is a different model, and the judge watches films the drafted players made. Kimi stays with longer per-turn timeouts and its
-thinking on; if it can't contend this season, it goes too.
+seat in the format dry run and finished last in both rounds (32%, 27%), so Gemini 3.1 Pro takes it. Kimi
+is dropped too: in Season 1 it made one Git move and then none, and it timed out and started 16 minutes
+late, so it would add a team without adding to what the season is for. Season 2 is three teams, one per
+lab (Anthropic, OpenAI, Google), with the budget that would have gone to a fourth (D34).
 
 Where a model offers a thinking level (Claude's thinking budget, OpenAI's reasoning effort), leads run it
 high: a lead's decisions are a few hundred output tokens, so thinking is cheap next to one image. Whether
@@ -218,6 +218,14 @@ carry it, does it land the SEASON 2 card, does it do what the brief asks (includ
 - **Gemini also gets the film itself**, with its sound (live-checked: it transcribes the lines).
 - The judges on camera are the panel, each played by its own lab's model, and each speaks from its own
   notes on what it saw and heard.
+- **Process, 25%** (D34): the same judges compare how each team used its history, from a record built
+  from its repository and its log (moves with their facts and private reasons, saved versions,
+  comparisons and verdicts, cuts, which one was submitted; never its public messages): did it make the
+  film better (effective), and did it do something others didn't (creative). A move that changed nothing
+  counts for nothing. The leads are told this in their rules.
+- **The network's note**: at each round's midpoint every team gets a note ("less telling, more showing";
+  "the ending is too quiet"; "fewer lines from a narrator"). Trying it on a saved version and comparing is
+  what the history is for; the judges count the note as part of the brief.
 
 ## Ghost runs: a benchmark from the recordings
 
@@ -276,7 +284,10 @@ Roughly four to five days, mostly 1, 3 and 4. Ghost runs come after the season.
 
 ## Settled (2026-10-08)
 
-- Budget: $12 a team a round, about $50-75 a season; the gateway's daily limit is raised to match.
+- Budget: $16 a team a round with three teams, about $150 a season at most; the gateway's daily limit is
+  raised to match.
+- Three teams, one per lab; Kimi is dropped (D34).
+- How a team uses its history is judged: 25% of the final ranking, from its repository and log (D34).
 - The merger round (two teams, one film, a real Git merge) is saved for Season 3.
 - Bios only undersell, one or two players a season, with a budget bonus for the team that drafts one.
 - Commit messages are public and may mislead; reasons are private and true; contents never lie. Left to

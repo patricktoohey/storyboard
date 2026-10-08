@@ -383,6 +383,41 @@ three-team final is about $0.50 for the panel.
 Tests: `test/teaser.test.ts` (the three request shapes, the film only for Gemini, transcripts, frame
 times, margins, broken answers, forfeits).
 
+## D34: the season is for showing what a Git repository lets agents do
+
+**The format dry run made no Git moves at all.** Across nine boards, every lead ran draft, plan, lines,
+score, cut, submit; nobody saved, restored or compared, and the panel noticed in the films: "branching is
+mostly asserted ... rather than demonstrated". In Season 1 (30 minutes, three silent cells) Opus ran the
+whole loop, save, compare twice, restore, submit the restored cut, and GPT saved before every revision.
+Adding lines, a score and a mix to a 20-minute round used up the slack that made the history worth using.
+The point of the entry is Artifacts, so the format now makes room for the history and gives it a reason:
+
+- **Three teams, one per lab** (Claude, GPT, Gemini), at 60 minutes and $16 a round: Kimi is dropped (one
+  Git move and then none in Season 1, a timeout and a 16-minute late start), and its budget goes to the
+  others, so a second version is affordable.
+- **The network's note** (`format.network_note`): at each round's midpoint, every team's view shows a note
+  from the network, one of three that suit any teaser and ask for a change worth trying beside what the
+  team has. A team that saved can try it on a branch and compare; one that didn't has to gamble. Once out,
+  the judges count it as part of the brief (a round where every team was in before the midpoint never
+  saw it, and isn't judged on it).
+- **Process is judged: 25% of the final ranking.** The panel compares each pair of teams' process records
+  (`processRecord`), built from the board's ledger and repository: every move in order with its facts and
+  the team's private reason (public messages dropped, since D31 lets them mislead), when the note arrived,
+  saved versions, comparisons and their verdicts, cuts, and whether the submitted cut was an earlier one.
+  Rubric: *effective* (did using the history make the film better; a move that changed nothing counts for
+  nothing, the lesson of Llama's ten saves on one commit) and *creative* (did it use the history in a way
+  that shows or that others didn't). Each judge's process verdicts weigh a third of its film verdicts, so
+  process is a quarter of the ranking (`PROCESS_SHARE`), and both parts are reported.
+- **The leads are told**: their rules gain "How you're judged", with the split and the process rubric.
+- **Git moves are counted** (save, restore, compare) per team per round, on the season page beside the
+  film and process parts.
+
+The bar for the next dry run: every team makes at least two Git moves in some round. If the note alone
+doesn't change behaviour, the next step is the history as material (a rival's or an abandoned shot in the
+final cut, with its provenance in the commit).
+
+Tests: `test/process.test.ts`.
+
 ## Backlog: staging continuity and non-human characters
 
 Observed on the boards so far, not yet addressed:

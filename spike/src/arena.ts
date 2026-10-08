@@ -12,6 +12,9 @@ import { loadSkill } from "./skills";
 import { type Evidence, forfeit, panelRequest, panelText, parseTeaserVerdict, watchesFilm } from "./teaser-rules.ts";
 import type { LlmKey } from "./cast-rules.ts";
 import { MENU } from "./crew.ts";
+import { PROCESS_RUBRIC, PROCESS_SHARE, briefWithNote, gitMoves, networkNote, processPrompt, processRecord, processWeight } from "./process-rules.ts";
+import { COMPARISONS, SAVED } from "./history.ts";
+import { ask } from "./models";
 import type { Heard } from "./sound-rules.ts";
 import { forkBoard, repoRemote } from "./template";
 
@@ -26,6 +29,8 @@ export interface Rules {
 	// The final round's panel (D33): one judge per lab, ranking the finished teasers; without one (arenas
 	// before it), the judges above rank the final round too
 	panel?: PanelJudge[];
+	// A note from "the network" that every team sees from `at` on, and the judges count as part of the brief (D34)
+	network_note?: { text: string; at: string };
 	// A team's own deadline when a twist changed its clock
 	teams: { team: string; board: string; showrunner: string; cinematographer: string; source?: string; lead?: string; team_name?: string; deadline?: string }[];
 	created: string;
@@ -106,6 +111,8 @@ export async function createArena(
 		season?: { season: string; round: number; teamRepos: Record<string, string>; cinematographers: Record<string, string> };
 		id?: string;
 		blind?: boolean;
+		// The network's mid-round note (D34)
+		network_note?: boolean;
 	},
 ) {
 	const id = opts.id ?? stamp();
@@ -141,6 +148,7 @@ export async function createArena(
 		created: new Date().toISOString(),
 		...(opts.blind ? { blind: true } : {}),
 		...(opts.season ? { season: opts.season.season, round: opts.season.round, origin: opts.origin } : {}),
+		...(opts.network_note ? { network_note: networkNote(opts.season?.round ?? 1, new Date(), opts.minutes) } : {}),
 	};
 	await onMain(remote, (tree) =>
 		tree.commit({ name: "arena" }, `Arena: ${teams.length} teams, $${opts.budget} each, deadline ${deadline}`, {
@@ -405,6 +413,31 @@ async function submittedEvidence(env: Env, rules: Rules, team: string, sub: { cu
 	};
 }
 
+/** A team's process record and Git moves for the round, from its board's ledger and history (D34). */
+async function processOf(env: Env, rules: Rules, team: string, submitted: string | null) {
+	const board = rules.teams.find((t) => t.team === team)!.board;
+	const remote = await repoRemote(env, board);
+	const [rows, saved, cuts, comparisons] = await Promise.all([
+		ledger(env, board),
+		WorkingTree.listBranches(remote, SAVED),
+		WorkingTree.listBranches(remote, "cut/"),
+		readText(env, board, COMPARISONS),
+	]);
+	const turns = rows.filter((r) => r.kind === "turn").map((r) => ({ detail: r.detail, result: r.result, updated: r.updated }));
+	return {
+		moves: gitMoves(turns),
+		record: processRecord({
+			turns,
+			start: new Date(rules.created),
+			saved: saved.map((b) => ({ name: b.slice(SAVED.length) })),
+			comparisons: comparisons ? JSON.parse(comparisons) : [],
+			cuts: cuts.filter((b) => /^cut\/v\d+$/.test(b)).map((b) => b.slice(4)),
+			submitted,
+			...(rules.network_note ? { note: rules.network_note } : {}),
+		}),
+	};
+}
+
 /** A submitted cut whose mix is still running: final judging waits for it rather than forfeit the team. */
 async function mixing(env: Env, board: string) {
 	return (await ledger(env, board)).some((j) => j.kind === "mix" && (j.status === "queued" || j.status === "running"));
@@ -431,6 +464,8 @@ async function runPanel(env: Env, arena: string, rules: Rules, panel: PanelJudge
 	}
 	const evidence = Object.fromEntries(await Promise.all(teams.map(async (t) => [t, await submittedEvidence(env, rules, t, subs[t] ?? undefined)] as const)));
 	const rubric = rubricOf((await loadSkill(await WorkingTree.clone(await repoRemote(env, arena), "main"), PANEL_RUBRIC)).body);
+	// The note counts only if it went out before every team was in
+	const judgedBrief = briefWithNote(rules.brief, rules.network_note && Date.parse(rules.network_note.at) <= Date.now() ? rules.network_note : undefined);
 	await progress(`the panel (${panel.map((j) => j.name).join(", ")}) watching ${Object.values(evidence).filter(Boolean).length} teasers`);
 	const comparisons = (
 		await Promise.all(
@@ -444,8 +479,8 @@ async function runPanel(env: Env, arena: string, rules: Rules, panel: PanelJudge
 							(async () => {
 								const model = MENU.lead[judge.model].id;
 								const send = (e: Evidence) => (watchesFilm(model) ? e : { ...e, film: undefined });
-								const ask = () => env.AI.run(model as keyof AiModels, panelRequest(model, rules.brief, rubric, send(a), send(b)) as never);
-								const out = await ask().catch(ask).catch((err) => (console.error("panel", judge.name, first, second, err), undefined));
+								const call = () => env.AI.run(model as keyof AiModels, panelRequest(model, judgedBrief, rubric, send(a), send(b)) as never);
+								const out = await call().catch(call).catch((err) => (console.error("panel", judge.name, first, second, err), undefined));
 								const verdict = parseTeaserVerdict(panelText(model, out), rubric);
 								return { judge: judge.name, first, second, pFirst: verdict.pFirst, notes: verdict.notes };
 							})(),
@@ -455,11 +490,34 @@ async function runPanel(env: Env, arena: string, rules: Rules, panel: PanelJudge
 			),
 		)
 	).flat();
-	const rates = winRates(comparisons, Object.fromEntries(panel.map((j) => [j.name, j.weight])));
+
+	// How each team used its history (D34): the same judges compare the teams' process records, text only
+	const records = Object.fromEntries(await Promise.all(teams.map(async (t) => [t, await processOf(env, rules, t, subs[t]?.cut ?? null)] as const)));
+	await progress(`the panel judging how ${teams.length} teams used their history`);
+	const processComparisons = (
+		await Promise.all(
+			panel.map((judge) =>
+				Promise.all(
+					matchups(teams).map(async ([first, second]): Promise<Comparison> => {
+						const { system, user } = processPrompt(judgedBrief, records[first].record, records[second].record);
+						const model = MENU.lead[judge.model].id;
+						const out = await ask(env, model, system, user, 6000).catch((err) => (console.error("process", judge.name, first, second, err), { text: "" }));
+						const verdict = parseTeaserVerdict(out.text, PROCESS_RUBRIC);
+						return { judge: `${judge.name}/process`, first, second, pFirst: verdict.pFirst, notes: verdict.notes };
+					}),
+				),
+			),
+		)
+	).flat();
+	const filmWeights = Object.fromEntries(panel.map((j) => [j.name, j.weight]));
+	const processWeights = Object.fromEntries(panel.map((j) => [`${j.name}/process`, processWeight(j.weight)]));
+	const parts = { film: winRates(comparisons, filmWeights).overall, process: winRates(processComparisons, processWeights).overall };
+	comparisons.push(...processComparisons);
+	const rates = winRates(comparisons, { ...filmWeights, ...processWeights });
 	await onMain(await repoRemote(env, arena), (tree) =>
 		tree.commit(
 			{ name: "judges" },
-			`Final comparison by the panel: ${Object.entries(rates.overall).sort((a, b) => b[1] - a[1]).map(([t, r]) => `${t} ${(r * 100).toFixed(0)}%`).join(", ")}`,
+			`Final comparison by the panel (film ${Math.round((1 - PROCESS_SHARE) * 100)}%, process ${Math.round(PROCESS_SHARE * 100)}%): ${Object.entries(rates.overall).sort((a, b) => b[1] - a[1]).map(([t, r]) => `${t} ${(r * 100).toFixed(0)}%`).join(", ")}`,
 			{
 				"scores/comparative.final.json": json({
 					final: true,
@@ -467,6 +525,10 @@ async function runPanel(env: Env, arena: string, rules: Rules, panel: PanelJudge
 					at: new Date().toISOString(),
 					commits: Object.fromEntries(teams.map((t) => [t, subs[t]!.commit])),
 					evidence: Object.fromEntries(teams.map((t) => [t, evidence[t] ? { frames: evidence[t]!.frames.length, heard: evidence[t]!.heard?.length ?? null } : null])),
+					...(rules.network_note ? { network_note: rules.network_note } : {}),
+					git_moves: Object.fromEntries(teams.map((t) => [t, records[t].moves])),
+					process_records: Object.fromEntries(teams.map((t) => [t, records[t].record])),
+					parts,
 					winRates: rates,
 					comparisons,
 				}),
@@ -633,7 +695,7 @@ export async function arenaState(env: Env, arena: string) {
 		judges_talk: lastTalk(judgesTalk, 40),
 		now: new Date().toISOString(),
 		leaderboard: board,
-		comparative: comparative && { final: comparative.final, at: comparative.at, winRates: comparative.winRates },
+		comparative: comparative && { final: comparative.final, at: comparative.at, winRates: comparative.winRates, ...(comparative.parts ? { parts: comparative.parts, git_moves: comparative.git_moves } : {}) },
 		teams,
 		log: log.map((l) => ({ hash: l.hash.slice(0, 7), author: l.author.name, message: l.message.split("\n")[0] })),
 	};

@@ -487,6 +487,7 @@ async function startRound(env: Env, s: Season, round: number) {
 		}),
 		origin: s.origin,
 		blind: Boolean(s.blind_final && round === s.rounds),
+		network_note: Boolean(s.format?.network_note),
 		id: `${s.season.replace("season-", "")}-r${round}`,
 		season: {
 			season: s.season,
@@ -979,6 +980,13 @@ export async function runSeasonStep(env: Env, arena: string, season: string, rou
 	const result: RoundResult = {
 		round,
 		ranking: state.leaderboard.map((r) => ({ team: r.team, winRate: r.winRate ?? r.score / 4, ...(r.disqualified ? { disqualified: r.disqualified } : {}) })),
+		...(state.comparative?.parts
+			? {
+					film: state.comparative.parts.film,
+					process: state.comparative.parts.process,
+					git_moves: Object.fromEntries(Object.entries(state.comparative.git_moves ?? {}).map(([t, m]) => [t, (m as { total: number }).total])),
+				}
+			: {}),
 	};
 	await updateSeason(env, season, `Round ${round} result: ${result.ranking.map((r) => `${r.team} ${(r.winRate * 100).toFixed(0)}%`).join(", ")}`, (s) => {
 		s.results = [...s.results.filter((r) => r.round !== round), result];

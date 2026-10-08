@@ -6,6 +6,7 @@
 // through the same functions the UI uses, then queues its next turn with a delay. Turns never overlap.
 import { ACTIONS, type Action, type BoardSummary, COMPARE_USD, type Decision, allowedActions, parseDecision } from "./arena-rules.ts";
 import { type Rules, closeArena, readRules, recordSubmission } from "./arena";
+import { PROCESS_RUBRIC, PROCESS_SHARE } from "./process-rules.ts";
 import { addNote, boardState, onMain, startCut } from "./board";
 import { type Crew, DEFAULT_CREW, MENU, SLOTS, type Slot, type VideoOption, clipCost, crewCosts, crewFrom, draftOptions, fitToBudget } from "./crew.ts";
 import { withCrew } from "./crew-env";
@@ -50,6 +51,16 @@ and lines (dialogue and voiceover on cells, each in its speaker's voice), laid o
 your video model makes any. Sound lives on main like everything else; a new cut carries it, and a remix
 puts the current sound under an existing cut without rendering its video again. A film without sound is
 allowed, and judged as such.`;
+
+/** How the final round is ranked, when a panel ranks it (D33, D34): the leads are told up front. */
+const judging = (rules: Rules) =>
+	rules.panel?.length
+		? `\n\n## How you're judged
+The final round is ranked by a panel of three judges (Claude, GPT and Gemini) who watch and listen to the
+cut you submit, comparing it with each rival's: ${Math.round((1 - PROCESS_SHARE) * 100)}% of the ranking. The other ${Math.round(PROCESS_SHARE * 100)}% is how you
+used your board's history, judged from your repository and your log (never from your messages):
+${PROCESS_RUBRIC.map((c) => `- ${c.id}: ${c.question}`).join("\n")}${rules.network_note ? `\nPartway through the round, the network may send every team a note. Once it arrives it is part of the brief.` : ""}`
+		: "";
 
 // Where a held note waits: the cinematographer pushed back, and the lead hasn't noted that cell again
 const HELD = "talk/held.json";
@@ -240,6 +251,7 @@ export async function runTurnJob(env: Env, job: TurnJob, progress: Progress) {
 		const history = await boardHistory(env, board, scores);
 		const view = {
 			brief: rules.brief,
+			...(rules.network_note && Date.now() >= Date.parse(rules.network_note.at) ? { network_note: `From the network, to every team: "${rules.network_note.text}"` } : {}),
 			minutes_left: Math.round((deadline - Date.now()) / 60000),
 			// Said outright: Opus waited four turns for a "still rendering" take that had long finished
 			running_now: summary.openJobs ? `${summary.openJobs} job(s) still running` : "nothing: every take listed below is finished, and waiting brings nothing new",
@@ -295,8 +307,8 @@ export async function runTurnJob(env: Env, job: TurnJob, progress: Progress) {
 			history,
 		};
 		const system = cast
-			? `${personaSystem(cast.lead, `the lead (showrunner) of ${cast.team_name}`, undefined, cast.story)}\n\n${skill.body}\n\n${HOW_IT_WORKS}\n\n${crewWorks(cast, blind)}${blind ? "" : `\n\n${RIVALS}`}\n\n${contract(allowed, !blind)}`
-			: `${skill.body}\n\n${HOW_IT_WORKS}\n\n${contract(allowed)}`;
+			? `${personaSystem(cast.lead, `the lead (showrunner) of ${cast.team_name}`, undefined, cast.story)}\n\n${skill.body}\n\n${HOW_IT_WORKS}${judging(rules)}\n\n${crewWorks(cast, blind)}${blind ? "" : `\n\n${RIVALS}`}\n\n${contract(allowed, !blind)}`
+			: `${skill.body}\n\n${HOW_IT_WORKS}${judging(rules)}\n\n${contract(allowed)}`;
 		const leadEnv = withCrew(env, crew);
 		await progress(`${crew.lead} deciding among ${allowed.join(", ")}`);
 		// A lead that times out (Kimi: 3046) loses the turn, not the team: it waits and is asked again
