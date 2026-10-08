@@ -13,6 +13,8 @@ import { LimitError } from "./ledger.ts";
 import { ledger, submit } from "./coordinator";
 import { WorkingTree } from "./git";
 import { boardHistory, compareVersions, restoreVersion, saveVersion } from "./history";
+import { COMMONS, CREW_ROOM, type TeamCast, appendTalk, noteReply, personaSystem, readTalk, talkReply } from "./cast";
+import { type Player, talkLine } from "./cast-rules.ts";
 import type { Job } from "./jobs";
 import { ask } from "./models";
 import { loadSkill } from "./skills";
@@ -39,6 +41,18 @@ commit that brings the old content back; nothing is lost, and you can restore fo
 judges compare two versions side by side before you choose. Use this: try a bolder direction after saving
 a safe one, compare, keep the better; print an earlier take if a later one is worse; submit the better cut.`;
 
+// Where a held note waits: the cinematographer pushed back, and the lead hasn't noted that cell again
+const HELD = "talk/held.json";
+type Held = Record<string, { note: string; reply: string; alternative?: string; by: string }>;
+
+const crewWorks = (cast: TeamCast, blind: boolean) => `## Your crew and the room
+You lead people, not tools: ${cast.players.map((p) => `${p.name} (${p.seat})`).join(", ")}. Your
+cinematographer reads every note before shooting it and may push back; a note that's pushed back is held,
+not shot, until you note that cell again (your note, their suggestion, or a new one), which is then shot as
+given. Use the crew room (talk) when it helps the film: ask for ideas, argue a choice, settle a
+disagreement. ${blind ? "This round is blind: the commons is closed and you can't see the other teams." : "The commons (post) is where every team talks to every other."} Everything said is recorded, and any team
+may use it in its film.`;
+
 const contract = (allowed: Action[]) => `## Your tools this turn
 ${allowed.map((a) => `- ${a}: ${ACTIONS[a]}`).join("\n")}
 
@@ -53,15 +67,17 @@ const leadCost = (crew: Crew, usage: { input: number; output: number }) => {
 };
 
 /** The lead model drafts the rest of the crew in one call, within the budget; a pinned lead stays. */
-async function draftCrew(env: Env, lead: Crew["lead"], strategy: string, lessons: string | null, budget: number, shots: number, cap: number) {
+async function draftCrew(env: Env, lead: Crew["lead"], strategy: string, lessons: string | null, budget: number, shots: number, cap: number, cinematographer?: Player) {
 	const planned = Array(shots).fill(cap);
-	const slots = SLOTS.filter((s) => s !== "lead");
+	// A cast team's cinematographer is a drafted player: its model fills the llm slot, unseen
+	const pinned = { lead, ...(cinematographer ? { llm: cinematographer.model } : {}) } as Partial<Crew>;
+	const slots = SLOTS.filter((s) => !(s in pinned));
 	const menu = Object.fromEntries(
 		slots.map((slot) => [
 			slot,
 			Object.fromEntries(
 				draftOptions(slot).map((key) => {
-					const film = fitToBudget({ ...DEFAULT_CREW, lead, [slot]: key } as Crew, planned, Infinity).film;
+					const film = fitToBudget({ ...DEFAULT_CREW, ...pinned, [slot]: key } as Crew, planned, Infinity).film;
 					return [key, `${(MENU[slot] as Record<string, { label: string }>)[key].label} (a minimal ${shots}-shot film with this choice: ~$${film.toFixed(2)})`];
 				}),
 			),
@@ -71,7 +87,7 @@ async function draftCrew(env: Env, lead: Crew["lead"], strategy: string, lessons
 
 ## Task
 Hire your crew for this round. Your own model (the lead, which plans, decides and writes notes) is fixed:
-${MENU.lead[lead].label}. Choose one option per slot from the menu; together they must leave room in the
+${MENU.lead[lead].label}.${cinematographer ? ` Your cinematographer is ${cinematographer.name}, drafted for the season.` : ""} Choose one option per slot from the menu; together they must leave room in the
 budget for notes, retakes and the required video.
 
 ## Output contract
@@ -79,7 +95,7 @@ Reply with ONLY a JSON object: {${slots.map((s) => `"${s}": string`).join(", ")}
 	const leadEnv = withCrew(env, { ...DEFAULT_CREW, lead });
 	// A lead that can't answer in time (Kimi timed out drafting, 3046, in the frontier season) still gets to
 	// play: the default crew, which always fits, and the lead decides everything after
-	const { text, usage } = await ask(leadEnv, leadEnv.DIRECTOR_MODEL, system, JSON.stringify({ budget_usd: budget, shots, lessons, menu }, null, 2), 4096).catch(
+	const { text, usage } = await ask(leadEnv, leadEnv.DIRECTOR_MODEL, system, JSON.stringify({ budget_usd: budget, shots, lessons, menu }, null, 2), 4096, true).catch(
 		(err) => ({ text: `{"reason": "draft failed (${String(err).slice(0, 80)}); default crew"}`, usage: { input: 0, output: 0 } }),
 	);
 	let picks: Record<string, unknown> = {};
@@ -88,9 +104,9 @@ Reply with ONLY a JSON object: {${slots.map((s) => `"${s}": string`).join(", ")}
 	} catch {
 		// An unreadable draft falls back to the default crew, which is affordable
 	}
-	const chosen = { ...DEFAULT_CREW, lead } as Record<Slot, string>;
+	const chosen = { ...DEFAULT_CREW, ...pinned } as Record<Slot, string>;
 	for (const slot of slots) if (typeof picks[slot] === "string" && draftOptions(slot).includes(picks[slot] as string)) chosen[slot] = picks[slot] as string;
-	const fit = fitToBudget(chosen as Crew, planned, budget, 0.8, ["lead"]);
+	const fit = fitToBudget(chosen as Crew, planned, budget, 0.8, Object.keys(pinned) as Slot[]);
 	return { ...fit, reason: typeof picks.reason === "string" ? picks.reason.slice(0, 200) : "", cost: leadCost(fit.crew, usage) };
 }
 
@@ -98,6 +114,9 @@ Reply with ONLY a JSON object: {${slots.map((s) => `"${s}": string`).join(", ")}
 export async function runTurnJob(env: Env, job: TurnJob, progress: Progress) {
 	const board = job.repo;
 	const cfg = JSON.parse((await readText(env, board, "board.json")) ?? "{}");
+	const cast: TeamCast | undefined = cfg.cast;
+	const blind = Boolean(cfg.blind);
+	const cinematographer = cast?.players.find((p) => p.seat === "cinematographer");
 	const rules = await readRules(env, job.arena);
 	const rows = await ledger(env, board);
 	const acted = rows.filter((r) => r.kind === "turn" && r.result === "acted").length;
@@ -148,17 +167,19 @@ export async function runTurnJob(env: Env, job: TurnJob, progress: Progress) {
 		deadline,
 		cutSeconds: clips.reduce((a, b) => a + b, 0),
 		prices: { take: costs.take, turn: costs.turn, cut: clips.reduce((sum, sec) => sum + clipCost(crew, sec).usd, 0), board: costs.board },
+		...(cast ? { talk: { names: cast.players.map((p) => p.name), commons: !blind } } : {}),
 	};
 
 	const allowed = allowedActions(summary);
 	let cost = 0;
+	const held: Held = cast ? JSON.parse((await readText(env, board, HELD)) ?? "{}") : {};
 	const skill = await loadSkill(await WorkingTree.clone(await repoRemote(env, board), "main"), cfg.skills.showrunner);
 	const lessons = (await readText(env, board, "lessons.md")) ?? null;
 
 	// The draft is its own call: the lead hires the rest of the crew
 	if (allowed[0] === "draft") {
 		await progress(`drafting the crew (${lead} leads)`);
-		const fit = await draftCrew(env, lead, skill.body, lessons, summary.budget, rules.cells, cap);
+		const fit = await draftCrew(env, lead, skill.body, lessons, summary.budget, rules.cells, cap, cinematographer);
 		await onMain(await repoRemote(env, board), async (tree) => {
 			const current = JSON.parse(await tree.read("board.json"));
 			await tree.commit(
@@ -195,7 +216,16 @@ export async function runTurnJob(env: Env, job: TurnJob, progress: Progress) {
 				total: summary.budget,
 				prices: { take: Number(costs.take.toFixed(3)), cut: Number(summary.prices.cut.toFixed(2)), replan: Number((costs.board + summary.cells.length * costs.take).toFixed(2)), compare: COMPARE_USD },
 			},
-			crew,
+			crew: cinematographer ? { ...crew, llm: `${cinematographer.name} (your cinematographer)` } : crew,
+			...(cfg.bonus_usd ? { producer_bonus_usd: cfg.bonus_usd } : {}),
+			...(cast
+				? {
+						your_crew: cast.players.map((p) => ({ name: p.name, seat: p.seat, bio: p.bio })),
+						crew_room: await readTalk(env, board, CREW_ROOM, 16),
+						held_notes: Object.fromEntries(Object.entries(held).map(([cell, h]) => [cell, { your_note: h.note, [`${h.by}_said`]: h.reply, ...(h.alternative ? { their_suggestion: h.alternative } : {}) }])),
+						commons: blind ? "closed: this round is blind" : await readTalk(env, job.arena, COMMONS, 12),
+					}
+				: {}),
 			lessons,
 			cells: (state?.cells ?? []).map((c) => ({
 				cell: c.id,
@@ -217,17 +247,19 @@ export async function runTurnJob(env: Env, job: TurnJob, progress: Progress) {
 			judges: scores.map((s) => ({ judge: s.judge, total: s.total, scores: s.scores, of_commit: String(s.commit).slice(0, 7) })),
 			history,
 		};
-		const system = `${skill.body}\n\n${HOW_IT_WORKS}\n\n${contract(allowed)}`;
+		const system = cast
+			? `${personaSystem(cast.lead, `the lead (showrunner) of ${cast.team_name}`)}\n\n${skill.body}\n\n${HOW_IT_WORKS}\n\n${crewWorks(cast, blind)}\n\n${contract(allowed)}`
+			: `${skill.body}\n\n${HOW_IT_WORKS}\n\n${contract(allowed)}`;
 		const leadEnv = withCrew(env, crew);
 		await progress(`${crew.lead} deciding among ${allowed.join(", ")}`);
 		// A lead that times out (Kimi: 3046) loses the turn, not the team: it waits and is asked again
 		const timedOut = (err: unknown) => ({ text: `{"action": "wait", "reason": "the lead did not answer: ${String(err).slice(0, 80).replace(/"/g, "'")}"}`, usage: { input: 0, output: 0 } });
-		let answer = await ask(leadEnv, leadEnv.DIRECTOR_MODEL, system, JSON.stringify(view, null, 2), 4096).catch(timedOut);
+		let answer = await ask(leadEnv, leadEnv.DIRECTOR_MODEL, system, JSON.stringify(view, null, 2), 4096, true).catch(timedOut);
 		cost += leadCost(crew, answer.usage);
 		let parsed = parseDecision(answer.text, allowed, summary);
 		if ("error" in parsed) {
 			// One correction, with the reason; then the turn waits
-			answer = await ask(leadEnv, leadEnv.DIRECTOR_MODEL, system, `${JSON.stringify(view)}\n\nYour last answer was rejected: ${parsed.error}. Answer again.`, 4096).catch(timedOut);
+			answer = await ask(leadEnv, leadEnv.DIRECTOR_MODEL, system, `${JSON.stringify(view)}\n\nYour last answer was rejected: ${parsed.error}. Answer again.`, 4096, true).catch(timedOut);
 			cost += leadCost(crew, answer.usage);
 			parsed = parseDecision(answer.text, allowed, summary);
 		}
@@ -256,8 +288,46 @@ export async function runTurnJob(env: Env, job: TurnJob, progress: Progress) {
 				break;
 			}
 			case "note": {
-				await progress(`note on cell ${args.cell}`);
-				const routed = await addNote(env, board, args.cell as string, args.note as string);
+				const cell = args.cell as string;
+				const note = args.note as string;
+				if (cast && cinematographer) {
+					const now = new Date();
+					const was = held[cell];
+					if (!was) {
+						// The cinematographer hears the note first, and may push back
+						await progress(`${cinematographer.name} reading the note on cell ${cell}`);
+						const c = state?.cells.find((x) => x.id === cell);
+						const shown = c?.takes.find((t) => t.take === c.printed) ?? c?.takes[c.takes.length - 1];
+						const r = await noteReply(env, cinematographer, cast, { cell, beat: c?.beat ?? "", prompt: shown?.prompt?.slice(0, 600), note, brief: rules.brief });
+						cost += r.cost;
+						const lines = [talkLine(now, cast.lead.name, `cell ${cell}: ${note}`, cinematographer.name), talkLine(new Date(), cinematographer.name, r.reply, cast.lead.name)];
+						if (r.stance === "push_back") {
+							await crewRoom(env, board, cast, lines, `${cinematographer.name} pushes back on the note for cell ${cell}`, {
+								...held,
+								[cell]: { note, reply: r.reply, ...(r.alternative ? { alternative: r.alternative } : {}), by: cinematographer.name },
+							});
+							detail += ` on cell ${cell}: "${note}" → held: ${cinematographer.name} pushed back: "${r.reply}"${r.alternative ? ` (suggests: "${r.alternative}")` : ""}`;
+							break;
+						}
+						await crewRoom(env, board, cast, lines, `Note on cell ${cell}`);
+						detail += ` (${cinematographer.name}: "${r.reply}")`;
+					} else {
+						// Noting a held cell again settles it: shot as given
+						const { [cell]: _settled, ...rest } = held;
+						const took = was.alternative && note.trim() === was.alternative.trim();
+						await crewRoom(
+							env,
+							board,
+							cast,
+							[talkLine(now, cast.lead.name, `cell ${cell}${took ? " (your suggestion)" : " (I've heard you; shoot this)"}: ${note}`, cinematographer.name)],
+							`Note on cell ${cell}, settled`,
+							rest,
+						);
+						detail += took ? ` (took ${cinematographer.name}'s suggestion)` : ` (overruled ${cinematographer.name})`;
+					}
+				}
+				await progress(`note on cell ${cell}`);
+				const routed = await addNote(env, board, cell, note);
 				await submit(env, board, routed.requests);
 				detail += ` on cell ${args.cell}: "${args.note}" → ${routed.route.action}`;
 				break;
@@ -276,6 +346,35 @@ export async function runTurnJob(env: Env, job: TurnJob, progress: Progress) {
 				const cut = await startCut(env, board, job.origin);
 				await submit(env, board, cut.requests, cut.group);
 				detail += `: ${cut.cut}, ${summary.cutSeconds}s`;
+				break;
+			}
+			case "talk": {
+				if (!cast) break;
+				const to = args.to as string;
+				const message = args.message as string;
+				const targets = to === "crew" ? cast.players : cast.players.filter((p) => p.name === to);
+				await progress(`${cast.lead.name} talking to ${to === "crew" ? "the crew" : to}`);
+				const room = await readTalk(env, board, CREW_ROOM, 20);
+				const boardBrief = (state?.cells ?? []).map((c) => ({ cell: c.id, shot: c.shot, beat: c.beat, printed_take: c.printed ?? null }));
+				const minutes = Math.round((deadline - Date.now()) / 60000);
+				const replies = await Promise.all(
+					targets.map((p) =>
+						talkReply(env, p, cast, { from: cast.lead.name, message, brief: rules.brief, minutes_left: minutes, crew_room: room, board: boardBrief }).catch(() => undefined),
+					),
+				);
+				cost += replies.reduce((sum, r) => sum + (r?.cost ?? 0), 0);
+				const lines = [
+					talkLine(new Date(), cast.lead.name, message, to === "crew" ? "crew" : to),
+					...targets.flatMap((p, i) => (replies[i] ? [talkLine(new Date(), p.name, replies[i]!.reply, cast.lead.name)] : [])),
+				];
+				await crewRoom(env, board, cast, lines, `${cast.lead.name} to ${to}`);
+				detail += ` to ${to}: "${message}"${targets.map((p, i) => (replies[i] ? ` | ${p.name}: "${replies[i]!.reply}"` : "")).join("")}`;
+				break;
+			}
+			case "post": {
+				if (!cast) break;
+				await appendTalk(env, job.arena, COMMONS, "The commons", [talkLine(new Date(), `${cast.lead.name} (${cast.team_name})`, args.message as string)], cast.lead.name, `${cast.team_name} posts`);
+				detail += `: "${args.message}"`;
 				break;
 			}
 			case "save": {
@@ -321,6 +420,17 @@ export async function runTurnJob(env: Env, job: TurnJob, progress: Progress) {
 	}
 	if (decision.reason) detail += ` — ${decision.reason}`;
 	return next(env, job, { detail, result, cost });
+}
+
+/** Appends to a team's crew room, and replaces its held notes when given, in one commit on the board. */
+async function crewRoom(env: Env, board: string, cast: TeamCast, lines: string[], message: string, held?: Held) {
+	await onMain(await repoRemote(env, board), async (tree) => {
+		const current = await tree.read(CREW_ROOM).catch(() => `# Crew room: ${cast.team_name}\n\n`);
+		await tree.commit({ name: cast.lead.name }, message, {
+			[CREW_ROOM]: `${current.trimEnd()}\n${lines.join("\n")}\n`,
+			...(held ? { [HELD]: JSON.stringify(held, null, 2) + "\n" } : {}),
+		});
+	});
 }
 
 /** Queues the next turn (refused once the deadline passes, which ends the chain) and returns the outcome. */

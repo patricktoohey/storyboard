@@ -7,14 +7,29 @@ export type Provider = "workers-ai" | "openai" | "anthropic";
 export const providerOf = (model: string): Provider =>
 	model.startsWith("anthropic/") ? "anthropic" : model.startsWith("openai/") ? "openai" : "workers-ai";
 
-/** The input for env.AI.run. Anthropic rejects a "system" message: its system prompt is a top-level field. */
-export function llmRequest(model: string, system: string, user: string, maxTokens: number) {
+// A lead's decisions are a few hundred tokens of answer, so thinking hard costs little next to one frame.
+// Claude thinks adaptively at high effort (a fixed budget_tokens is refused through the binding, 7003, on
+// Opus and Sonnet 5.5: checked 2026-10-08); OpenAI's reasoning models take a high effort. Thinking shares
+// the token budget with the answer, so it gets room on top.
+const REASONING_ROOM = 8000;
+
+/**
+ * The input for env.AI.run. Anthropic rejects a "system" message: its system prompt is a top-level field.
+ * `think` raises the thinking level where the provider has one (Workers AI's reasoning models think anyway).
+ */
+export function llmRequest(model: string, system: string, user: string, maxTokens: number, think = false) {
 	switch (providerOf(model)) {
 		case "anthropic":
-			return { system, messages: [{ role: "user", content: user }], max_tokens: maxTokens };
+			return think
+				? { system, messages: [{ role: "user", content: user }], max_tokens: maxTokens + REASONING_ROOM, thinking: { type: "adaptive" }, output_config: { effort: "high" } }
+				: { system, messages: [{ role: "user", content: user }], max_tokens: maxTokens };
 		case "openai":
 			// Reasoning models count their reasoning against this budget, like Kimi and Gemma
-			return { messages: [{ role: "system", content: system }, { role: "user", content: user }], max_completion_tokens: maxTokens };
+			return {
+				messages: [{ role: "system", content: system }, { role: "user", content: user }],
+				max_completion_tokens: think ? maxTokens + REASONING_ROOM : maxTokens,
+				...(think ? { reasoning_effort: "high" } : {}),
+			};
 		default:
 			return { messages: [{ role: "system", content: system }, { role: "user", content: user }], max_tokens: maxTokens };
 	}

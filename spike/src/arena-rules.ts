@@ -1,5 +1,6 @@
 // The arena's decisions without I/O: what a showrunner may do next, which takes to print, how rubrics
 // read, and how scores become a leaderboard. Pure, so it is unit-tested (test/arena-rules.test.ts).
+import { addressee } from "./cast-rules.ts";
 
 // ── Showrunner actions ──────────────────────────────────────────────────────────────────────────────
 
@@ -24,6 +25,8 @@ export const ACTIONS = {
 	restore:
 		'{"version": string} Bring the board back to an earlier version: a commit from your history or a saved name. Recorded as a new commit, so nothing is lost and you can restore forward again. Free',
 	compare: `{"a": string, "b": string} Have the judges compare two versions of your board side by side (commits, saved names, or "main" for now); the verdict appears in your history. About $${COMPARE_USD.toFixed(2)}`,
+	talk: '{"to": "crew" | a player\'s name, "message": string} Speak to your crew in the crew room: ask for ideas, argue a choice, settle a disagreement. Whoever you address answers. Costs only their words',
+	post: '{"message": string} Say something in the commons, which every team reads: a challenge, an offer, a doubt about a rival. Free',
 	wait: "Do nothing now; let running work finish or think again shortly",
 } as const;
 export type Action = keyof typeof ACTIONS;
@@ -55,6 +58,8 @@ export interface BoardSummary {
 	cutSeconds: number;
 	// The crew's prices: one take, one turn, the whole cut at its video model's billing, and a new plan
 	prices: { take: number; turn: number; cut: number; board?: number };
+	// A cast team: its players' names (for talk), and whether the commons is open (not in a blind round)
+	talk?: { names: string[]; commons: boolean };
 }
 
 // A cut takes ~5 minutes to render (clips run in parallel) plus assembly; leave a margin on top
@@ -132,6 +137,8 @@ export function allowedActions(s: BoardSummary): Action[] {
 	if (s.cut) actions.push("submit");
 	actions.push("save", "restore");
 	if (s.spent + COMPARE_USD + videoCost <= s.budget) actions.push("compare");
+	if (s.talk?.names.length && s.spent + s.prices.turn + videoCost <= s.budget) actions.push("talk");
+	if (s.talk?.commons) actions.push("post");
 	actions.push("wait");
 	return actions;
 }
@@ -213,6 +220,18 @@ export function parseDecision(text: string, allowed: Action[], s: BoardSummary):
 			const vb = str(a.b, 80);
 			if (!va || !vb || va === vb) return { error: "compare needs two different versions" };
 			return { action, args: { a: va, b: vb }, reason };
+		}
+		case "talk": {
+			const names = s.talk?.names ?? [];
+			const to = addressee(a.to, names);
+			const message = str(a.message, 600);
+			if (!to || !message) return { error: `talk needs "to" ("crew" or one of ${names.join(", ")}) and a message` };
+			return { action, args: { to, message }, reason };
+		}
+		case "post": {
+			const message = str(a.message, 600);
+			if (!message) return { error: "post needs a message" };
+			return { action, args: { message }, reason };
 		}
 		case "replan": {
 			const direction = str(a.direction, 600);

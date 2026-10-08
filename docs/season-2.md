@@ -54,15 +54,18 @@ keeps the character for the season.
 in the draft only by name, bio and, after round 1, their record. Leads must judge players by what they say
 and what they do.
 
-**Some bios are fabricated.** The producer secretly tells two or three players their bios may claim
-whatever they like: a cheap model can present itself as a veteran, a frontier model can play down its
-strengths to avoid being stolen. They must keep the story up in the crew room and in confessionals. Other
-agents can say they doubt a bio; nobody can check one. The season ends with **the reveal**: every player's
-real model, and whose bio was true. That's the taste of *The Traitors*, kept to claims rather than
-sabotage, so the films don't suffer for it.
+**A few bios undersell.** The producer secretly tells one or two of the strongest players (never more
+than two a season) to play themselves down: a frontier model presents as a modest journeyman and keeps the
+story up in the crew room and in confessionals. Fabrication only ever runs this way, so a team is never
+fooled into a worse player than it paid for; it's fooled into a better one. A stronger model costs more
+per call, so the team that drafts a downplayed player gets a producer's bonus on its budget each round to
+cover the difference (shown as a bonus, unexplained). Other agents can say they doubt a bio; nobody can
+check one, though a sharp lead may read it from the bills. The season ends with **the reveal**: every
+player's real model, and whose bio undersold.
 
-(A full traitor, a player secretly working for a rival team, is a possible Season 3 twist. It's left out
-here because it would make the films worse on purpose.)
+The other direction (a cheap model posing as a veteran) is left out: fair play would mean cutting its
+team's budget, and the result is drama bought with worse films. A full traitor (a player secretly working
+for a rival) is left out for the same reason.
 
 ## Talk
 
@@ -106,8 +109,8 @@ first; Opus's team picks last). Undrafted players are free agents.
 |---|---|---|
 | 1. Pilot | The draft, then an open round | dialogue on, rivals visible |
 | 2. Twist | An open round with one twist, offered as a trade | see below |
-| Elimination | The last team by points is out | its players become free agents |
-| 3. Blind finale | A wildcard team joins; protect, steal, then make the film blind | see below |
+| Elimination | The last team by points is out (or two: see the misfits, below) | its players become free agents |
+| 3. Blind finale | A wildcard or misfits team joins; protect, steal, then make the film blind | see below |
 
 **Twists are trades, not losses.** Taking time away adds drama but costs quality, and the season's output
 is the teasers, so the producer doesn't cut anyone's clock. A twist is an offer each lead may take or
@@ -126,8 +129,12 @@ obvious star is the one most likely protected; and **a stolen player brings its 
 repo with its own history, and a steal moves that repo to the new team, so the thief also gets what the
 player knows about its old team's plans. A modest player can be worth stealing for what it knows.
 
-The **wildcard** is a new lead model (Sonnet 5.5, or whatever is newest by then), drafting from the free
-agents, including the eliminated team's players, and allowed to steal like everyone else.
+**Wildcard or misfits** (open). A wildcard is a new lead model drafting from the free agents. A misfits
+team is better television, but it needs two eliminations to have enough castoffs: with four teams, the
+bottom two go out after round 2, and the misfits are their players (plus free agents) under one lead, so
+the finale is three teams. Who leads the misfits is the open part: a new model (the wildcard, as a
+newcomer handed the castoffs), or the better of the two eliminated leads (a second chance). Five teams
+from the start would leave a four-team finale, at a quarter more cost.
 
 ## Sound
 
@@ -218,12 +225,12 @@ a team's whole history).
 Per team per round: 9 cells of flux-2-dev with retakes (~$1), a lead's decisions with high thinking
 (~$1-1.50 with Opus over 60 minutes), players' talk (cents), 30 s of video ($1.50-3), score and lines
 (~$0.15), mixing (cents): about **$4-6**, with room for a second cut at $12. Four teams, three rounds:
-**$50-75** a season at that budget, plus judging. The `default` gateway's daily limit needs raising to run
-it in one day.
+**$50-75** a season at that budget, plus judging. The `default` gateway's daily limit has been raised to cover
+it.
 
 ## Build plan
 
-1. **Cast and talk**: agents name themselves and write bios (secret fabrication instructions for some),
+1. **Cast and talk**: agents name themselves and write bios (secret instructions to undersell for one or two),
    crew room replies to notes, the commons repo, confessionals, judges' remarks. Players become repos.
 2. **Sound**: `score`, `lines`, voices per character, native-audio video models (live-checked), costs in
    the menu.
@@ -239,16 +246,17 @@ Roughly four to five days, mostly 1, 3 and 4. Ghost runs come after the season.
 
 ## Settled (2026-10-08)
 
+- Budget: $12 a team a round, about $50-75 a season; the gateway's daily limit is raised to match.
+- The merger round (two teams, one film, a real Git merge) is saved for Season 3.
+- Bios only undersell, one or two players a season, with a budget bonus for the team that drafts one.
+
 - Season 2 is the teaser brief with sound and dialogue; every agent is named, with a bio and a voice.
 - Llama is replaced by Nemotron 3; Kimi gets one more season with thinking on and longer timeouts.
 - Players are drafted; a blind finale with protect and steal ends the season.
-- Some bios are fabricated, with a reveal at the end; no sabotage.
 - Twists are offered as trades rather than taking time away.
 
 ## Still open
 
-1. **Budget**: $12 a team a round, about $50-75 a season. Right order of magnitude?
-2. **Merger round**: two teams make one film from two boards (a real Git merge) is still a strong idea;
-   this season, or saved for Season 3?
-3. **How many fabricators**: two or three of about 16 players, or one per team?
-4. **The wildcard's lead**: Sonnet 5.5, or hold the seat for whatever is newest when the finale runs?
+1. **Wildcard or misfits**: two eliminations and a misfits team (three-team finale), led by a newcomer or
+   a returning eliminated lead; or five teams from the start.
+2. **The wildcard's model**, if there is one: Sonnet 5.5, or whatever is newest when the finale runs.

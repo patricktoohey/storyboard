@@ -26,6 +26,7 @@
 //   GET  /arenas/:id/timeline                  the arena rebuilt from Git history (replay.ts); POST /arenas/:id/replay stores a recording
 //   POST /arenas/:id/compare {"final"?}         queue comparative judging (every pair of boards, both ways)
 //   POST /seasons, GET /seasons, GET /seasons/:id/state   seasons: rounds of arenas with retrospectives between
+//                                              ("cast": true or {"undersold": n}: characters, a draft, talk; "blind_final")
 //   POST /arenas/:id/close                     after the deadline: record submissions, queue the final round (cron does this too)
 //   POST /sweep                                mark jobs with no progress for 10 minutes failed (also runs every 5 minutes)
 //   POST /template[?reset=1]                   create the template / add newly bundled skills (reset: overwrite with bundled)
@@ -89,7 +90,17 @@ export default {
 			if (root === "seasons") {
 				if (method === "GET" && !repoName) return Response.json(await listSeasons(env));
 				if (method === "POST" && !repoName) {
-					const body = await json<{ brief?: string; briefs?: string[]; rounds?: number; minutes?: number; budget?: number; cells?: number; teams?: (string | TeamSpec)[] }>(request);
+					const body = await json<{
+						brief?: string;
+						briefs?: string[];
+						rounds?: number;
+						minutes?: number;
+						budget?: number;
+						cells?: number;
+						teams?: (string | TeamSpec)[];
+						cast?: boolean | { undersold?: number };
+						blind_final?: boolean;
+					}>(request);
 					const bad = badTeams(body.teams);
 					if (bad) return Response.json({ error: bad }, { status: 400 });
 					const briefs = body.briefs?.length ? body.briefs : body.brief ? [body.brief] : [];
@@ -102,6 +113,8 @@ export default {
 						cells: Math.min(Math.max(body.cells ?? 4, 2), 8),
 						teams: body.teams,
 						origin: url.origin,
+						...(body.cast ? { cast: { undersold: Math.min(Math.max((typeof body.cast === "object" ? body.cast.undersold : undefined) ?? 1, 0), 2) } } : {}),
+						...(body.blind_final ? { blind_final: true } : {}),
 					});
 					return Response.json(created, { status: 202 });
 				}
@@ -142,8 +155,8 @@ export default {
 			}
 			// Checks one video model's adapter on an existing printed frame: renders, downloads, discards
 			if (method === "POST" && root === "debug" && repoName === "llm") {
-				const body = await json<{ model: string; system?: string; user?: string; max_tokens?: number }>(request);
-				const r = await probeLlm(env, body.model, body.system ?? "Answer in one short sentence.", body.user ?? "What is a storyboard?", body.max_tokens ?? 1024).catch(
+				const body = await json<{ model: string; system?: string; user?: string; max_tokens?: number; think?: boolean; extra?: Record<string, unknown> }>(request);
+				const r = await probeLlm(env, body.model, body.system ?? "Answer in one short sentence.", body.user ?? "What is a storyboard?", body.max_tokens ?? 1024, Boolean(body.think), body.extra).catch(
 					(e) => ({ model: body.model, error: String(e) }),
 				);
 				return Response.json(r);

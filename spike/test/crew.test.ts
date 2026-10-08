@@ -87,9 +87,9 @@ test("the lead slot: frontier models on the menu, old crews lead with their one 
 test("frontier leads cost cents per plan, not dollars: the video is still the bill", () => {
 	const opus = crewCosts({ ...DEFAULT_CREW, lead: "claude-opus-5.5" });
 	const llama = crewCosts(DEFAULT_CREW);
-	// A plan with Opus (thinking included) costs a few cents more than with Llama; a 5 s Wan clip is $0.50
-	assert.ok(opus.board - llama.board < 0.06, `plan ${opus.board} vs ${llama.board}`);
-	assert.ok(opus.turn < 0.05, `turn ${opus.turn}`);
+	// A plan with Opus thinking hard costs under 10 cents more than with Llama; a 5 s Wan clip is $0.50
+	assert.ok(opus.board - llama.board < 0.1, `plan ${opus.board} vs ${llama.board}`);
+	assert.ok(opus.turn < 0.1, `turn ${opus.turn}`);
 	// The cinematographer is the llm slot: a frontier lead doesn't change what a take costs
 	assert.equal(opus.take, llama.take);
 });

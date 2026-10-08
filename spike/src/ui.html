@@ -83,6 +83,9 @@ aside.log h3 + ul { margin-bottom: 16px; }
 .cut ol { margin: 0; padding-left: 20px; display: grid; gap: 6px; font-size: 12px; }
 .cut li.now { color: var(--accent); }
 @media (max-width: 900px) { .cut { grid-template-columns: 1fr; } }
+.talk { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 4px; font-size: 12px; max-height: 18em; overflow: auto; }
+.talk li { border-left: 2px solid var(--line); padding-left: 8px; }
+.talk time { color: var(--muted); margin-right: 4px; }
 .arena-head { display: flex; gap: 16px; align-items: baseline; flex-wrap: wrap; }
 .clock { font-size: 28px; font-variant-numeric: tabular-nums; color: var(--accent); }
 table.lb { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
@@ -328,6 +331,16 @@ async function openArena(name) {
   arenaTimer = setInterval(tick, 4000);
 }
 
+// Talk lines as committed ("- 14:05 **Ada** → **Ren**: text"), newest last
+function talkHtml(lines, empty = "nothing said yet") {
+  if (!lines?.length) return `<p class="small muted">${empty}</p>`;
+  return `<ul class="talk">${lines.map((l) => {
+    const m = /^- (\d\d:\d\d) (.*)$/.exec(l);
+    const body = esc(m ? m[2] : l.replace(/^- /, "")).replace(/\*\*(.+?)\*\*/g, "<b>$1</b>");
+    return `<li>${m ? `<time>${m[1]}</time>` : ""}${body}</li>`;
+  }).join("")}</ul>`;
+}
+
 function renderArena() {
   const a = arena;
   if (!a) return;
@@ -352,11 +365,16 @@ function renderArena() {
       <table class="lb" style="margin-top:12px"><tr><th>#</th><th>team</th><th>win rate</th>${judges.map((j) => `<th>${esc(j.replace("judge-", ""))}</th>`).join("")}<th>spent</th><th>turns</th><th>now</th></tr>${rows}</table>
     </section>
     <div class="layout" style="margin-top:16px">
-      <div class="teams">${a.teams.map((t) => `<article class="panel"><b>${esc(t.team)}</b> <a href="#${esc(t.board)}" data-open="${esc(t.board)}" class="small">open board</a>
+      <div class="teams">${a.teams.map((t) => `<article class="panel"><b>${esc(t.cast?.team_name ?? t.team)}</b> <a href="#${esc(t.board)}" data-open="${esc(t.board)}" class="small">open board</a>
+        ${t.cast ? `<div class="small muted">led by <b>${esc(t.cast.lead.name)}</b> (${esc(t.team)}) · ${t.cast.players.map((p) => `${esc(p.name)} <span class="muted">(${esc(p.seat)})</span>`).join(" · ")}</div>` : ""}
         <div class="small muted">${esc(t.lastAction)}</div>
         <div class="strip">${t.cells.map((c) => c.printed ? `<img data-repo="${esc(t.board)}" data-path="cells/${c.id}/frame.webp" alt="">` : `<div class="ph"></div>`).join("")}</div>
-        ${t.failedJobs ? `<div class="small issues">${t.failedJobs} failed job(s)</div>` : ""}</article>`).join("")}</div>
-      <aside class="log panel"><h3>arena</h3><ul>${a.log.map((l) => `<li><code>${esc(l.hash)}</code> <b>${esc(l.author)}</b> ${esc(l.message)}</li>`).join("")}</ul></aside>
+        ${t.failedJobs ? `<div class="small issues">${t.failedJobs} failed job(s)</div>` : ""}
+        ${t.cast ? `<details open><summary class="small muted">crew room</summary>${talkHtml(t.crewRoom?.slice(-14))}</details>` : ""}</article>`).join("")}</div>
+      <aside class="log panel">
+        ${a.teams.some((t) => t.cast) ? `<h3>commons</h3>${a.rules.blind ? `<p class="small muted">closed: this round is blind</p>` : talkHtml(a.commons?.slice(-20))}` : ""}
+        ${a.judges_talk?.length ? `<h3>the judges</h3>${talkHtml(a.judges_talk)}` : ""}
+        <h3>arena</h3><ul>${a.log.map((l) => `<li><code>${esc(l.hash)}</code> <b>${esc(l.author)}</b> ${esc(l.message)}</li>`).join("")}</ul></aside>
     </div>`;
   document.querySelectorAll("img[data-repo]").forEach(async (el) => { const u = await frameOf(el.dataset.repo, "main", el.dataset.path); if (u) el.src = u; });
   document.querySelectorAll("[data-open]").forEach((el) => (el.onclick = (e) => { e.preventDefault(); clearInterval(arenaTimer); arena = null; $("#boards").value = el.dataset.open; openBoard(el.dataset.open); }));
@@ -398,6 +416,14 @@ function renderSeason(s) {
       </table>
       <div class="row" style="margin-top:10px">${s.arenas.map((a) => `<button data-open="${esc(a.arena)}">Round ${a.round}${a.closed ? "" : " (live)"}: ${esc(a.brief.slice(0, 50))}</button>`).join("")}</div>
     </section>
+    ${s.cast ? `<section class="panel" style="margin-top:16px">
+      <h3 style="margin:0 0 8px">The cast${s.revealed ? " (revealed)" : ""}</h3>
+      <div class="small">${s.cast.leads.map((l) => `<p><b>${esc(l.name)}</b>, lead of <b>${esc(l.team_name)}</b> (${esc(l.team)}): ${esc(l.bio)}</p>`).join("")}</div>
+      <table class="lb small"><tr><th>player</th><th>seat</th><th>team</th><th>bio</th>${s.revealed ? "<th>really</th>" : ""}</tr>
+        ${s.cast.players.map((p) => `<tr><td><b>${esc(p.name)}</b></td><td>${esc(p.seat)}</td><td>${esc(s.cast.leads.find((l) => l.team === p.team)?.team_name ?? "free agent")}</td><td>${esc(p.bio)}</td>${s.revealed ? `<td>${esc(p.model)}${p.undersold ? " · undersold" : ""}</td>` : ""}</tr>`).join("")}</table>
+      <p class="small muted">Judges: ${s.cast.judges.map((j) => `<b>${esc(j.name)}</b> (${esc(j.judge.replace("judge-", ""))}): ${esc(j.bio)}`).join(" · ")}</p>
+      <details><summary class="small muted">the draft</summary>${talkHtml(s.draft_talk)}</details>
+    </section>` : ""}
     ${s.teams.map((t) => `<section class="panel" style="margin-top:16px">
       <h3 style="margin:0 0 8px">${esc(t.team)}: how its strategy changed</h3>
       <div class="evolution">${t.strategies.map((x) => `<div><b>${x.after ? `After round ${x.after}` : "Round 1 (start)"}</b>${x.after ? `<span class="muted">${esc(x.message.split("\n")[0].replace(/^Retrospective after round \d+: /, ""))}</span>\n\n` : ""}${esc(x.strategy)}</div>`).join("")}</div>

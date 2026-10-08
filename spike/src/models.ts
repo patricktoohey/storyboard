@@ -42,31 +42,33 @@ async function withRetry<T>(fn: (attempt: number) => Promise<T>, retryOn = TRANS
 	}
 }
 
+/** The lead's calls (direction, bible edits, notes, retrospectives) think hard; the per-take writing doesn't. */
 async function chat(env: Env, model: string, system: string, user: string, maxTokens = 8192): Promise<string> {
-	return (await ask(env, model, system, user, maxTokens)).text;
+	return (await ask(env, model, system, user, maxTokens, model === env.DIRECTOR_MODEL)).text;
 }
 
 /** A text model's answer with the tokens it used (for billing what a call really cost). */
-export async function ask(env: Env, model: string, system: string, user: string, maxTokens = 8192): Promise<{ text: string; usage: { input: number; output: number } }> {
+export async function ask(env: Env, model: string, system: string, user: string, maxTokens = 8192, think = false): Promise<{ text: string; usage: { input: number; output: number } }> {
 	// Reasoning models (Gemma 4, Kimi, GPT, Claude with thinking) think in the same token budget: at 2048 the
 	// director's plan came back empty, all of it spent on reasoning
-	const out = await withRetry(() => env.AI.run(model as keyof AiModels, llmRequest(model, system, user, maxTokens) as never));
+	const out = await withRetry(() => env.AI.run(model as keyof AiModels, llmRequest(model, system, user, maxTokens, think) as never));
 	const text = llmText(out);
 	const usage = llmUsage(out);
 	if (text.trim()) return { text, usage };
 	// Empty: the reasoning used the whole budget. Kimi did this at 8192 once the plan gained locations and
 	// blocking (season-2026-10-08-0a8064, round 1); one retry with double the room
 	if (maxTokens < 16384) {
-		const again = await ask(env, model, system, user, maxTokens * 2);
+		const again = await ask(env, model, system, user, maxTokens * 2, think);
 		return { text: again.text, usage: { input: usage.input + again.usage.input, output: usage.output + again.usage.output } };
 	}
 	throw new Error(`${model} returned no text: ${JSON.stringify(out).slice(0, 200)}`);
 }
 
 /** A raw call for POST /debug/llm: what a provider actually returns, and how long it took. */
-export async function probeLlm(env: Env, model: string, system: string, user: string, maxTokens = 1024) {
+export async function probeLlm(env: Env, model: string, system: string, user: string, maxTokens = 1024, think = false, extra: Record<string, unknown> = {}) {
 	const started = Date.now();
-	const out = await env.AI.run(model as keyof AiModels, llmRequest(model, system, user, maxTokens) as never);
+	// `extra` fields go on the request as they are: for checking what a provider accepts through the binding
+	const out = await env.AI.run(model as keyof AiModels, { ...llmRequest(model, system, user, maxTokens, think), ...extra } as never);
 	return { model, ms: Date.now() - started, text: llmText(out), usage: llmUsage(out), raw: JSON.stringify(out).slice(0, 1500) };
 }
 

@@ -10,6 +10,8 @@ export interface LlmOption {
 	out: number; // USD per M output tokens
 	// Reasoning tokens a call typically spends before answering, billed as output
 	thinking?: number;
+	// The same for a lead's calls, which think hard where the provider allows it (llm.ts)
+	leadThinking?: number;
 }
 export interface RendererOption {
 	id: string;
@@ -39,10 +41,10 @@ const LLMS = {
 	"llama-3.3-70b": { id: "@cf/meta/llama-3.3-70b-instruct-fp8-fast", label: "Llama 3.3 70B: dependable all-rounder", in: 0.293, out: 2.253 },
 	"nemotron-3-120b": { id: "@cf/nvidia/nemotron-3-120b-a12b", label: "Nemotron 3 120B: strong planner, good value", in: 0.5, out: 1.5, thinking: 800 },
 	"kimi-k2.6": { id: "@cf/moonshotai/kimi-k2.6", label: "Kimi K2.6: the strongest open model, but slow: a decision can take minutes, and it has timed out", in: 0.95, out: 4.0, thinking: 2000 },
-	"gpt-5.4-mini": { id: "openai/gpt-5.4-mini", label: "GPT-5.4 mini: a small frontier model, quick", in: 0.75, out: 4.5, thinking: 300 },
-	"gpt-6.1-sol": { id: "openai/gpt-6.1-sol", label: "GPT-6.1 Sol: OpenAI's frontier model", in: 2.0, out: 10.0, thinking: 800 },
-	"claude-sonnet-5.5": { id: "anthropic/claude-sonnet-5.5", label: "Claude Sonnet 5.5: frontier, fast", in: 2.0, out: 10.0, thinking: 500 },
-	"claude-opus-5.5": { id: "anthropic/claude-opus-5.5", label: "Claude Opus 5.5: Anthropic's most capable model", in: 4.0, out: 20.0, thinking: 1000 },
+	"gpt-5.4-mini": { id: "openai/gpt-5.4-mini", label: "GPT-5.4 mini: a small frontier model, quick", in: 0.75, out: 4.5, thinking: 300, leadThinking: 2000 },
+	"gpt-6.1-sol": { id: "openai/gpt-6.1-sol", label: "GPT-6.1 Sol: OpenAI's frontier model", in: 2.0, out: 10.0, thinking: 800, leadThinking: 3000 },
+	"claude-sonnet-5.5": { id: "anthropic/claude-sonnet-5.5", label: "Claude Sonnet 5.5: frontier, fast", in: 2.0, out: 10.0, thinking: 500, leadThinking: 2500 },
+	"claude-opus-5.5": { id: "anthropic/claude-opus-5.5", label: "Claude Opus 5.5: Anthropic's most capable model", in: 4.0, out: 20.0, thinking: 1000, leadThinking: 2500 },
 } satisfies Record<string, LlmOption>;
 
 const snapUp = (allowed: number[]) => (s: number) => allowed.find((a) => a >= s) ?? allowed[allowed.length - 1];
@@ -153,7 +155,8 @@ const CALLS = { director: [2000, 1200], cinematographer: [1200, 200], turn: [500
 const SLOT_OF = { director: "lead", cinematographer: "llm", turn: "lead", revision: "lead" } as const;
 const llmCall = (crew: Crew, call: keyof typeof CALLS) => {
 	const m: LlmOption = MENU[SLOT_OF[call]][crew[SLOT_OF[call]]];
-	return (CALLS[call][0] * m.in + (CALLS[call][1] + (m.thinking ?? 0)) * m.out) / 1e6;
+	const thinking = SLOT_OF[call] === "lead" ? (m.leadThinking ?? m.thinking) : m.thinking;
+	return (CALLS[call][0] * m.in + (CALLS[call][1] + (thinking ?? 0)) * m.out) / 1e6;
 };
 // Clef routing (notes router, showrunner decisions, blast radius) is the arena's fixed model
 const ROUTER = 0.002;

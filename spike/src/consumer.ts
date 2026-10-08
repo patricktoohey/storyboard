@@ -2,7 +2,7 @@
 // ledger, and queue whatever it leads to (a board's takes, a continuity retake, a bible edit's takes).
 import { printTakes, retakeOptions, runAssembleJob, runBibleJob, runBoardJob, runTakeJob, runVideoJob } from "./board";
 import { queueLiveComparison, queueLiveJudging, runCompareJob, runJudgeJob } from "./arena";
-import { runSeasonStep } from "./season";
+import { runCastJob, runDraftPick, runSeasonStep } from "./season";
 import { limitsOf, report, submit } from "./coordinator";
 import { withCrew } from "./crew-env";
 import { LimitError } from "./ledger.ts";
@@ -77,6 +77,10 @@ async function run(env: Env, job: Job) {
 			const out = await runSeasonStep(env, job.repo, job.season, job.round, progress);
 			return { detail: out.detail };
 		}
+		case "cast":
+			return runCastJob(env, job.season, job.origin, progress);
+		case "draft_pick":
+			return runDraftPick(env, job.season, job.pick, job.origin, progress);
 		case "judge": {
 			const judged = await runJudgeJob(env, job.repo, job.team, job.board, job.final, progress);
 			// Live: with a new score in, compare the boards again

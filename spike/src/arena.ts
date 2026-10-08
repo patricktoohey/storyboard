@@ -5,6 +5,7 @@
 import { type Comparison, type Criterion, type JudgeScore, leaderboard, matchups, rubricOf, sampleCells, winRates } from "./arena-rules.ts";
 import { onMain } from "./board";
 import { submit, ledger } from "./coordinator";
+import { lastTalk } from "./cast-rules.ts";
 import { parseCsv } from "./csv.ts";
 import { WorkingTree } from "./git";
 import { loadSkill } from "./skills";
@@ -18,8 +19,10 @@ export interface Rules {
 	video_required: true;
 	visibility: "open";
 	judges: { name: string; weight: number }[];
-	teams: { team: string; board: string; showrunner: string; cinematographer: string; source?: string; lead?: string }[];
+	teams: { team: string; board: string; showrunner: string; cinematographer: string; source?: string; lead?: string; team_name?: string }[];
 	created: string;
+	// A blind round: teams see neither the commons nor each other (a cast season's finale)
+	blind?: boolean;
 	// Set when the arena is a round of a season (season.ts)
 	season?: string;
 	round?: number;
@@ -37,6 +40,9 @@ export interface TeamSpec {
 	team: string;
 	showrunner?: string;
 	lead?: string;
+	// A cast season's team: its characters and players (cast.ts), and the producer's bonus on its budget
+	cast?: import("./cast").TeamCast;
+	bonus?: number;
 }
 export const teamSpec = (t: string | TeamSpec): TeamSpec => (typeof t === "string" ? { team: t } : t);
 const JUDGES = [
@@ -74,6 +80,7 @@ export async function createArena(
 		// A season round: boards fork from each team's own repo (its evolved skills and lessons)
 		season?: { season: string; round: number; teamRepos: Record<string, string>; cinematographers: Record<string, string> };
 		id?: string;
+		blind?: boolean;
 	},
 ) {
 	const id = opts.id ?? stamp();
@@ -84,12 +91,12 @@ export async function createArena(
 	// Read each team's showrunner skill from the arena's own copy of the skills
 	const arenaTree = await WorkingTree.clone(remote, "main");
 	const teams = await Promise.all(
-		(opts.teams ?? DEFAULT_TEAMS).map(teamSpec).map(async ({ team, showrunner = `showrunner-${team}`, lead }) => {
+		(opts.teams ?? DEFAULT_TEAMS).map(teamSpec).map(async ({ team, showrunner = `showrunner-${team}`, lead, cast, bonus }) => {
 			const source = opts.season?.teamRepos[team];
 			// A season team's showrunner skill lives in its own repo (it evolves there); others in the template
 			const skill = await loadSkill(source ? await WorkingTree.clone(await repoRemote(env, source), "main") : arenaTree, showrunner);
 			const cinematographer = opts.season?.cinematographers[team] ?? skill.metadata.cinematographer ?? "cinematographer";
-			return { team, board: `board-${team}-${id}`, showrunner, cinematographer, source, ...(lead ? { lead } : {}) };
+			return { team, board: `board-${team}-${id}`, showrunner, cinematographer, source, ...(lead ? { lead } : {}), ...(cast ? { team_name: cast.team_name } : {}), cast, bonus };
 		}),
 	);
 	for (const j of JUDGES) rubricOf((await loadSkill(arenaTree, j.name)).body);
@@ -102,15 +109,17 @@ export async function createArena(
 		video_required: true,
 		visibility: "open",
 		judges: JUDGES,
-		teams,
+		// The rules are public: no casts (player models) and no bonuses in them
+		teams: teams.map(({ cast: _c, bonus: _b, ...t }) => t),
 		created: new Date().toISOString(),
+		...(opts.blind ? { blind: true } : {}),
 		...(opts.season ? { season: opts.season.season, round: opts.season.round, origin: opts.origin } : {}),
 	};
 	await onMain(remote, (tree) =>
 		tree.commit({ name: "arena" }, `Arena: ${teams.length} teams, $${opts.budget} each, deadline ${deadline}`, {
 			"brief.md": `# Brief\n\n${opts.brief}\n`,
 			"rules.json": json(rules),
-			...Object.fromEntries(teams.map((t) => [`teams/${t.team}.json`, json(t)])),
+			...Object.fromEntries(teams.map(({ cast: _c, bonus: _b, ...t }) => [`teams/${t.team}.json`, json(t)])),
 		}),
 	);
 
@@ -123,9 +132,12 @@ export async function createArena(
 					"board.json": json({
 						arena,
 						team: t.team,
-						budget_usd: opts.budget,
+						budget_usd: opts.budget + (t.bonus ?? 0),
+						...(t.bonus ? { bonus_usd: t.bonus } : {}),
 						deadline,
+						...(opts.blind ? { blind: true } : {}),
 						...(t.lead ? { lead: t.lead } : {}),
+						...(t.cast ? { cast: t.cast } : {}),
 						skills: { director: "director", cinematographer: t.cinematographer, casting: "casting", showrunner: t.showrunner },
 					}),
 				}),
@@ -434,10 +446,11 @@ export async function arenaState(env: Env, arena: string) {
 	const closed = Boolean(await readText(env, arena, "closed.json"));
 	const teams = await Promise.all(
 		rules.teams.map(async (t) => {
-			const [jobs, csv, boardJson, submission, ...scoreTexts] = await Promise.all([
+			const [jobs, csv, boardJson, crewRoom, submission, ...scoreTexts] = await Promise.all([
 				ledger(env, t.board),
 				readText(env, t.board, "storyboard.csv"),
 				readText(env, t.board, "board.json"),
+				readText(env, t.board, "talk/crew.md"),
 				readText(env, arena, `submissions/${t.team}.json`),
 				...rules.judges.flatMap((j) => [readText(env, arena, scorePath(t.team, j.name, false)), readText(env, arena, scorePath(t.team, j.name, true))]),
 			]);
@@ -447,9 +460,13 @@ export async function arenaState(env: Env, arena: string) {
 			const turns = jobs.filter((j) => j.kind === "turn");
 			const lastAction = turns.find((j) => j.result === "acted");
 			const sub = submission ? JSON.parse(submission) : null;
+			const cfg = boardJson ? JSON.parse(boardJson) : {};
 			return {
 				...t,
-				crew: boardJson ? (JSON.parse(boardJson).crew ?? null) : null,
+				crew: cfg.crew ?? null,
+				// Who's on the team, as viewers see them (models stay secret until the season's reveal)
+				cast: cfg.cast ? { team_name: cfg.cast.team_name, lead: cfg.cast.lead, players: cfg.cast.players.map((p: { name: string; seat: string; bio: string }) => ({ name: p.name, seat: p.seat, bio: p.bio })) } : null,
+				crewRoom: lastTalk(crewRoom, 60),
 				spent: jobs.reduce((sum, j) => sum + (Number(j.cost_est) || 0), 0),
 				turns: turns.filter((j) => j.result === "acted").length,
 				lastAction: lastAction?.detail ?? (turns[0]?.detail || "starting"),
@@ -475,10 +492,13 @@ export async function arenaState(env: Env, arena: string) {
 	);
 	using handle = await env.ARTIFACTS.get(arena);
 	const log = await handle.log({ ref: "main", limit: 30 });
+	const [commons, judgesTalk] = await Promise.all([readText(env, arena, "talk/commons.md"), readText(env, arena, "talk/judges.md")]);
 	return {
 		arena,
 		rules,
 		closed,
+		commons: lastTalk(commons, 60),
+		judges_talk: lastTalk(judgesTalk, 40),
 		now: new Date().toISOString(),
 		leaderboard: board,
 		comparative: comparative && { final: comparative.final, at: comparative.at, winRates: comparative.winRates },
