@@ -77,7 +77,11 @@ budget for notes, retakes and the required video.
 ## Output contract
 Reply with ONLY a JSON object: {${slots.map((s) => `"${s}": string`).join(", ")}, "reason": string}`;
 	const leadEnv = withCrew(env, { ...DEFAULT_CREW, lead });
-	const { text, usage } = await ask(leadEnv, leadEnv.DIRECTOR_MODEL, system, JSON.stringify({ budget_usd: budget, shots, lessons, menu }, null, 2), 4096);
+	// A lead that can't answer in time (Kimi timed out drafting, 3046, in the frontier season) still gets to
+	// play: the default crew, which always fits, and the lead decides everything after
+	const { text, usage } = await ask(leadEnv, leadEnv.DIRECTOR_MODEL, system, JSON.stringify({ budget_usd: budget, shots, lessons, menu }, null, 2), 4096).catch(
+		(err) => ({ text: `{"reason": "draft failed (${String(err).slice(0, 80)}); default crew"}`, usage: { input: 0, output: 0 } }),
+	);
 	let picks: Record<string, unknown> = {};
 	try {
 		picks = JSON.parse(text.slice(text.indexOf("{"), text.lastIndexOf("}") + 1));
@@ -184,6 +188,8 @@ export async function runTurnJob(env: Env, job: TurnJob, progress: Progress) {
 		const view = {
 			brief: rules.brief,
 			minutes_left: Math.round((deadline - Date.now()) / 60000),
+			// Said outright: Opus waited four turns for a "still rendering" take that had long finished
+			running_now: summary.openJobs ? `${summary.openJobs} job(s) still running` : "nothing: every take listed below is finished, and waiting brings nothing new",
 			budget: {
 				spent: Number(summary.spent.toFixed(2)),
 				total: summary.budget,
@@ -214,12 +220,14 @@ export async function runTurnJob(env: Env, job: TurnJob, progress: Progress) {
 		const system = `${skill.body}\n\n${HOW_IT_WORKS}\n\n${contract(allowed)}`;
 		const leadEnv = withCrew(env, crew);
 		await progress(`${crew.lead} deciding among ${allowed.join(", ")}`);
-		let answer = await ask(leadEnv, leadEnv.DIRECTOR_MODEL, system, JSON.stringify(view, null, 2), 4096);
+		// A lead that times out (Kimi: 3046) loses the turn, not the team: it waits and is asked again
+		const timedOut = (err: unknown) => ({ text: `{"action": "wait", "reason": "the lead did not answer: ${String(err).slice(0, 80).replace(/"/g, "'")}"}`, usage: { input: 0, output: 0 } });
+		let answer = await ask(leadEnv, leadEnv.DIRECTOR_MODEL, system, JSON.stringify(view, null, 2), 4096).catch(timedOut);
 		cost += leadCost(crew, answer.usage);
 		let parsed = parseDecision(answer.text, allowed, summary);
 		if ("error" in parsed) {
 			// One correction, with the reason; then the turn waits
-			answer = await ask(leadEnv, leadEnv.DIRECTOR_MODEL, system, `${JSON.stringify(view)}\n\nYour last answer was rejected: ${parsed.error}. Answer again.`, 4096);
+			answer = await ask(leadEnv, leadEnv.DIRECTOR_MODEL, system, `${JSON.stringify(view)}\n\nYour last answer was rejected: ${parsed.error}. Answer again.`, 4096).catch(timedOut);
 			cost += leadCost(crew, answer.usage);
 			parsed = parseDecision(answer.text, allowed, summary);
 		}

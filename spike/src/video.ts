@@ -56,6 +56,8 @@ export function clipSeconds(cell: Pick<Cell, "duration_s">, cap: number) {
 }
 
 /** Runs the crew's image-to-video model (each provider has its own request shape) and downloads the clip. */
+const PLAIN_MOTION = "Subtle natural motion; the camera stays still.";
+
 export async function animate(
 	env: Env,
 	frame: { url: string; jpeg: () => Promise<Uint8Array> },
@@ -70,9 +72,14 @@ export async function animate(
 	const base64 = MENU.video[crew.video].imageAs === "base64" ? toBase64(await frame.jpeg()) : undefined;
 	const req = videoRequest(crew, { url: frame.url, base64 }, prompt, seconds, { seed, staticCamera });
 	if (crew.video === "wan-2.7-i2v") req.input.negative_prompt = NEGATIVE_PROMPT;
-	const out = (await env.AI.run(req.model as keyof AiModels, req.input as never)) as unknown as
-		| { video?: string; state?: string; result?: { video?: string } }
-		| undefined;
+	type Out = { video?: string; state?: string; result?: { video?: string } } | undefined;
+	const out = (await env.AI.run(req.model as keyof AiModels, req.input as never).catch(async (err) => {
+		// Hailuo answered one beat's motion prompt with "7003: User Input Error"; the same frame animated with
+		// the plain prompt (season-2026-10-08-0a8064). One retry with it, recorded in the clip's metadata.
+		if (!String(err).includes("7003") || prompt === PLAIN_MOTION) throw err;
+		req.input.prompt = PLAIN_MOTION;
+		return env.AI.run(req.model as keyof AiModels, req.input as never);
+	})) as unknown as Out;
 	// The catalog returns the clip as a URL, either bare or wrapped in { state, result }
 	const url = out?.video ?? out?.result?.video;
 	if (!url) throw new Error(`${req.model} returned no video: ${JSON.stringify(out).slice(0, 300)}`);
@@ -81,7 +88,7 @@ export async function animate(
 	const mp4 = new Uint8Array(await res.arrayBuffer());
 	return {
 		mp4,
-		meta: { model: req.model, prompt, planned_seconds: seconds, seconds: req.billed, usd: req.usd, seed, input: { ...req.input, image: undefined, image_uri: undefined, image_input: undefined, first_frame_image: undefined }, bytes: mp4.byteLength, elapsed_ms: Date.now() - started },
+		meta: { model: req.model, prompt: req.input.prompt as string, planned_seconds: seconds, seconds: req.billed, usd: req.usd, seed, input: { ...req.input, image: undefined, image_uri: undefined, image_input: undefined, first_frame_image: undefined }, bytes: mp4.byteLength, elapsed_ms: Date.now() - started },
 	};
 }
 

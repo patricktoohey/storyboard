@@ -106,7 +106,9 @@ export function allowedActions(s: BoardSummary): Action[] {
 		// Video is required: with a cut in hand and no time to make a better one, submit. Otherwise the team
 		// may keep working toward another cut, and choose which cut to submit
 		if (timeLeft < 2 * cutTime) return ["submit"];
-		if (s.openJobs > 0) return ["wait", "submit"];
+		// Work toward a better cut is running: wait for it (asking the lead every 20 s whether to submit
+		// instead cost Opus 2¢ a turn to say "wait"); the clock above still forces the submission
+		if (s.openJobs > 0) return ["wait"];
 	} else {
 		// Out of time: finish the board and cut now, or the team has nothing to submit. This comes before
 		// waiting on running work: slow retakes must not hold up the cut (the crew arena's auteur printed with

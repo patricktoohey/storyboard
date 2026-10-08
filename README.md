@@ -52,10 +52,12 @@ Working and deployed (Workers, Artifacts, Queues, Workers AI, AI Gateway, Images
   decides every turn from a manual of tools that includes Git: save a version, restore an earlier one,
   have the judges compare two, print an earlier take, submit an earlier cut.
 - **Seasons**: teams over several rounds; retrospectives rewrite each team's strategy, or return to an
-  earlier version that did better. The first live season ran 2026-10-08.
+  earlier version that did better. In the comparison season (same skill, different lead models), Claude
+  Opus 5.5 won both rounds, and in round 2 saved, compared twice, restored its saved version and submitted
+  the cut made from it.
 - **Tests**: 99 unit tests (`npm test`), live model evals (`npm run eval`), an end-to-end smoke test.
 
-Next: a season of frontier against open lead models, chained video, and the demo video.
+Next: [Season 2](docs/season-2.md), a 30-second teaser about the show itself, with sound; then the demo video.
 
 ## Try it
 
@@ -76,6 +78,7 @@ balance and a spend limit on the `default` gateway.
 
 - [docs/design.md](docs/design.md): the pipeline, repo layout, agents and where Clef fits
 - [docs/arena.md](docs/arena.md): arenas, the crew draft, comparative judging, seasons, both arena runs and what they showed
+- [docs/season-2.md](docs/season-2.md): the next challenge, a season preview about the show itself, with sound (design)
 - [docs/decisions.md](docs/decisions.md): every design decision, the evidence behind it, and the test that pins it
 - [docs/cloudflare-notes.md](docs/cloudflare-notes.md): API facts (Artifacts, Clef, model inputs, prices)
 - [docs/competition-plan.md](docs/competition-plan.md): the original plan and demo video outline

@@ -419,3 +419,44 @@ model is the only difference: `{"teams": [{"team": "opus", "showrunner": "showru
 return to one (`revert_to`) instead of rewriting.
 
 First smoke run: Opus 92%, Llama 8% of side-by-side judgments; Opus spent $1.01 of $2, Llama $0.65.
+
+## The comparison season (season-2026-10-08-120b9b)
+
+Four teams, one starting skill (`showrunner`), different lead models; 2 rounds of 30 minutes, $2.50 a team
+a round, 3 cells; the lighthouse brief, then Night Drive. $10.50 in all.
+
+| Lead | Round 1 | Round 2 | Points | Git moves (r1, r2) | Lead model cost (r1, r2) |
+|---|---|---|---|---|---|
+| Claude Opus 5.5 | 85% | 73% | **6** | 1, 4 | $0.33, $0.34 |
+| GPT-6.1 Sol | 58% | 64% | 4 | 4, 3 | $0.11, $0.09 |
+| Kimi K2.6 | 42% | 43% | 2 | 1, 0 | $0.10, $0.14 |
+| Llama 3.3 70B | 15% | 20% | 0 | 10, 0 | $0.02, $0.02 |
+
+(Win rates are side-by-side comparisons, so they add up across teams; points rank each round 3-2-1-0.)
+
+What the leads did with the history:
+
+- **Opus, round 2**, the full loop: cut v1 early, `save` the board behind it, notes and retakes, print,
+  `compare` the new board with the saved one (lost, 41%), print a hybrid of the new cell 01 with the
+  earlier takes of 02 and 03, `compare` again (lost, 39%), then `restore` the saved version, "the current
+  board lost to safe-v1 in both comparisons", and submit the cut made from it.
+- **GPT-6.1 Sol** saved before every revision (`safe-original`, `safe-handwriting`, `safe-current`,
+  ...), compared once in round 1 (a near tie, 49%), and in round 1 recut and submitted v2. Its
+  retrospective noticed the winner's crew and copied it for round 2 (Sonnet as cinematographer,
+  flux-2-dev).
+- **Kimi** was too slow to lead a timed team: its round 1 draft timed out (3046) and it started 16 minutes
+  late; its decisions took minutes each. Its notes were among the best written.
+- **Llama** used `save` ten times in round 1 on the same commit, without ever comparing or restoring:
+  the tool, without the idea. Its retrospective failed on malformed JSON, so it kept its strategy.
+
+Retrospectives were specific and acted on: Opus, "when two notes fail on one issue, stop rewording"; GPT,
+"the winner used the same cinematographer, a stronger renderer, and fewer turns"; Kimi moved to a lean crew
+to keep money for revisions.
+
+Fixed during and after the season: the view says outright when nothing is running (Opus waited on a
+finished take); no lead call while work runs after a cut; a draft that fails falls back to the default
+crew; a lead that times out waits instead of failing the turn; JSON answers get one corrected retry;
+Artifacts 5xx are retried on clone and push; Hailuo's 7003 is retried with a plain motion prompt; replays
+show Git moves in teal and fit any number of teams.
+
+Next: [Season 2](season-2.md), a teaser about the show itself, with sound.

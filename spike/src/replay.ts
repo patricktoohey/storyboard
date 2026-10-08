@@ -10,7 +10,8 @@ import { repoRemote } from "./template";
 export interface ReplayEvent {
 	t: number; // unix seconds
 	team?: string;
-	kind: "start" | "draft" | "plan" | "turn" | "take" | "print" | "cut" | "score" | "submit" | "failed" | "close" | "final";
+	// "git": a team using its history as a tool (save, restore, compare, replan)
+	kind: "start" | "draft" | "plan" | "turn" | "git" | "take" | "print" | "cut" | "score" | "submit" | "failed" | "close" | "final";
 	text: string;
 	// For prints: the frames on the board after this commit
 	frames?: { cell: string; take: number; ref: string }[];
@@ -57,12 +58,18 @@ export async function arenaTimeline(env: Env, arena: string) {
 			else if (m.startsWith("Draft crew:")) events.push({ t: c.authoredAt, team: team.team, kind: "draft", text: m });
 			else if (c.author.name === "editor" && m.startsWith("Print")) {
 				events.push({ t: c.authoredAt, team: team.team, kind: "print", text: m, frames: await printedAt(env, team.board, c.hash) });
+			} else if (m.startsWith("Restore ")) {
+				// A restore changes the board like a print does: show its frames
+				events.push({ t: c.authoredAt, team: team.team, kind: "print", text: m, frames: await printedAt(env, team.board, c.hash) });
 			}
 		}
 		for (const c of await logOf(env, team.board, "jobs")) {
 			const m = first(c.message);
 			let match: RegExpExecArray | null;
-			if ((match = /^✓ turn: (turn \d+: (?!wait).*)$/.exec(m))) events.push({ t: c.authoredAt, team: team.team, kind: "turn", text: match[1] });
+			if ((match = /^✓ turn: (turn \d+: (?!wait).*)$/.exec(m))) {
+				const git = /^turn \d+: (save|restore|compare|replan)\b/.test(match[1]);
+				events.push({ t: c.authoredAt, team: team.team, kind: git ? "git" : "turn", text: match[1] });
+			}
 			else if ((match = /^✓ take (\d+) of cell (\S+): (.*)$/.exec(m))) events.push({ t: c.authoredAt, team: team.team, kind: "take", text: `take ${match[1]} of cell ${match[2]}: ${match[3]}` });
 			else if ((match = /^✓ assemble: (.*)$/.exec(m))) events.push({ t: c.authoredAt, team: team.team, kind: "cut", text: `cut assembled: ${match[1]}` });
 			else if ((match = /^✗ (.*)$/.exec(m))) events.push({ t: c.authoredAt, team: team.team, kind: "failed", text: match[1] });

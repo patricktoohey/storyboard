@@ -58,8 +58,8 @@ test("with a cut in hand and time left, the team may keep working toward a bette
 	const s = board({ cut: "v1", cuts: ["v1"], deadline: minutes(30) });
 	const allowed = allowedActions(s);
 	for (const a of ["note", "retake", "submit", "save", "restore", "compare", "wait"]) assert.ok(allowed.includes(a as never), a);
-	// Running work after a cut: wait for it, or submit what exists
-	assert.deepEqual(allowedActions({ ...s, openJobs: 2 }), ["wait", "submit"]);
+	// Running work after a cut: wait for it, without asking the lead (the clock still forces the submit)
+	assert.deepEqual(allowedActions({ ...s, openJobs: 2 }), ["wait"]);
 });
 
 test("with time and money, the lead chooses among working, Git tools, cutting and waiting", () => {

@@ -24,6 +24,10 @@ export interface Agent {
 
 export type Files = Record<string, string | Uint8Array>;
 
+// Artifacts sometimes answers receive-pack with an empty body under concurrent pushes, and has answered a
+// clone or push with a bare 500 (a take in the frontier season); both pass on a retry
+const retryable = (err: unknown) => /unpack|HTTP Error: 5\d\d/.test(String(err));
+
 export class WorkingTree {
 	private fs: MemoryFS;
 	private remote: Remote;
@@ -47,21 +51,21 @@ export class WorkingTree {
 	}
 
 	/** Shallow, single-branch clone, then optionally start a new branch from it. */
-	static async clone(remote: Remote, from: string, newBranch?: string) {
-		const fs = new MemoryFS();
-		const tree = new WorkingTree(fs, remote);
-		await git.clone({
-			fs,
-			http,
-			dir: tree.dir,
-			url: remote.url,
-			ref: from,
-			singleBranch: true,
-			depth: 1,
-			onAuth: tree.auth,
-		});
-		if (newBranch) await git.branch({ fs, dir: tree.dir, ref: newBranch, checkout: true });
-		return tree;
+	static async clone(remote: Remote, from: string, newBranch?: string): Promise<WorkingTree> {
+		for (let attempt = 1; ; attempt++) {
+			// A fresh tree per attempt: a failed clone can leave a half-written object store behind
+			const fs = new MemoryFS();
+			const tree = new WorkingTree(fs, remote);
+			try {
+				await git.clone({ fs, http, dir: tree.dir, url: remote.url, ref: from, singleBranch: true, depth: 1, onAuth: tree.auth });
+			} catch (err) {
+				if (attempt >= 3 || !retryable(err)) throw err;
+				await new Promise((r) => setTimeout(r, 400 * attempt));
+				continue;
+			}
+			if (newBranch) await git.branch({ fs, dir: tree.dir, ref: newBranch, checkout: true });
+			return tree;
+		}
 	}
 
 	async read(path: string) {
@@ -172,7 +176,7 @@ export class WorkingTree {
 				if (!result.ok) throw new Error(`push ${ref} failed: ${JSON.stringify(result.refs)}`);
 				return result;
 			} catch (err) {
-				if (attempt >= attempts || !String(err).includes("unpack")) throw err;
+				if (attempt >= attempts || !retryable(err)) throw err;
 				console.warn(`push ${ref} attempt ${attempt} failed: ${err}`);
 				await new Promise((r) => setTimeout(r, 250 * 2 ** attempt + Math.random() * 250));
 			}

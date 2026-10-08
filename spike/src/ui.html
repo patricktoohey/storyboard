@@ -453,7 +453,8 @@ async function buildReplay(tl, canvas) {
   const W = 1280, H = 720;
   const teams = tl.rules.teams.map((t) => t.team);
   const boardOf = Object.fromEntries(tl.rules.teams.map((t) => [t.team, t.board]));
-  const styleOf = Object.fromEntries(tl.rules.teams.map((t) => [t.team, `${t.showrunner.replace("showrunner-", "")} · ${t.cinematographer}`]));
+  // A pinned lead model is the team's identity; otherwise its showrunner style and cinematographer
+  const styleOf = Object.fromEntries(tl.rules.teams.map((t) => [t.team, t.lead ? `led by ${t.lead}` : `${t.showrunner.replace("showrunner-", "")} · ${t.cinematographer}`]));
   const load = (url) => new Promise((r) => { if (!url) return r(null); const im = new Image(); im.onload = () => r(im); im.onerror = () => r(null); im.src = url; });
   const images = {};
   for (const e of tl.events.filter((x) => x.frames)) {
@@ -481,7 +482,7 @@ async function buildReplay(tl, canvas) {
   }
 
   // Pace: quick for takes, longer for decisions, prints and scores
-  const hold = { take: 0.6, turn: 1.8, print: 2.2, score: 1.6, final: 2.2, submit: 1.8, cut: 1.6, plan: 1.2, draft: 1.6, failed: 2.2, start: 2.5, close: 2.0 };
+  const hold = { take: 0.6, turn: 1.8, git: 2.6, print: 2.2, score: 1.6, final: 2.2, submit: 1.8, cut: 1.6, plan: 1.2, draft: 1.6, failed: 2.2, start: 2.5, close: 2.0 };
   const steps = tl.events.map((e) => ({ e, d: hold[e.kind] ?? 1 }));
   const finaleBoard = 5;
   const duration = steps.reduce((a, b) => a + b.d, 0) + finaleBoard + clips.length * 5;
@@ -504,12 +505,12 @@ async function buildReplay(tl, canvas) {
     const el = Math.max(0, upto - t0);
     ctx.fillStyle = "#f2b544"; ctx.font = "600 26px ui-monospace, monospace"; ctx.textAlign = "right";
     ctx.fillText(`T+${Math.floor(el / 60)}:${String(el % 60).padStart(2, "0")}`, W - 32, 48); ctx.textAlign = "left";
-    const colW = (W - 64 - 2 * 24) / 3;
+    const colW = (W - 64 - (teams.length - 1) * 24) / teams.length;
     teams.forEach((team, i) => {
       const x = 32 + i * (colW + 24), y = 80, s = st[team];
       ctx.fillStyle = "#1b1b1f"; ctx.fillRect(x, y, colW, 520);
       ctx.fillStyle = "#ececf1"; ctx.font = "600 22px system-ui"; ctx.fillText(team, x + 16, y + 34);
-      ctx.fillStyle = "#9a9aa6"; ctx.font = "14px system-ui"; wrap(styleOf[team], x + 16, y + 56, colW - 190, 16, 1);
+      ctx.fillStyle = "#9a9aa6"; ctx.font = "14px system-ui"; wrap(styleOf[team], x + 16, y + 56, colW - 110, 16, 1);
       const sc = s.scores; ctx.textAlign = "right";
       ctx.fillStyle = sc ? "#ececf1" : "#9a9aa6"; ctx.font = "600 30px system-ui"; ctx.fillText(sc ? total(sc).toFixed(2) : "–", x + colW - 16, y + 40);
       ctx.font = "13px system-ui"; ctx.fillStyle = "#9a9aa6";
@@ -523,9 +524,11 @@ async function buildReplay(tl, canvas) {
         if (f) { ctx.fillStyle = "rgba(0,0,0,.6)"; ctx.fillRect(fx, fy, 70, 20); ctx.fillStyle = "#ececf1"; ctx.font = "12px system-ui"; ctx.fillText(`${f.cell} · take ${f.take}`, fx + 6, fy + 14); }
       }
       const by = y + 80 + 2 * (fh + 16) + 8;
-      ctx.fillStyle = s.flash > 0 ? "#f2b544" : "#ececf1"; ctx.font = "15px system-ui"; wrap(s.last || "waiting for the brief", x + 16, by + 16, colW - 32, 20, 6);
+      // Git moves (save, restore, compare, replan) flash teal: the history used as a tool
+      ctx.fillStyle = s.flash > 0 ? (s.lastGit ? "#4fd1c5" : "#f2b544") : "#ececf1"; ctx.font = "15px system-ui"; wrap(s.last || "waiting for the brief", x + 16, by + 16, colW - 32, 20, 6);
       ctx.fillStyle = "#9a9aa6"; ctx.font = "13px system-ui";
       ctx.fillText(`turns ${s.turns} · takes ${s.takes} · prints ${s.prints}`, x + 16, y + 500);
+      if (s.git) { ctx.fillStyle = "#4fd1c5"; ctx.fillText(`git ${s.git}`, x + 16, y + 480); }
       if (s.badge) { ctx.textAlign = "right"; ctx.fillStyle = s.badge.color; ctx.font = "600 13px system-ui"; ctx.fillText(s.badge.text, x + colW - 16, y + 500); ctx.textAlign = "left"; }
     });
     ctx.fillStyle = "#1b1b1f"; ctx.fillRect(32, 616, W - 64, 80);
@@ -541,7 +544,9 @@ async function buildReplay(tl, canvas) {
       if (s) {
         if (e.kind === "print") { s.frames = e.frames; s.prints++; }
         if (e.kind === "score" || e.kind === "final") s.scores = e.scores;
-        if (e.kind === "turn") s.turns++;
+        if (e.kind === "turn" || e.kind === "git") s.turns++;
+        if (e.kind === "git") s.git = (s.git || 0) + 1;
+        if (e.kind !== "take") s.lastGit = e.kind === "git";
         if (e.kind === "take") s.takes++;
         if (e.kind === "submit") s.badge = /\(cut /.test(e.text) ? { text: "SUBMITTED", color: "#5fc48a" } : { text: "NO VIDEO", color: "#ef6a5b" };
         if (e.kind !== "take") { s.last = e.text; s.flash = 1; }

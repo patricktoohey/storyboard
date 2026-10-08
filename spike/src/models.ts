@@ -70,6 +70,20 @@ export async function probeLlm(env: Env, model: string, system: string, user: st
 	return { model, ms: Date.now() - started, text: llmText(out), usage: llmUsage(out), raw: JSON.stringify(out).slice(0, 1500) };
 }
 
+/**
+ * A JSON answer, with one correction: an answer that doesn't parse is sent back with the parser's error.
+ * Llama's first retrospective put markdown bullets inside a JSON array and the team kept its old strategy.
+ */
+async function chatJson<T>(env: Env, model: string, system: string, user: string): Promise<T> {
+	const text = await chat(env, model, system, user);
+	try {
+		return extractJson<T>(text);
+	} catch (err) {
+		const again = await chat(env, model, system, `${user}\n\nYour last reply was not valid JSON (${String(err).slice(0, 160)}). Reply again with ONLY the JSON object.`);
+		return extractJson<T>(again);
+	}
+}
+
 function extractJson<T>(text: string): T {
 	const start = text.indexOf("{");
 	const end = text.lastIndexOf("}");
@@ -94,9 +108,7 @@ Reply with ONLY a JSON object:
             "blocking": string,  // one sentence: where each person is and what they face, e.g. "Driver at the wheel facing forward; passenger behind her, leaning in"
             "positions": {character name: "left" | "center" | "right"}}]}  // where each character is in the frame; keep sides consistent between shots in the same place
 Write exactly ${cellCount} cells.`;
-	const board = extractJson<Omit<Board, "cells"> & { cells: Omit<Cell, "id">[] }>(
-		await chat(env, llmFor(env, skill.metadata.model, env.DIRECTOR_MODEL), system, concept),
-	);
+	const board = await chatJson<Omit<Board, "cells"> & { cells: Omit<Cell, "id">[] }>(env, llmFor(env, skill.metadata.model, env.DIRECTOR_MODEL), system, concept);
 	const characters = (board.characters ?? []).map((c) => {
 		const age_band = c.age_band in AGE_BANDS ? c.age_band : "young_adult";
 		// Age must be in the look itself; "worn face" alone renders as 30
@@ -383,8 +395,11 @@ ${bible}
 
 CURRENT CHARACTERS:
 ${JSON.stringify(characters, null, 2)}`;
-	const out = extractJson<{ changed?: boolean; summary: string; bible: string; characters: Character[] }>(
-		await chat(env, llmFor(env, skill.metadata.model, env.DIRECTOR_MODEL), system, user),
+	const out = await chatJson<{ changed?: boolean; summary: string; bible: string; characters: Character[] }>(
+		env,
+		llmFor(env, skill.metadata.model, env.DIRECTOR_MODEL),
+		system,
+		user,
 	);
 	const known = new Map(characters.map((c) => [c.name, c]));
 	return {
@@ -457,7 +472,7 @@ Reply with ONLY a JSON object:
  "strategy": string,                       // your new "## Strategy" section body: 3 to 6 markdown bullets
  "revert_to": string | null,               // a version from your_strategy_history to return to instead, or null
  "adopt_cinematographer": string | null}  // a cinematographer skill name from the rivals, or null`;
-	const out = extractJson<Retrospective>(await chat(env, llmFor(env, skill.metadata.model, env.DIRECTOR_MODEL), system, context));
+	const out = await chatJson<Retrospective>(env, llmFor(env, skill.metadata.model, env.DIRECTOR_MODEL), system, context);
 	return {
 		lessons: (out.lessons ?? []).map(String).slice(0, 5),
 		strategy: String(out.strategy ?? ""),

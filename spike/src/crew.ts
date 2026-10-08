@@ -38,7 +38,7 @@ const LLMS = {
 	"gemma-4": { id: "@cf/google/gemma-4-26b-a4b-it", label: "Gemma 4 26B: cheap and quick, plainer writing", in: 0.1, out: 0.3, thinking: 800 },
 	"llama-3.3-70b": { id: "@cf/meta/llama-3.3-70b-instruct-fp8-fast", label: "Llama 3.3 70B: dependable all-rounder", in: 0.293, out: 2.253 },
 	"nemotron-3-120b": { id: "@cf/nvidia/nemotron-3-120b-a12b", label: "Nemotron 3 120B: strong planner, good value", in: 0.5, out: 1.5, thinking: 800 },
-	"kimi-k2.6": { id: "@cf/moonshotai/kimi-k2.6", label: "Kimi K2.6: the strongest open model, slow (it reasons at length)", in: 0.95, out: 4.0, thinking: 2000 },
+	"kimi-k2.6": { id: "@cf/moonshotai/kimi-k2.6", label: "Kimi K2.6: the strongest open model, but slow: a decision can take minutes, and it has timed out", in: 0.95, out: 4.0, thinking: 2000 },
 	"gpt-5.4-mini": { id: "openai/gpt-5.4-mini", label: "GPT-5.4 mini: a small frontier model, quick", in: 0.75, out: 4.5, thinking: 300 },
 	"gpt-6.1-sol": { id: "openai/gpt-6.1-sol", label: "GPT-6.1 Sol: OpenAI's frontier model", in: 2.0, out: 10.0, thinking: 800 },
 	"claude-sonnet-5.5": { id: "anthropic/claude-sonnet-5.5", label: "Claude Sonnet 5.5: frontier, fast", in: 2.0, out: 10.0, thinking: 500 },
