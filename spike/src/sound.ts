@@ -24,6 +24,8 @@ import {
 	mixName,
 	mixPlan,
 	mixerFull,
+	frameTimes,
+	heardOf,
 	soundSignature,
 	mp3Seconds,
 	parseLines,
@@ -248,6 +250,8 @@ Reply with ONLY a JSON object: {"voices": {speaker name: voice key}, "say": stri
 	return { detail: `${spoken.length} lines by ${by} (${chars} characters; voices ${speakers.map((s) => `${s.name}=${voices[s.name]}`).join(", ")})${parsed.dropped.length ? `; dropped ${parsed.dropped.join(", ")}` : ""}` };
 }
 
+const WHISPER = "@cf/openai/whisper-large-v3-turbo";
+
 /**
  * Job: mix a cut. Reads its clips (EDL order) and main's sound, writes ffmpeg's plan (sound-rules.ts), runs
  * it in the mixer Container, and commits video/teaser.mp4, video/mix.json and the sound it used to the cut.
@@ -292,6 +296,24 @@ export async function runMixJob(env: Env, repo: string, cut: string, progress: P
 	if (!res.ok) throw new Error(`mix failed: ${(await res.text()).slice(0, 300)}`);
 	const mp4 = new Uint8Array(await res.arrayBuffer());
 
+	// For the judges who can't watch video (D33): frames from the finished film, and what can be heard in it
+	// (Whisper on the mixed soundtrack, so a buried line isn't heard). The teaser is kept even if this fails.
+	await progress("frames and a transcript for the judges");
+	const evidence: Record<string, Uint8Array | string> = {};
+	let evidenceError: string | undefined;
+	try {
+		const ex = await mixer.fetch(new Request("http://mixer/extract", { method: "POST", body: JSON.stringify({ times: frameTimes(plan.total) }) }));
+		if (!ex.ok) throw new Error(`extract: ${ex.status} ${(await ex.text()).slice(0, 200)}`);
+		const got = (await ex.json()) as { frames: { t: number; jpg: string }[]; audio: string | null };
+		const frames = got.frames.map((f, i) => ({ t: f.t, file: `video/frames/${String(i + 1).padStart(2, "0")}.jpg`, jpg: f.jpg }));
+		for (const f of frames) evidence[f.file] = Uint8Array.from(atob(f.jpg), (c) => c.charCodeAt(0));
+		evidence["video/frames.json"] = JSON.stringify(frames.map(({ t, file }) => ({ t, file })), null, 2) + "\n";
+		const heard = got.audio ? heardOf(await env.AI.run(WHISPER as keyof AiModels, { audio: got.audio } as never)) : [];
+		evidence["video/transcript.json"] = JSON.stringify({ model: WHISPER, heard }, null, 2) + "\n";
+	} catch (err) {
+		evidenceError = String(err).slice(0, 300);
+	}
+
 	// The sound goes onto the cut with the teaser, so the cut is the whole film as mixed
 	const remote = await repoRemote(env, repo);
 	const tree = await WorkingTree.clone(remote, branch);
@@ -305,6 +327,7 @@ export async function runMixJob(env: Env, repo: string, cut: string, progress: P
 		levels: { clips_under_score: 0.6, score: 0.8, lines: 1.3, ducking: "sidechain, ratio 6" },
 		ffmpeg_ms: Number(res.headers.get("x-ffmpeg-ms")) || Date.now() - started,
 		bytes: mp4.byteLength,
+		...(evidenceError ? { evidence_error: evidenceError } : {}),
 	};
 	const extra = Object.fromEntries(Object.entries(sources).filter(([f]) => f.startsWith("sound/")));
 	for (const p of [LINES_CSV, VOICES_JSON, "sound/score.json"]) {
@@ -314,8 +337,9 @@ export async function runMixJob(env: Env, repo: string, cut: string, progress: P
 	await tree.commit({ name: "mixer" }, `Mix ${cut}: ${plan.total}s, ${clips.filter((c) => c.audio).length} clips with their own sound${scoreMp3 ? ", score" : ""}, ${plan.cues.length} lines`, {
 		"video/teaser.mp4": mp4,
 		"video/mix.json": JSON.stringify(mix, null, 2) + "\n",
+		...evidence,
 		...extra,
 	});
 	await tree.push(branch);
-	return { detail: `${branch}: teaser.mp4, ${plan.total}s, ${(mp4.byteLength / 1e6).toFixed(1)} MB (ffmpeg ${(mix.ffmpeg_ms / 1000).toFixed(1)}s)` };
+	return { detail: `${branch}: teaser.mp4, ${plan.total}s, ${(mp4.byteLength / 1e6).toFixed(1)} MB (ffmpeg ${(mix.ffmpeg_ms / 1000).toFixed(1)}s)${evidenceError ? `; no frames or transcript: ${evidenceError}` : ""}` };
 }

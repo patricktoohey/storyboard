@@ -302,6 +302,8 @@ A cast season can carry a `format`, and every part of it is committed to the sea
 
 ## D32: a judge that watches and listens, and a mixer that waits its turn
 
+(The single Gemini judge at double weight became the three-lab panel in D33.)
+
 **The format dry run** (`season-2026-10-08-2345e6`: three teams chained from Season 1, a twist round, one
 elimination, a Sonnet 5.5 wildcard, protect and steal, a blind final) ran every move once fixes were in:
 
@@ -341,6 +343,45 @@ the voices apart, so it hears. About a tenth of a cent a film.
   no holograms or neon), and the teaser judge's `brief` criterion includes how it should look.
 
 Tests: `test/teaser.test.ts` (the request, margins, notes, forfeits), `mixerFull` in `test/sound.test.ts`.
+
+## D33: the final round is ranked by a panel from the three labs
+
+Gemini 3.1 Pro leads a team in Season 2 (Nemotron came last in both dry-run rounds), so the teams are led
+by Anthropic, OpenAI and Google models, and a Gemini judge alone would rank its own lab's team. The final
+round is now ranked by **a panel**: Claude Opus 5.5, GPT-6.1 Sol and Gemini 3.1 Pro, at equal weight, each
+comparing every pair of finished teasers both ways round on one rubric (`skills/judge-teaser`).
+
+- **They can't all watch.** Through the binding, Claude and GPT take images but not video or audio (GPT
+  refused `input_audio`: "text or image_url" only); Gemini 3.1 Pro takes the mp4 with its sound. So every
+  judge gets the same evidence, and Gemini also gets the film:
+  - eight frames from the finished teaser (the last half a second from the end, where the title card is),
+    taken by the mixer Container right after the mix (`POST /extract`);
+  - a transcript of what can be heard in the mix: Whisper (`whisper-large-v3-turbo` on Workers AI, from none
+    of the three labs) on the mixed soundtrack, so a line buried under the score isn't heard;
+  - the team's direction for its score, marked as the team's own words.
+  All three go on the cut beside `teaser.mp4` (`video/frames/`, `video/frames.json`, `video/transcript.json`).
+- **Clef** keeps the live scores during a round and the teams' own comparisons; a new arena's
+  `rules.panel` replaces it only for the final ranking (older arenas are judged as before).
+- **Final judging waits for mixes** still running (up to 8 minutes) instead of forfeiting a team that
+  submitted a cut a moment before the close.
+- **The judges on camera are the panel**, each created and played by its own lab's model, and each speaks
+  from its own notes on what it saw and heard.
+- **A verdict survives a broken answer**: when a note's unescaped quote breaks the JSON, each criterion is
+  read on its own (one of 18 live verdicts came back that way and had counted as even).
+
+**Live check on the dry run's finale** (the three teasers re-mixed with frames and transcripts; Whisper
+caught every line with its timing): all three judges put the Opus team first (Claude 56%, GPT 57%,
+Gemini 59%; overall Opus 57%, wildcard 47%, GPT 45%), where the stills had put the wildcard first. They
+disagree where their evidence differs: Gemini, which heard the films, gave the wildcard 64% for its score
+("a clock tick that splits into echoes") and GPT's team 24% ("the absence of a musical score leaves the
+teaser feeling flat"); GPT's judge, reading frames, gave the wildcard 34% ("branching is mostly asserted
+by 'Three versions' rather than demonstrated"). The Claude judge didn't favour the Opus team (56%, the
+lowest of the three); the GPT judge rated GPT's team highest of the three (59%, against 51% and 24%),
+which the panel exists to dilute. A Claude call costs about 5,300 tokens in for two films, so a
+three-team final is about $0.50 for the panel.
+
+Tests: `test/teaser.test.ts` (the three request shapes, the film only for Gemini, transcripts, frame
+times, margins, broken answers, forfeits).
 
 ## Backlog: staging continuity and non-human characters
 

@@ -61,6 +61,26 @@ export const SPEECH_USD_PER_CHAR = 0.0001;
 // Requested as mp3 at 128 kbps, so a file's length is its size: no decoder needed in the Worker
 export const MP3_FORMAT = "mp3_44100_128";
 
+/**
+ * When to take the judges' frames from a mixed teaser (D33): evenly through the film, and the last one half a
+ * second from the end, where the title card is.
+ */
+export function frameTimes(total: number, n = 8): number[] {
+	if (!(total > 1)) return [0];
+	const times = Array.from({ length: n }, (_, i) => Number((((i + 0.5) * total) / n).toFixed(1)));
+	times[n - 1] = Number(Math.max(0, total - 0.5).toFixed(1));
+	return times;
+}
+
+/** Whisper's answer, kept to what a judge reads: timed lines of what can be heard in the mix. */
+export type Heard = { start: number; end: number; text: string }[];
+export function heardOf(out: unknown): Heard {
+	const segments = (out as { segments?: { start?: number; end?: number; text?: string }[] })?.segments ?? [];
+	return segments
+		.filter((x) => typeof x.text === "string" && x.text.trim())
+		.map((x) => ({ start: Number((x.start ?? 0).toFixed(1)), end: Number((x.end ?? 0).toFixed(1)), text: x.text!.trim() }));
+}
+
 /** The Containers error for "every instance is running": worth waiting for, unlike any other failure. */
 export const mixerFull = (error: string) => /maximum number of running container instances/i.test(error);
 export const mp3Seconds = (bytes: number) => Number(((bytes * 8) / 128_000).toFixed(2));

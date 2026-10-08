@@ -45,6 +45,8 @@ export interface Lead extends Persona {
 
 export interface Judge extends Persona {
 	judge: string;
+	// The model that plays the judge: a panel judge is its own lab's model (D33)
+	model?: LlmKey;
 }
 
 export interface Cast {

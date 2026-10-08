@@ -37,7 +37,7 @@ Proposed brief (what every team's lead and players read):
 | Talk | the lead's reasons, in the ledger | crew room, commons, confessionals, judges' remarks |
 | What a team sees | its own board; rivals at retrospective | rivals' moves every turn, except in the **blind finale** |
 | Leads | Opus 5.5, GPT-6.1 Sol, Kimi K2.6, Llama 3.3 | Opus 5.5, GPT-6.1 Sol, Kimi K2.6, **Gemini 3.1 Pro** |
-| Judging | Clef on contact sheets | + a judge that watches and listens |
+| Judging | Clef on contact sheets | the final ranked by a panel: Claude, GPT and Gemini on the finished teaser |
 | Seasons | standalone | **chained**: teams and players keep their repos and memory |
 
 Llama is dropped: it has no thinking mode, so a rerun would only repeat Season 1. Nemotron 3 took its
@@ -204,15 +204,20 @@ goes; the hope is that it stays an occasional move.
 
 ## Judging
 
-Clef judges stills, so craft and story stay on contact sheets (now 8 sampled frames), with the
-side-by-side comparison as the ranking. Sound, dialogue and the teaser's pull need a judge that watches and
-listens:
+Clef judges stills on contact sheets: quick and cheap, so it keeps the live scores during a round and judges
+the teams' own comparisons. The final round is ranked by **the panel** (D33): three judges, one from each
+lab whose model leads a team (Claude Opus 5.5, GPT-6.1 Sol, Gemini 3.1 Pro), at equal weight, so no lab's
+judge decides alone. Each compares the finished teasers two at a time, both ways round, on one rubric
+(`skills/judge-teaser`): does it make you want to watch, does it show what's new, do the voices and sound
+carry it, does it land the SEASON 2 card, does it do what the brief asks (including the look).
 
-- **Teaser judge** (built, D32): Gemini 3.8 Flash takes the mixed video with its sound through the binding
-  (live-checked: it transcribes the lines). Rubric: does it build anticipation, does it
-  show what's new, do the voices and sound carry it, does it land the SEASON 2 card.
-- If no catalog model takes video with audio, the fallback is a transcript (Whisper) plus the score's
-  prompt and the contact sheet for an LLM judge: weaker, but it hears the words.
+- **The same evidence for every judge**: eight frames from the finished film (the last by the title card)
+  and a transcript of what can be heard in its mix (Whisper on Workers AI, from none of the three labs, so
+  a buried line isn't heard), plus the team's direction for its score. Claude and GPT take images but not
+  video or audio through the binding.
+- **Gemini also gets the film itself**, with its sound (live-checked: it transcribes the lines).
+- The judges on camera are the panel, each played by its own lab's model, and each speaks from its own
+  notes on what it saw and heard.
 
 ## Ghost runs: a benchmark from the recordings
 
@@ -263,8 +268,8 @@ it.
    offers, elimination, the blind finale's protect and steal, a wildcard or returning entrant, chained
    seasons with a backstory. Not built: the twist "use one shot from a rival's board".
 5. **Thinking levels and Nemotron** (built, D29): live checks through the binding; longer timeouts for Kimi.
-6. **The teaser judge** (built, D32): Gemini 3.8 Flash watches and listens to the mixed teasers, two at a
-   time, in the final round; rubric skill `judge-teaser`, double weight.
+6. **The judging panel** (built, D32, D33): Claude, GPT and Gemini rank the final round on the finished
+   teasers (frames and a transcript for all, the film for Gemini); rubric skill `judge-teaser`.
 7. **A dry run** (2 teams, 1 round, small budget), then the real season.
 
 Roughly four to five days, mostly 1, 3 and 4. Ghost runs come after the season.

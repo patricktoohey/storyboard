@@ -9,7 +9,7 @@
 // create its character, then the leads draft their players one pick at a time (draft_pick jobs, a snake),
 // and only then does round 1 start. After each round the judges remark on every film and everyone records
 // a confessional before the retrospectives; when the season ends, the reveal.
-import { arenaState, createArena, DEFAULT_TEAMS, readRules, type TeamSpec, teamSpec } from "./arena";
+import { arenaState, createArena, DEFAULT_TEAMS, PANEL, readRules, type TeamSpec, teamSpec } from "./arena";
 import { type Comparison, type RoundResult, replaceStrategy, seasonStandings, strategyOf } from "./arena-rules.ts";
 import { onMain } from "./board";
 import {
@@ -250,11 +250,9 @@ export async function createSeason(
 // ── Casting and the draft ──────────────────────────────────────────────────────────────────────────
 
 const leadModel = (lead?: string): LlmKey => (lead && lead in MENU.lead ? (lead as LlmKey) : (DEFAULT_CREW.lead as LlmKey));
-const JUDGE_ROLES: Record<string, string> = {
-	"judge-craft": "a judge on the show who rules on craft: continuity, framing, the image",
-	"judge-story": "a judge on the show who rules on story: the brief, the arc, the feeling",
-	"judge-teaser": "a judge on the show who watches and listens to the finished teaser: whether it makes you want to watch, the voices, the sound, the title card",
-};
+// The judges on camera are the panel (D33), each played by its own lab's model
+const JUDGE_ROLE = "a judge on the show: you watch every team's finished teaser and rule on whether it makes you want to watch the season, what's new in it, its voices and sound, and its title card";
+const JUDGE_ROLES: Record<string, string> = Object.fromEntries(PANEL.map((j) => [j.name, JUDGE_ROLE]));
 
 /**
  * Job: every lead, player and judge creates its character, played by its own model (judges by the judges'
@@ -324,10 +322,11 @@ export async function runCastJob(env: Env, season: string, origin: string, progr
 	const judges: Judge[] = [];
 	for (const judge of Object.keys(JUDGE_ROLES)) {
 		const voice = voiceOf.judge(judges.length);
-		const made = await createCharacter(env, JUDGE_VOICE, JUDGE_ROLES[judge], { taken, voice }).catch(() => ({ persona: { ...fallback(90), name: judge, voice_id: voice }, cost: 0 }));
+		const model = PANEL.find((j) => j.name === judge)?.model ?? JUDGE_VOICE;
+		const made = await createCharacter(env, model, JUDGE_ROLES[judge], { taken, voice }).catch(() => ({ persona: { ...fallback(90), name: judge, voice_id: voice }, cost: 0 }));
 		cost += made.cost;
 		taken.push(made.persona.name);
-		judges.push({ judge, name: made.persona.name, bio: made.persona.bio, voice: made.persona.voice, voice_id: made.persona.voice_id });
+		judges.push({ judge, model, name: made.persona.name, bio: made.persona.bio, voice: made.persona.voice, voice_id: made.persona.voice_id });
 	}
 
 	await progress("opening the players' repos");
@@ -1018,11 +1017,18 @@ export async function runSeasonStep(env: Env, arena: string, season: string, rou
 async function roundTalk(env: Env, s: Season, arena: string, state: ArenaState, result: RoundResult) {
 	const cast = s.cast!;
 	const names = Object.fromEntries(cast.leads.map((l) => [l.team, l.team_name]));
-	// What the watching judge saw and heard in each teaser (D32), so every judge's remark is about the film
+	// What each panel judge saw and heard in each teaser (D33), so its remark is about the film; a judge
+	// that isn't on the panel (an older season's) hears the panel's notes
 	const compared = JSON.parse((await readText(env, arena, "scores/comparative.final.json")) ?? "{}") as { comparisons?: Comparison[] };
-	const watched = (team: string) => [
-		...new Set((compared.comparisons ?? []).flatMap((c) => (c.notes ? [c.first === team ? c.notes.first : c.second === team ? c.notes.second : ""] : [])).filter(Boolean)),
+	const watched = (team: string, judge?: string) => [
+		...new Set(
+			(compared.comparisons ?? [])
+				.filter((c) => c.notes && (!judge || c.judge === judge))
+				.map((c) => (c.first === team ? c.notes!.first : c.second === team ? c.notes!.second : ""))
+				.filter(Boolean),
+		),
 	];
+	const onPanel = (j: Judge) => (compared.comparisons ?? []).some((c) => c.judge === j.judge);
 	const films = await Promise.all(
 		state.teams.map(async (t) => ({
 			team: names[t.team] ?? t.team,
@@ -1032,11 +1038,16 @@ async function roundTalk(env: Env, s: Season, arena: string, state: ArenaState, 
 			shots: (t.cells ?? []).map((c) => c.shot),
 			beats: ((await readText(env, t.board, "storyboard.csv")) ?? "").split("\n").slice(1, 12).join("\n"),
 			scores: Object.fromEntries(t.finalScores.map((f) => [f.judge, f.scores])),
-			...(watched(t.team).length ? { seen_and_heard: watched(t.team).slice(0, 3) } : {}),
+			id: t.team,
 		})),
 	);
+	const filmsFor = (j: Judge) =>
+		films.map(({ id, ...f }) => {
+			const seen = watched(id, onPanel(j) ? j.judge : undefined);
+			return seen.length ? { ...f, [onPanel(j) ? "what_you_saw_and_heard" : "what_the_panel_saw_and_heard"]: seen.slice(0, 3) } : f;
+		});
 	const remarks = await Promise.all(
-		cast.judges.map(async (j) => ({ judge: j, said: await judgeRemarks(env, j, { brief: state.rules.brief, round: result.round, films, ...(s.backstory ? { story_so_far: s.backstory.show } : {}) }, films.map((f) => f.team)).catch(() => ({})) })),
+		cast.judges.map(async (j) => ({ judge: j, said: await judgeRemarks(env, j, { brief: state.rules.brief, round: result.round, films: filmsFor(j), ...(s.backstory ? { story_so_far: s.backstory.show } : {}) }, films.map((f) => f.team)).catch(() => ({})) })),
 	);
 	const at = new Date();
 	await appendTalk(

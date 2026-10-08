@@ -5,6 +5,8 @@
 //   GET  /ping            ready check
 //   PUT  /files/<name>    the request body becomes <name> in the work directory
 //   POST /run             {"args": [...]} runs ffmpeg there; answers with out.mp4, or 500 with its stderr
+//   POST /extract         {"times": [s, ...]} after /run: a JPEG of out.mp4 at each time and its soundtrack as
+//                         a small mp3, for the judges who can't watch video (D33); answers JSON, then clears up
 import { spawn } from "node:child_process";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
@@ -48,8 +50,26 @@ createServer(async (req, res) => {
 			const { code, err } = await ffmpeg(args);
 			if (code !== 0) return res.writeHead(500, { "content-type": "text/plain" }).end(`ffmpeg exited ${code}: ${err}`);
 			const mp4 = await readFile(`${WORK}/out.mp4`);
-			await rm(WORK, { recursive: true, force: true });
+			// out.mp4 stays for /extract; the instance sleeps soon after, and nothing in it persists
 			return res.writeHead(200, { "content-type": "video/mp4", "x-ffmpeg-ms": String(Date.now() - started) }).end(mp4);
+		}
+		if (req.method === "POST" && url.pathname === "/extract") {
+			const { times } = JSON.parse((await body(req)).toString());
+			if (!Array.isArray(times) || times.length > 16 || times.some((t) => typeof t !== "number" || !(t >= 0 && t < 600))) {
+				return res.writeHead(400).end("bad times");
+			}
+			const frames = [];
+			for (const [i, t] of times.entries()) {
+				const name = `frame${i}.jpg`;
+				const { code, err } = await ffmpeg(["-ss", t.toFixed(2), "-i", "out.mp4", "-frames:v", "1", "-vf", "scale=640:-2", "-q:v", "5", "-y", name]);
+				if (code !== 0) return res.writeHead(500).end(`frame at ${t}s: ${err}`);
+				frames.push({ t, jpg: (await readFile(`${WORK}/${name}`)).toString("base64") });
+			}
+			// Mono 16 kHz is what speech recognition wants, and keeps it small
+			const { code, err } = await ffmpeg(["-i", "out.mp4", "-vn", "-ac", "1", "-ar", "16000", "-b:a", "48k", "-y", "audio.mp3"]);
+			const audio = code === 0 ? (await readFile(`${WORK}/audio.mp3`)).toString("base64") : null;
+			await rm(WORK, { recursive: true, force: true });
+			return res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ frames, audio, ...(audio ? {} : { audio_error: err }) }));
 		}
 		res.writeHead(404).end("not found");
 	} catch (e) {

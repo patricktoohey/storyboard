@@ -201,7 +201,7 @@ The round's results are in. For each team, give the one sentence you'd say to th
 film: specific, honest, in character. Tough is fine; cruel isn't.
 
 Reply with ONLY a JSON object: {"remarks": {${teams.map((t) => `"${t}": string`).join(", ")}}}`;
-	const out = await speak(env, JUDGE_VOICE, system, JSON.stringify(context, null, 2));
+	const out = await speak(env, judge.model ?? JUDGE_VOICE, system, JSON.stringify(context, null, 2));
 	try {
 		const raw = JSON.parse(out.text.slice(out.text.indexOf("{"), out.text.lastIndexOf("}") + 1)).remarks ?? {};
 		return Object.fromEntries(teams.flatMap((t) => (typeof raw[t] === "string" ? [[t, raw[t].replace(/\s+/g, " ").trim().slice(0, 400)]] : [])));

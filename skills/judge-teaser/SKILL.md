@@ -1,18 +1,17 @@
 ---
 name: judge-teaser
-description: Arena judge that watches and listens to the finished teaser, picture and sound. Compares two teasers at a time in the final round.
+description: The final round's panel rubric. Three judges (Claude, GPT, Gemini) compare the finished teasers two at a time.
 metadata:
   role: judge
-  style: Teaser (watches and listens)
-  watches: teaser
-  model: google/gemini-3.8-flash
+  style: The panel (the finished teaser)
 ---
 
-# Judge: the teaser
+# Judge: the panel
 
-Watches each team's mixed teaser (`video/teaser.mp4` on its submitted cut) with its sound, two at a time,
-and says which one does each criterion better. The other judges see contact sheets; this one hears the
-lines and the score. A team with no mixed teaser loses its matchups here.
+The final round is ranked by a panel of three judges, one from each lab whose model leads a team, at
+equal weight. Each compares two teams' finished teasers at a time, both ways round, on this rubric. Every
+judge gets eight frames from the film and a transcript of what can be heard in its mix; the Gemini judge
+also watches the film itself, with its sound. A team with no mixed teaser loses its matchups.
 
 ```rubric
 [

@@ -9,7 +9,10 @@ import { lastTalk } from "./cast-rules.ts";
 import { parseCsv } from "./csv.ts";
 import { WorkingTree } from "./git";
 import { loadSkill } from "./skills";
-import { TEASER_MODEL, forfeit, geminiText, parseTeaserVerdict, teaserRequest, watches } from "./teaser-rules.ts";
+import { type Evidence, forfeit, panelRequest, panelText, parseTeaserVerdict, watchesFilm } from "./teaser-rules.ts";
+import type { LlmKey } from "./cast-rules.ts";
+import { MENU } from "./crew.ts";
+import type { Heard } from "./sound-rules.ts";
 import { forkBoard, repoRemote } from "./template";
 
 export interface Rules {
@@ -20,6 +23,9 @@ export interface Rules {
 	video_required: true;
 	visibility: "open";
 	judges: { name: string; weight: number }[];
+	// The final round's panel (D33): one judge per lab, ranking the finished teasers; without one (arenas
+	// before it), the judges above rank the final round too
+	panel?: PanelJudge[];
 	// A team's own deadline when a twist changed its clock
 	teams: { team: string; board: string; showrunner: string; cinematographer: string; source?: string; lead?: string; team_name?: string; deadline?: string }[];
 	created: string;
@@ -49,11 +55,24 @@ export interface TeamSpec {
 	twist?: { usd: number; minutes: number; text: string };
 }
 export const teamSpec = (t: string | TeamSpec): TeamSpec => (typeof t === "string" ? { team: t } : t);
+// Clef on contact sheets: quick and cheap, so they score live during a round and judge teams' own comparisons
 const JUDGES = [
 	{ name: "judge-craft", weight: 1 },
 	{ name: "judge-story", weight: 1 },
-	// The only judge that sees the film itself, with its sound, so it counts double (D32)
-	{ name: "judge-teaser", weight: 2 },
+];
+
+/** A panel judge: a lab's model with the panel's rubric (skills/judge-teaser). */
+export interface PanelJudge {
+	name: string;
+	model: LlmKey;
+	weight: number;
+}
+export const PANEL_RUBRIC = "judge-teaser";
+// One judge from each lab whose model leads a team, at equal weight, so none decides alone (D33)
+export const PANEL: PanelJudge[] = [
+	{ name: "judge-claude", model: "claude-opus-5.5", weight: 1 },
+	{ name: "judge-gpt", model: "gpt-6.1-sol", weight: 1 },
+	{ name: "judge-gemini", model: "gemini-3.1-pro", weight: 1 },
 ];
 
 const stamp = () => `${new Date().toISOString().slice(0, 10)}-${crypto.randomUUID().slice(0, 6)}`;
@@ -106,7 +125,7 @@ export async function createArena(
 			return { team, board: `board-${team}-${id}`, showrunner, cinematographer, source, ...(lead ? { lead } : {}), ...(cast ? { team_name: cast.team_name } : {}), ...own, cast, bonus, twist };
 		}),
 	);
-	for (const j of JUDGES) rubricOf((await loadSkill(arenaTree, j.name)).body);
+	for (const name of [...JUDGES.map((j) => j.name), PANEL_RUBRIC]) rubricOf((await loadSkill(arenaTree, name)).body);
 
 	const rules: Rules = {
 		brief: opts.brief,
@@ -116,6 +135,7 @@ export async function createArena(
 		video_required: true,
 		visibility: "open",
 		judges: JUDGES,
+		panel: PANEL,
 		// The rules are public: no casts (player models) and no bonuses in them
 		teams: teams.map(({ cast: _c, bonus: _b, twist: _t, ...t }) => t),
 		created: new Date().toISOString(),
@@ -204,10 +224,8 @@ export async function runJudgeJob(env: Env, arena: string, team: string, board: 
 	const arenaTree = await WorkingTree.clone(await repoRemote(env, arena), "main");
 	const results: JudgeScore[] = [];
 	for (const { name } of rules.judges) {
-		const skill = await loadSkill(arenaTree, name);
-		// A watching judge compares the mixed teasers (runCompareJob); it has no contact sheet to score
-		if (watches(skill.metadata)) continue;
 		await progress(`${name} scoring ${team} at ${commit.slice(0, 7)}`);
+		const skill = await loadSkill(arenaTree, name);
 		const rubric = rubricOf(skill.body);
 		const questions = Object.fromEntries(
 			rubric.map((c) => [c.id, { type: "score", instructions: c.question, criteria: c.levels }]),
@@ -317,6 +335,7 @@ export async function askPair(
  */
 export async function runCompareJob(env: Env, arena: string, final: boolean, progress: (d: string) => Promise<unknown>) {
 	const rules = await readRules(env, arena);
+	if (final && rules.panel?.length) return runPanel(env, arena, rules, rules.panel, progress);
 	const boards = (
 		await Promise.all(
 			rules.teams.map(async (t) => {
@@ -335,13 +354,7 @@ export async function runCompareJob(env: Env, arena: string, final: boolean, pro
 	const arenaTree = await WorkingTree.clone(await repoRemote(env, arena), "main");
 	const comparisons: Comparison[] = [];
 	for (const { name } of rules.judges) {
-		const skill = await loadSkill(arenaTree, name);
-		const rubric = rubricOf(skill.body);
-		if (watches(skill.metadata)) {
-			// Only submitted cuts are mixed; the live comparisons are stills
-			if (final) comparisons.push(...(await compareTeasers(env, arena, rules, name, rubric, boards.map((b) => b.team), progress)));
-			continue;
-		}
+		const rubric = rubricOf((await loadSkill(arenaTree, name)).body);
 		await progress(`${name} comparing ${boards.length} boards`);
 		const pairs = matchups(boards.map((b) => b.team));
 		const results = await Promise.all(
@@ -372,41 +385,95 @@ export async function runCompareJob(env: Env, arena: string, final: boolean, pro
 	return { compared: true, overall: rates.overall };
 }
 
-/** A team's submitted teaser (its cut's mixed video/teaser.mp4) as base64, or undefined without one. */
-async function submittedTeaser(env: Env, arena: string, rules: Rules, team: string) {
-	const sub = await readText(env, arena, `submissions/${team}.json`);
-	const cut = sub ? (JSON.parse(sub).cut as string | null) : null;
+/** What the panel is given of a team's submitted cut: its frames, transcript, score direction and film. */
+async function submittedEvidence(env: Env, rules: Rules, team: string, sub: { cut: string | null } | undefined): Promise<Evidence | undefined> {
 	const board = rules.teams.find((t) => t.team === team)?.board;
-	if (!cut || !board) return undefined;
+	if (!sub?.cut || !board) return undefined;
+	const ref = `cut/${sub.cut}`;
 	using handle = await env.ARTIFACTS.get(board);
-	const blob = await handle.readFile({ ref: `cut/${cut}`, path: "video/teaser.mp4" });
-	return blob ? toBase64(new Uint8Array(await blob.arrayBuffer())) : undefined;
+	const read = (path: string) => handle.readFile({ ref, path });
+	const film = await read("video/teaser.mp4");
+	if (!film) return undefined;
+	const [framesJson, transcript, score] = await Promise.all(["video/frames.json", "video/transcript.json", "sound/score.json"].map(async (p) => (await read(p))?.text()));
+	const frameList = framesJson ? (JSON.parse(framesJson) as { t: number; file: string }[]) : [];
+	const frames = await Promise.all(frameList.map(async (f) => ({ t: f.t, jpg: toBase64(new Uint8Array(await (await read(f.file))!.arrayBuffer())) })));
+	return {
+		frames,
+		heard: transcript ? (JSON.parse(transcript).heard as Heard) : null,
+		score: score ? (JSON.parse(score).direction ?? JSON.parse(score).prompt ?? null) : null,
+		film: toBase64(new Uint8Array(await film.arrayBuffer())),
+	};
+}
+
+/** A submitted cut whose mix is still running: final judging waits for it rather than forfeit the team. */
+async function mixing(env: Env, board: string) {
+	return (await ledger(env, board)).some((j) => j.kind === "mix" && (j.status === "queued" || j.status === "running"));
 }
 
 /**
- * A watching judge (D32): Gemini watches and listens to every pair of submitted teasers, both ways round.
- * A team with no mixed teaser loses its matchups; if nobody has one (a silent arena), the judge sits out.
+ * The final round's panel (D33): every panel judge compares every pair of submitted teasers, both ways
+ * round, on the panel's rubric. Every judge gets the frames and the transcript; the Gemini judge also gets
+ * the film. A team with no mixed teaser loses its matchups. A failed call is retried once, then counts as
+ * even. Results go in scores/comparative.final.json like any final comparison.
  */
-async function compareTeasers(env: Env, arena: string, rules: Rules, judge: string, rubric: Criterion[], teams: string[], progress: (d: string) => Promise<unknown>) {
-	const teasers = Object.fromEntries(await Promise.all(teams.map(async (t) => [t, await submittedTeaser(env, arena, rules, t)] as const)));
-	if (!Object.values(teasers).some(Boolean)) return [];
-	await progress(`${judge} watching ${Object.values(teasers).filter(Boolean).length} teasers`);
-	return Promise.all(
-		matchups(teams).flatMap(([first, second]): Promise<Comparison>[] => {
-			const [a, b] = [teasers[first], teasers[second]];
-			if (!a && !b) return [];
-			if (!a || !b) return [Promise.resolve({ judge, first, second, pFirst: forfeit(rubric, Boolean(a)) })];
-			return [
-				(async () => {
-					const ask = () => env.AI.run(TEASER_MODEL as keyof AiModels, teaserRequest(rules.brief, rubric, a, b) as never);
-					// One retry; after that the matchup counts as even rather than losing the round's judging
-					const out = await ask().catch(ask).catch((err) => (console.error("teaser judge", first, second, err), undefined));
-					const verdict = parseTeaserVerdict(geminiText(out), rubric);
-					return { judge, first, second, pFirst: verdict.pFirst, notes: verdict.notes };
-				})(),
-			];
-		}),
+async function runPanel(env: Env, arena: string, rules: Rules, panel: PanelJudge[], progress: (d: string) => Promise<unknown>) {
+	const subs = Object.fromEntries(
+		await Promise.all(rules.teams.map(async (t) => [t.team, JSON.parse((await readText(env, arena, `submissions/${t.team}.json`)) ?? "null") as { cut: string | null; commit: string } | null] as const)),
 	);
+	const teams = rules.teams.filter((t) => subs[t.team]).map((t) => t.team);
+	if (teams.length < 2) return { compared: false, reason: "fewer than two submissions" };
+	// Up to 8 minutes for mixes still running
+	for (let i = 0; i < 24; i++) {
+		const waiting = (await Promise.all(rules.teams.filter((t) => subs[t.team]?.cut).map(async (t) => ((await mixing(env, t.board)) ? t.team : undefined)))).filter(Boolean);
+		if (!waiting.length) break;
+		await progress(`waiting for ${waiting.join(", ")} to finish mixing`);
+		await new Promise((r) => setTimeout(r, 20_000));
+	}
+	const evidence = Object.fromEntries(await Promise.all(teams.map(async (t) => [t, await submittedEvidence(env, rules, t, subs[t] ?? undefined)] as const)));
+	const rubric = rubricOf((await loadSkill(await WorkingTree.clone(await repoRemote(env, arena), "main"), PANEL_RUBRIC)).body);
+	await progress(`the panel (${panel.map((j) => j.name).join(", ")}) watching ${Object.values(evidence).filter(Boolean).length} teasers`);
+	const comparisons = (
+		await Promise.all(
+			panel.map((judge) =>
+				Promise.all(
+					matchups(teams).flatMap(([first, second]): Promise<Comparison>[] => {
+						const [a, b] = [evidence[first], evidence[second]];
+						if (!a && !b) return [];
+						if (!a || !b) return [Promise.resolve({ judge: judge.name, first, second, pFirst: forfeit(rubric, Boolean(a)) })];
+						return [
+							(async () => {
+								const model = MENU.lead[judge.model].id;
+								const send = (e: Evidence) => (watchesFilm(model) ? e : { ...e, film: undefined });
+								const ask = () => env.AI.run(model as keyof AiModels, panelRequest(model, rules.brief, rubric, send(a), send(b)) as never);
+								const out = await ask().catch(ask).catch((err) => (console.error("panel", judge.name, first, second, err), undefined));
+								const verdict = parseTeaserVerdict(panelText(model, out), rubric);
+								return { judge: judge.name, first, second, pFirst: verdict.pFirst, notes: verdict.notes };
+							})(),
+						];
+					}),
+				),
+			),
+		)
+	).flat();
+	const rates = winRates(comparisons, Object.fromEntries(panel.map((j) => [j.name, j.weight])));
+	await onMain(await repoRemote(env, arena), (tree) =>
+		tree.commit(
+			{ name: "judges" },
+			`Final comparison by the panel: ${Object.entries(rates.overall).sort((a, b) => b[1] - a[1]).map(([t, r]) => `${t} ${(r * 100).toFixed(0)}%`).join(", ")}`,
+			{
+				"scores/comparative.final.json": json({
+					final: true,
+					panel: panel.map(({ name, model, weight }) => ({ name, model, weight })),
+					at: new Date().toISOString(),
+					commits: Object.fromEntries(teams.map((t) => [t, subs[t]!.commit])),
+					evidence: Object.fromEntries(teams.map((t) => [t, evidence[t] ? { frames: evidence[t]!.frames.length, heard: evidence[t]!.heard?.length ?? null } : null])),
+					winRates: rates,
+					comparisons,
+				}),
+			},
+		),
+	);
+	return { compared: true, overall: rates.overall };
 }
 
 function toBase64(bytes: Uint8Array) {
