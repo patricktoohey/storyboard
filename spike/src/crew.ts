@@ -45,6 +45,7 @@ const LLMS = {
 	"kimi-k2.6": { id: "@cf/moonshotai/kimi-k2.6", label: "Kimi K2.6: the strongest open model, but slow: a decision can take minutes, and it has timed out", in: 0.95, out: 4.0, thinking: 2000 },
 	"gpt-5.4-mini": { id: "openai/gpt-5.4-mini", label: "GPT-5.4 mini: a small frontier model, quick", in: 0.75, out: 4.5, thinking: 300, leadThinking: 2000 },
 	"gpt-6.1-sol": { id: "openai/gpt-6.1-sol", label: "GPT-6.1 Sol: OpenAI's frontier model", in: 2.0, out: 10.0, thinking: 800, leadThinking: 3000 },
+	"gemini-3.1-pro": { id: "google/gemini-3.1-pro", label: "Gemini 3.1 Pro: Google's frontier model", in: 2.0, out: 12.0, thinking: 800, leadThinking: 3000 },
 	"claude-sonnet-5.5": { id: "anthropic/claude-sonnet-5.5", label: "Claude Sonnet 5.5: frontier, fast", in: 2.0, out: 10.0, thinking: 500, leadThinking: 2500 },
 	"claude-opus-5.5": { id: "anthropic/claude-opus-5.5", label: "Claude Opus 5.5: Anthropic's most capable model", in: 4.0, out: 20.0, thinking: 1000, leadThinking: 2500 },
 } satisfies Record<string, LlmOption>;

@@ -36,12 +36,14 @@ Proposed brief (what every team's lead and players read):
 | Team | a lead model and a crew of tools | a named lead and **drafted, named players** who talk |
 | Talk | the lead's reasons, in the ledger | crew room, commons, confessionals, judges' remarks |
 | What a team sees | its own board; rivals at retrospective | rivals' moves every turn, except in the **blind finale** |
-| Leads | Opus 5.5, GPT-6.1 Sol, Kimi K2.6, Llama 3.3 | Opus 5.5, GPT-6.1 Sol, Kimi K2.6, **Nemotron 3 120B** |
+| Leads | Opus 5.5, GPT-6.1 Sol, Kimi K2.6, Llama 3.3 | Opus 5.5, GPT-6.1 Sol, Kimi K2.6, **Gemini 3.1 Pro** |
 | Judging | Clef on contact sheets | + a judge that watches and listens |
 | Seasons | standalone | **chained**: teams and players keep their repos and memory |
 
-Llama is dropped: it has no thinking mode, so a rerun would only repeat Season 1. Nemotron 3 takes the
-open-weights seat (its reasoning mode to be live-checked). Kimi stays with longer per-turn timeouts and its
+Llama is dropped: it has no thinking mode, so a rerun would only repeat Season 1. Nemotron 3 took its
+seat in the format dry run and finished last in both rounds (32%, 27%), so Gemini 3.1 Pro takes it for
+Season 2: all four big labs' models, with Kimi K2.6 as the open-weights lead. Gemini 3.8 Flash is also
+the teaser judge; the lead is a different model, and the judge watches films the drafted players made. Kimi stays with longer per-turn timeouts and its
 thinking on; if it can't contend this season, it goes too.
 
 Where a model offers a thinking level (Claude's thinking budget, OpenAI's reasoning effort), leads run it
@@ -276,7 +278,8 @@ Roughly four to five days, mostly 1, 3 and 4. Ghost runs come after the season.
   emerge, not encouraged; revealed after each round.
 
 - Season 2 is the teaser brief with sound and dialogue; every agent is named, with a bio and a voice.
-- Llama is replaced by Nemotron 3; Kimi gets one more season with thinking on and longer timeouts.
+- Llama is replaced by Gemini 3.1 Pro (Nemotron 3 was tried in the dry run and came last); Kimi gets one
+  more season with thinking on and longer timeouts.
 - Players are drafted; a blind finale with protect and steal ends the season.
 - Twists are offered as trades rather than taking time away.
 

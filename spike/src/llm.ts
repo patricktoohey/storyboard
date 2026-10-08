@@ -1,11 +1,12 @@
-// Text models from every provider behind one call. Workers AI models, OpenAI and Anthropic (both billed
+// Text models from every provider behind one call. Workers AI models, OpenAI, Anthropic and Google (billed
 // through AI Gateway's unified billing) name their inputs and outputs differently; this builds the request
-// and reads the answer for each. Pure: unit-tested in test/llm.test.ts.
+// and reads the answer for each. Gemini takes OpenAI's chat format through the binding (live-checked
+// 2026-10-08, thinking at reasoning_effort "high"). Pure: unit-tested in test/llm.test.ts.
 
-export type Provider = "workers-ai" | "openai" | "anthropic";
+export type Provider = "workers-ai" | "openai" | "anthropic" | "google";
 
 export const providerOf = (model: string): Provider =>
-	model.startsWith("anthropic/") ? "anthropic" : model.startsWith("openai/") ? "openai" : "workers-ai";
+	model.startsWith("anthropic/") ? "anthropic" : model.startsWith("openai/") ? "openai" : model.startsWith("google/") ? "google" : "workers-ai";
 
 // A lead's decisions are a few hundred tokens of answer, so thinking hard costs little next to one frame.
 // Claude thinks adaptively at high effort (a fixed budget_tokens is refused through the binding, 7003, on
@@ -24,6 +25,7 @@ export function llmRequest(model: string, system: string, user: string, maxToken
 				? { system, messages: [{ role: "user", content: user }], max_tokens: maxTokens + REASONING_ROOM, thinking: { type: "adaptive" }, output_config: { effort: "high" } }
 				: { system, messages: [{ role: "user", content: user }], max_tokens: maxTokens };
 		case "openai":
+		case "google":
 			// Reasoning models count their reasoning against this budget, like Kimi and Gemma
 			return {
 				messages: [{ role: "system", content: system }, { role: "user", content: user }],

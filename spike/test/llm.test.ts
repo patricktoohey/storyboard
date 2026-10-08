@@ -12,10 +12,17 @@ test("Anthropic gets its system prompt as a top-level field; it rejects a system
 	assert.equal(req.max_tokens, 4096);
 });
 
-test("OpenAI and Workers AI take a system message; OpenAI budgets completion tokens", () => {
+test("OpenAI, Gemini and Workers AI take a system message; OpenAI and Gemini budget completion tokens", () => {
 	const gpt = llmRequest("openai/gpt-6.1-sol", "s", "u", 100) as Record<string, unknown>;
 	assert.equal((gpt.messages as { role: string }[])[0].role, "system");
 	assert.equal(gpt.max_completion_tokens, 100);
+	// Gemini takes OpenAI's shape through the binding, thinking included
+	assert.equal(providerOf("google/gemini-3.1-pro"), "google");
+	assert.deepEqual(llmRequest("google/gemini-3.1-pro", "s", "u", 100, true), {
+		messages: [{ role: "system", content: "s" }, { role: "user", content: "u" }],
+		max_completion_tokens: 8100,
+		reasoning_effort: "high",
+	});
 	const llama = llmRequest("@cf/meta/llama-3.3-70b-instruct-fp8-fast", "s", "u", 100) as Record<string, unknown>;
 	assert.equal(llama.max_tokens, 100);
 });
