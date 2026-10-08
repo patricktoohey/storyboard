@@ -195,17 +195,35 @@ interface RenderOptions {
 }
 
 /** Each attempt gets a fresh seed, so a flagged output (3030) can come out clean on retry. */
+// When a renderer keeps failing, the next lighter one shoots instead (D36): in the format dry run's second
+// round flux-2-dev answered portraits but failed every full-size shot with references for 34 minutes (3043),
+// and no team printed anything
+export const RENDER_FALLBACK: Record<string, string> = {
+	"@cf/black-forest-labs/flux-2-dev": "@cf/black-forest-labs/flux-2-klein-9b",
+	"@cf/black-forest-labs/flux-2-klein-9b": "@cf/black-forest-labs/flux-2-klein-4b",
+};
+
 async function runImageModel(env: Env, prompt: string, opts: RenderOptions) {
-	return withRetry(async (attempt) => {
-		const seed = randomSeed();
-		return { bytes: await runImageModelOnce(env, prompt, { ...opts, seed }), seed, attempts: attempt };
-	}, [...TRANSIENT, "3030"]);
+	let model: string = env.RENDER_MODEL;
+	for (;;) {
+		try {
+			return await withRetry(async (attempt) => {
+				const seed = randomSeed();
+				return { bytes: await runImageModelOnce(env, model, prompt, { ...opts, seed }), seed, attempts: attempt, model };
+			}, [...TRANSIENT, "3030"]);
+		} catch (err) {
+			const next = RENDER_FALLBACK[model];
+			if (!next || !TRANSIENT.some((code) => String(err).includes(code))) throw err;
+			console.warn(`${model} failing (${String(err).slice(0, 80)}); rendering with ${next}`);
+			model = next;
+		}
+	}
 }
 
 /** flux-2 models take multipart form data (and reference images); flux-1-schnell takes JSON with no seed. */
-async function runImageModelOnce(env: Env, prompt: string, opts: RenderOptions & { seed: number }) {
+async function runImageModelOnce(env: Env, model: string, prompt: string, opts: RenderOptions & { seed: number }) {
 	let out: { image: string };
-	if (env.RENDER_MODEL.includes("flux-2")) {
+	if (model.includes("flux-2")) {
 		const form = new FormData();
 		form.append("prompt", prompt);
 		form.append("width", String(opts.width));
@@ -213,11 +231,11 @@ async function runImageModelOnce(env: Env, prompt: string, opts: RenderOptions &
 		form.append("seed", String(opts.seed));
 		opts.references?.forEach((r, i) => form.append(`input_image_${i}`, new Blob([r.jpeg], { type: "image/jpeg" })));
 		const body = new Response(form);
-		out = (await env.AI.run(env.RENDER_MODEL as keyof AiModels, {
+		out = (await env.AI.run(model as keyof AiModels, {
 			multipart: { body: body.body, contentType: body.headers.get("content-type") },
 		} as never)) as unknown as { image: string };
 	} else {
-		out = (await env.AI.run(env.RENDER_MODEL as keyof AiModels, { prompt, steps: 4 } as never)) as unknown as {
+		out = (await env.AI.run(model as keyof AiModels, { prompt, steps: 4 } as never)) as unknown as {
 			image: string;
 		};
 	}
@@ -272,7 +290,7 @@ export async function render(env: Env, cell: Cell, prompt: string, references: R
 	];
 	const anchored = anchors.length ? `${framed} ${anchors.join(" ")}` : framed;
 	// 1344x576 is close to 2.39:1 anamorphic and divisible by 16
-	const { bytes: source, seed, attempts } = await runImageModel(env, anchored, { width: 1344, height: 576, references: [...(place ? [place] : []), ...refs] });
+	const { bytes: source, seed, attempts, model } = await runImageModel(env, anchored, { width: 1344, height: 576, references: [...(place ? [place] : []), ...refs] });
 	// 384px for the per-frame critic; 640px for continuity, where hair and clothing need to be legible
 	const [frame, preview, detail] = await Promise.all([
 		encode(env, source, "image/webp"),
@@ -284,7 +302,8 @@ export async function render(env: Env, cell: Cell, prompt: string, references: R
 		previewBase64: toBase64(preview),
 		detailBase64: toBase64(detail),
 		meta: {
-			model: env.RENDER_MODEL,
+			model,
+			...(model !== env.RENDER_MODEL ? { fell_back_from: env.RENDER_MODEL } : {}),
 			seed,
 			attempts,
 			width: 1344,

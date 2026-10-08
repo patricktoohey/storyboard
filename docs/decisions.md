@@ -440,6 +440,30 @@ its second comparison differed from the saved version only in shot 1, a one-shot
 
 Tests: `test/ideas.test.ts`.
 
+## D36: the format dry run with Git in the format, and a renderer that can fail over
+
+**Round 1** (`season-2026-10-08-d88e0c`: Opus, GPT, Gemini; 45 minutes, $10, the network note): the
+behaviour D34 and D35 were for. Every team made five to seven Git moves, against none in the first dry
+run. Opus ran ideas, compare, print three times (shots 3, 4, 5: 63%, 60%, 68%) and cut v2 "with the board
+we chose through three side-by-side comparisons" and lines rewritten for the note; Gemini compared its cut
+against Opus's board (lost, 13%); GPT saved twice, ran ideas on two shots, and replanned for the note too
+late to cut it. The panel: Opus 64%, GPT 57%, Gemini 30% (film 65/61/25, process 60/47/43). The Gemini
+judge gave Gemini's team its lowest film score of the three judges (19%).
+
+- **The panel crashed the first time**: 18 film comparisons at once, Gemini's each with two teasers inline,
+  took the Worker down with three final-score jobs beside it, and the round fell back to Clef's live
+  comparison. Each judge now runs its matchups one at a time (round 1's panel, re-run, completed).
+
+**Round 2, the blind finale, produced no film.** Every full-size shot failed with 3043 ("Internal server
+error") from flux-2-dev, which every team had drafted, for the whole 34 minutes; the same model rendered
+portraits and location plates in the same minutes, and full-size shots with references until about 22:47.
+All three teams were disqualified (no video), so the season stands on round 1.
+
+- **A renderer that keeps failing hands over** (`RENDER_FALLBACK`): after its retries, flux-2-dev's shot
+  goes to flux-2-klein-9b, and klein-9b's to klein-4b. `render.json` records the model that shot it and
+  `fell_back_from`.
+- **No film, no panel**: a round where no team has a mixed teaser isn't ranked on process alone.
+
 ## Backlog: staging continuity and non-human characters
 
 Observed on the boards so far, not yet addressed:

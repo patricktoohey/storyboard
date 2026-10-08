@@ -463,6 +463,9 @@ async function runPanel(env: Env, arena: string, rules: Rules, panel: PanelJudge
 		await new Promise((r) => setTimeout(r, 20_000));
 	}
 	const evidence = Object.fromEntries(await Promise.all(teams.map(async (t) => [t, await submittedEvidence(env, rules, t, subs[t] ?? undefined)] as const)));
+	// Nobody has a film (the dry run's finale, when the renderer failed): there's nothing to rank, and process
+	// alone isn't a round
+	if (!Object.values(evidence).some(Boolean)) return { compared: false, reason: "no team has a mixed teaser" };
 	const rubric = rubricOf((await loadSkill(await WorkingTree.clone(await repoRemote(env, arena), "main"), PANEL_RUBRIC)).body);
 	// The note counts only if it went out before every team was in
 	const judgedBrief = briefWithNote(rules.brief, rules.network_note && Date.parse(rules.network_note.at) <= Date.now() ? rules.network_note : undefined);
