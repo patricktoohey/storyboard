@@ -467,27 +467,29 @@ async function runPanel(env: Env, arena: string, rules: Rules, panel: PanelJudge
 	// The note counts only if it went out before every team was in
 	const judgedBrief = briefWithNote(rules.brief, rules.network_note && Date.parse(rules.network_note.at) <= Date.now() ? rules.network_note : undefined);
 	await progress(`the panel (${panel.map((j) => j.name).join(", ")}) watching ${Object.values(evidence).filter(Boolean).length} teasers`);
+	// One call at a time per judge: firing all 18 at once (Gemini's each carrying two films) took the
+	// format dry run's round 1 judging down with the Worker, and the round fell back to Clef (D35)
 	const comparisons = (
 		await Promise.all(
-			panel.map((judge) =>
-				Promise.all(
-					matchups(teams).flatMap(([first, second]): Promise<Comparison>[] => {
-						const [a, b] = [evidence[first], evidence[second]];
-						if (!a && !b) return [];
-						if (!a || !b) return [Promise.resolve({ judge: judge.name, first, second, pFirst: forfeit(rubric, Boolean(a)) })];
-						return [
-							(async () => {
-								const model = MENU.lead[judge.model].id;
-								const send = (e: Evidence) => (watchesFilm(model) ? e : { ...e, film: undefined });
-								const call = () => env.AI.run(model as keyof AiModels, panelRequest(model, judgedBrief, rubric, send(a), send(b)) as never);
-								const out = await call().catch(call).catch((err) => (console.error("panel", judge.name, first, second, err), undefined));
-								const verdict = parseTeaserVerdict(panelText(model, out), rubric);
-								return { judge: judge.name, first, second, pFirst: verdict.pFirst, notes: verdict.notes };
-							})(),
-						];
-					}),
-				),
-			),
+			panel.map(async (judge) => {
+				const model = MENU.lead[judge.model].id;
+				const send = (e: Evidence) => (watchesFilm(model) ? e : { ...e, film: undefined });
+				const out: Comparison[] = [];
+				for (const [first, second] of matchups(teams)) {
+					const [a, b] = [evidence[first], evidence[second]];
+					if (!a && !b) continue;
+					if (!a || !b) {
+						out.push({ judge: judge.name, first, second, pFirst: forfeit(rubric, Boolean(a)) });
+						continue;
+					}
+					const call = () => env.AI.run(model as keyof AiModels, panelRequest(model, judgedBrief, rubric, send(a), send(b)) as never);
+					const answer = await call().catch(call).catch((err) => (console.error("panel", judge.name, first, second, err), undefined));
+					const verdict = parseTeaserVerdict(panelText(model, answer), rubric);
+					out.push({ judge: judge.name, first, second, pFirst: verdict.pFirst, notes: verdict.notes });
+					await progress(`${judge.name}: ${out.length} of ${matchups(teams).length} matchups`);
+				}
+				return out;
+			}),
 		)
 	).flat();
 
