@@ -280,7 +280,9 @@ A cast season can carry a `format`, and every part of it is committed to the sea
   and talk stay with the team. A decision may add a public `message` beside its private `reason`. After
   each open round the show puts them side by side in `talk/claims.md`. `compare` takes
   `rival:<team>/<version>`, so a claim can be checked against what the rival's board holds.
-- **Twists are offers** (`twist_round`): every lead may take $3 for 10 minutes off its own clock, and every
+- **Twists are offers** (`twist_round`): every lead may take a quarter of its budget for a sixth of its
+  clock ($3 for 10 minutes in a 60-minute, $12 round; every lead refused a flat $3 for 10 minutes when
+  that was half a 20-minute round), and every
   team but the last may swap the player in one seat with the team just below it. Rounds now carry a
   per-team deadline.
 - **Elimination and an entrant** (`eliminate`: 0-2; `entrant`: a `wildcard` lead model, or the best
@@ -297,6 +299,48 @@ A cast season can carry a `format`, and every part of it is committed to the sea
   season (its evolved strategy and lessons), the draft starts from the bottom of that season (new teams
   first), and `backstoryOf` turns its results into the story every character is told ("the reigning
   champions of Season 1"), followed by the producer's own notes.
+
+## D32: a judge that watches and listens, and a mixer that waits its turn
+
+**The format dry run** (`season-2026-10-08-2345e6`: three teams chained from Season 1, a twist round, one
+elimination, a Sonnet 5.5 wildcard, protect and steal, a blind final) ran every move once fixes were in:
+
+- **Closing raced.** The last submission and the deadline sweep both closed round 1's arena, so it was
+  judged twice and the twists ran twice. Closing is now checked inside the commit that closes it, and
+  every format step skips work already done, so a retried step is safe (`POST /seasons/:id/events`
+  re-queues one).
+- **A team without its own skill** (a new team, the wildcard) starts from the generic `showrunner`; the
+  wildcard's first finale attempt failed looking for `showrunner-wildcard`.
+- **Seven of nine teasers were never mixed.** Every mix named its own Container instance, each stayed awake
+  2 minutes, and with 4 instances allowed, teams finishing together hit "Maximum number of running
+  container instances exceeded". Now 10 instances, asleep 20 s after a mix, and a mix that finds them all
+  busy waits and retries (`mixerFull`). The three finale teasers, re-mixed together, all went through.
+
+**The teaser judge** (`skills/judge-teaser`, `src/teaser-rules.ts`). Clef judges contact sheets, so no
+judge heard the lines or the score. Gemini 3.8 Flash takes `teaser.mp4` inline through the binding
+(Gemini's own `contents`/`parts` format, `inline_data` of `video/mp4`) and counts video and audio
+separately (1,080 and 450 tokens for 18 s): it transcribed a teaser's five lines word for word and told
+the voices apart, so it hears. About a tenth of a cent a film.
+
+- It compares two submitted teasers at a time, both ways round, like the other judges, so its verdicts go
+  into the same win rates. It names a margin per criterion (even, slight, clear, decisive → 0.5 to 0.9),
+  which a model does more reliably than invent a probability. Rubric: pull, what's new, sound, the card,
+  the brief (including how it should look).
+- It counts double: it's the only judge that sees the film itself. It judges only the final round (only
+  submitted cuts are mixed); a team without a mixed teaser loses its matchups; in a silent arena it sits
+  out. A failed call is retried once, then counts as even.
+- It writes one sentence on each film naming something it saw or heard ("the crisp delivery of 'Far
+  enough to be brave'"); those sentences go into every judge's remarks on camera, and it is a third judge
+  character in cast seasons.
+- **On the dry run's finale**, judged on stills the wildcard won (67%, Opus 50%, GPT 33%). Watching and
+  listening, the teaser judge put it last (Opus 60%, GPT 57%, wildcard 34%: "the vocal mix feels flat";
+  "obscures the branching interface inside a stylized cinema shot"), consistently both ways round. At
+  double weight, Opus would have won the final.
+- **The look**: it also noticed what the producer did, the sci-fi look ("holographic data strings… blue
+  laser-like light"). The Season 2 brief now asks for reality TV (real rooms, ordinary people, handheld,
+  no holograms or neon), and the teaser judge's `brief` criterion includes how it should look.
+
+Tests: `test/teaser.test.ts` (the request, margins, notes, forfeits), `mixerFull` in `test/sound.test.ts`.
 
 ## Backlog: staging continuity and non-human characters
 

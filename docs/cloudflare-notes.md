@@ -70,6 +70,11 @@ Others: `flux-2-dev`,
 
 Text generation: `kimi-k2.6`, `deepseek-v4-pro-0813`, `glm-5.3`, `nemotron-3-120b-a12b`, `gemma-4-26b-a4b-it`, `llama-3.3-70b-instruct-fp8-fast`.
 
+Video and audio in (unified catalog): `google/gemini-3.8-flash` takes Gemini's own request, `{contents: [{role,
+parts: [{inline_data: {mime_type: "video/mp4", data: base64}}, {text}]}], generationConfig}`, through `env.AI.run`
+and `cf ai run`; it hears the soundtrack (usage reports VIDEO and AUDIO tokens: 1,080 and 450 for 18 s of
+720p). $0.75 / $3.75 per 1M tokens in / out. Answer text in `candidates[0].content.parts[].text`.
+
 Vision: `llama-3.2-11b-vision-instruct`, `moondream3.1-9B-A2B`, `mistral-small-3.1-24b-instruct`.
 
 Video (unified catalog, through AI Gateway / `env.AI`; not in the Workers AI catalog itself):

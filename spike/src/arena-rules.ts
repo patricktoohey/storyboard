@@ -373,6 +373,8 @@ export interface Comparison {
 	first: string;
 	second: string;
 	pFirst: Record<string, number>;
+	// A watching judge's sentence on each film (teaser-rules.ts)
+	notes?: { first: string; second: string };
 }
 
 export interface WinRates {

@@ -5,7 +5,8 @@ import { Container } from "@cloudflare/containers";
 
 export class Mixer extends Container {
 	defaultPort = 8080;
-	sleepAfter = "2m";
+	// Nothing in it outlives a mix, so it frees its slot soon after (D32)
+	sleepAfter = "20s";
 	// Everything it needs is uploaded; it never fetches anything itself
 	enableInternet = false;
 }

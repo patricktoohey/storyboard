@@ -10,7 +10,8 @@ const mixer = defineContainer({
 	name: "storyboard-mixer",
 	image: { dockerfile: "./mixer/Dockerfile" },
 	instanceType: "standard-1",
-	maxInstances: 4,
+	// Every team's every cut is mixed, and a season's teams often finish together (D32)
+	maxInstances: 10,
 });
 
 export default defineConfig({

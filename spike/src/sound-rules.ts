@@ -60,6 +60,9 @@ export const MUSIC_USD_PER_S = 0.0025;
 export const SPEECH_USD_PER_CHAR = 0.0001;
 // Requested as mp3 at 128 kbps, so a file's length is its size: no decoder needed in the Worker
 export const MP3_FORMAT = "mp3_44100_128";
+
+/** The Containers error for "every instance is running": worth waiting for, unlike any other failure. */
+export const mixerFull = (error: string) => /maximum number of running container instances/i.test(error);
 export const mp3Seconds = (bytes: number) => Number(((bytes * 8) / 128_000).toFixed(2));
 
 // What a sound job is charged when queued (D19): the model's price plus the player's call that writes it

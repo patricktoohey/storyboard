@@ -10,7 +10,7 @@
 // and only then does round 1 start. After each round the judges remark on every film and everyone records
 // a confessional before the retrospectives; when the season ends, the reveal.
 import { arenaState, createArena, DEFAULT_TEAMS, readRules, type TeamSpec, teamSpec } from "./arena";
-import { type RoundResult, replaceStrategy, seasonStandings, strategyOf } from "./arena-rules.ts";
+import { type Comparison, type RoundResult, replaceStrategy, seasonStandings, strategyOf } from "./arena-rules.ts";
 import { onMain } from "./board";
 import {
 	COMMONS,
@@ -253,6 +253,7 @@ const leadModel = (lead?: string): LlmKey => (lead && lead in MENU.lead ? (lead 
 const JUDGE_ROLES: Record<string, string> = {
 	"judge-craft": "a judge on the show who rules on craft: continuity, framing, the image",
 	"judge-story": "a judge on the show who rules on story: the brief, the arc, the feeling",
+	"judge-teaser": "a judge on the show who watches and listens to the finished teaser: whether it makes you want to watch, the voices, the sound, the title card",
 };
 
 /**
@@ -1017,6 +1018,11 @@ export async function runSeasonStep(env: Env, arena: string, season: string, rou
 async function roundTalk(env: Env, s: Season, arena: string, state: ArenaState, result: RoundResult) {
 	const cast = s.cast!;
 	const names = Object.fromEntries(cast.leads.map((l) => [l.team, l.team_name]));
+	// What the watching judge saw and heard in each teaser (D32), so every judge's remark is about the film
+	const compared = JSON.parse((await readText(env, arena, "scores/comparative.final.json")) ?? "{}") as { comparisons?: Comparison[] };
+	const watched = (team: string) => [
+		...new Set((compared.comparisons ?? []).flatMap((c) => (c.notes ? [c.first === team ? c.notes.first : c.second === team ? c.notes.second : ""] : [])).filter(Boolean)),
+	];
 	const films = await Promise.all(
 		state.teams.map(async (t) => ({
 			team: names[t.team] ?? t.team,
@@ -1026,6 +1032,7 @@ async function roundTalk(env: Env, s: Season, arena: string, state: ArenaState, 
 			shots: (t.cells ?? []).map((c) => c.shot),
 			beats: ((await readText(env, t.board, "storyboard.csv")) ?? "").split("\n").slice(1, 12).join("\n"),
 			scores: Object.fromEntries(t.finalScores.map((f) => [f.judge, f.scores])),
+			...(watched(t.team).length ? { seen_and_heard: watched(t.team).slice(0, 3) } : {}),
 		})),
 	);
 	const remarks = await Promise.all(

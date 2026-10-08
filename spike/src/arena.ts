@@ -9,6 +9,7 @@ import { lastTalk } from "./cast-rules.ts";
 import { parseCsv } from "./csv.ts";
 import { WorkingTree } from "./git";
 import { loadSkill } from "./skills";
+import { TEASER_MODEL, forfeit, geminiText, parseTeaserVerdict, teaserRequest, watches } from "./teaser-rules.ts";
 import { forkBoard, repoRemote } from "./template";
 
 export interface Rules {
@@ -51,6 +52,8 @@ export const teamSpec = (t: string | TeamSpec): TeamSpec => (typeof t === "strin
 const JUDGES = [
 	{ name: "judge-craft", weight: 1 },
 	{ name: "judge-story", weight: 1 },
+	// The only judge that sees the film itself, with its sound, so it counts double (D32)
+	{ name: "judge-teaser", weight: 2 },
 ];
 
 const stamp = () => `${new Date().toISOString().slice(0, 10)}-${crypto.randomUUID().slice(0, 6)}`;
@@ -201,8 +204,10 @@ export async function runJudgeJob(env: Env, arena: string, team: string, board: 
 	const arenaTree = await WorkingTree.clone(await repoRemote(env, arena), "main");
 	const results: JudgeScore[] = [];
 	for (const { name } of rules.judges) {
-		await progress(`${name} scoring ${team} at ${commit.slice(0, 7)}`);
 		const skill = await loadSkill(arenaTree, name);
+		// A watching judge compares the mixed teasers (runCompareJob); it has no contact sheet to score
+		if (watches(skill.metadata)) continue;
+		await progress(`${name} scoring ${team} at ${commit.slice(0, 7)}`);
 		const rubric = rubricOf(skill.body);
 		const questions = Object.fromEntries(
 			rubric.map((c) => [c.id, { type: "score", instructions: c.question, criteria: c.levels }]),
@@ -330,7 +335,13 @@ export async function runCompareJob(env: Env, arena: string, final: boolean, pro
 	const arenaTree = await WorkingTree.clone(await repoRemote(env, arena), "main");
 	const comparisons: Comparison[] = [];
 	for (const { name } of rules.judges) {
-		const rubric = rubricOf((await loadSkill(arenaTree, name)).body);
+		const skill = await loadSkill(arenaTree, name);
+		const rubric = rubricOf(skill.body);
+		if (watches(skill.metadata)) {
+			// Only submitted cuts are mixed; the live comparisons are stills
+			if (final) comparisons.push(...(await compareTeasers(env, arena, rules, name, rubric, boards.map((b) => b.team), progress)));
+			continue;
+		}
 		await progress(`${name} comparing ${boards.length} boards`);
 		const pairs = matchups(boards.map((b) => b.team));
 		const results = await Promise.all(
@@ -359,6 +370,49 @@ export async function runCompareJob(env: Env, arena: string, final: boolean, pro
 		),
 	);
 	return { compared: true, overall: rates.overall };
+}
+
+/** A team's submitted teaser (its cut's mixed video/teaser.mp4) as base64, or undefined without one. */
+async function submittedTeaser(env: Env, arena: string, rules: Rules, team: string) {
+	const sub = await readText(env, arena, `submissions/${team}.json`);
+	const cut = sub ? (JSON.parse(sub).cut as string | null) : null;
+	const board = rules.teams.find((t) => t.team === team)?.board;
+	if (!cut || !board) return undefined;
+	using handle = await env.ARTIFACTS.get(board);
+	const blob = await handle.readFile({ ref: `cut/${cut}`, path: "video/teaser.mp4" });
+	return blob ? toBase64(new Uint8Array(await blob.arrayBuffer())) : undefined;
+}
+
+/**
+ * A watching judge (D32): Gemini watches and listens to every pair of submitted teasers, both ways round.
+ * A team with no mixed teaser loses its matchups; if nobody has one (a silent arena), the judge sits out.
+ */
+async function compareTeasers(env: Env, arena: string, rules: Rules, judge: string, rubric: Criterion[], teams: string[], progress: (d: string) => Promise<unknown>) {
+	const teasers = Object.fromEntries(await Promise.all(teams.map(async (t) => [t, await submittedTeaser(env, arena, rules, t)] as const)));
+	if (!Object.values(teasers).some(Boolean)) return [];
+	await progress(`${judge} watching ${Object.values(teasers).filter(Boolean).length} teasers`);
+	return Promise.all(
+		matchups(teams).flatMap(([first, second]): Promise<Comparison>[] => {
+			const [a, b] = [teasers[first], teasers[second]];
+			if (!a && !b) return [];
+			if (!a || !b) return [Promise.resolve({ judge, first, second, pFirst: forfeit(rubric, Boolean(a)) })];
+			return [
+				(async () => {
+					const ask = () => env.AI.run(TEASER_MODEL as keyof AiModels, teaserRequest(rules.brief, rubric, a, b) as never);
+					// One retry; after that the matchup counts as even rather than losing the round's judging
+					const out = await ask().catch(ask).catch((err) => (console.error("teaser judge", first, second, err), undefined));
+					const verdict = parseTeaserVerdict(geminiText(out), rubric);
+					return { judge, first, second, pFirst: verdict.pFirst, notes: verdict.notes };
+				})(),
+			];
+		}),
+	);
+}
+
+function toBase64(bytes: Uint8Array) {
+	let binary = "";
+	for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+	return btoa(binary);
 }
 
 /** Live: after a team is scored, compare the boards again, unless a comparison is already queued. */

@@ -23,6 +23,7 @@ import {
 	type VoiceKey,
 	mixName,
 	mixPlan,
+	mixerFull,
 	soundSignature,
 	mp3Seconds,
 	parseLines,
@@ -276,8 +277,15 @@ export async function runMixJob(env: Env, repo: string, cut: string, progress: P
 	}
 	const mixer = getContainer(env.MIXER as unknown as DurableObjectNamespace<Mixer>, `${repo}-${cut}-${crypto.randomUUID().slice(0, 6)}`);
 	for (const [f, bytes] of Object.entries(sources)) {
-		const res = await mixer.fetch(new Request(`http://mixer/files/${mixName(f)}`, { method: "PUT", body: bytes }));
-		if (!res.ok) throw new Error(`uploading ${f} to the mixer: ${res.status} ${await res.text()}`);
+		// With every container busy (teams finish together), wait for one to sleep rather than lose the mix
+		for (let attempt = 1; ; attempt++) {
+			const res = await mixer.fetch(new Request(`http://mixer/files/${mixName(f)}`, { method: "PUT", body: bytes }));
+			if (res.ok) break;
+			const text = await res.text();
+			if (!mixerFull(text) || attempt >= 10) throw new Error(`uploading ${f} to the mixer: ${res.status} ${text}`);
+			await progress(`every mixer is busy; waiting (attempt ${attempt})`);
+			await new Promise((r) => setTimeout(r, 20_000));
+		}
 	}
 	const started = Date.now();
 	const res = await mixer.fetch(new Request("http://mixer/run", { method: "POST", body: JSON.stringify({ args: plan.args }) }));

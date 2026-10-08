@@ -206,8 +206,8 @@ Clef judges stills, so craft and story stay on contact sheets (now 8 sampled fra
 side-by-side comparison as the ranking. Sound, dialogue and the teaser's pull need a judge that watches and
 listens:
 
-- **Teaser judge**: a multimodal model that takes the mixed video (Gemini 3.8 Flash is on the catalog;
-  how it takes video through the binding needs a live test). Rubric: does it build anticipation, does it
+- **Teaser judge** (built, D32): Gemini 3.8 Flash takes the mixed video with its sound through the binding
+  (live-checked: it transcribes the lines). Rubric: does it build anticipation, does it
   show what's new, do the voices and sound carry it, does it land the SEASON 2 card.
 - If no catalog model takes video with audio, the fallback is a transcript (Whisper) plus the score's
   prompt and the contact sheet for an LLM judge: weaker, but it hears the words.
@@ -261,7 +261,8 @@ it.
    offers, elimination, the blind finale's protect and steal, a wildcard or returning entrant, chained
    seasons with a backstory. Not built: the twist "use one shot from a rival's board".
 5. **Thinking levels and Nemotron** (built, D29): live checks through the binding; longer timeouts for Kimi.
-6. **The teaser judge** (after a live test of video input), rubric skill `judge-teaser`.
+6. **The teaser judge** (built, D32): Gemini 3.8 Flash watches and listens to the mixed teasers, two at a
+   time, in the final round; rubric skill `judge-teaser`, double weight.
 7. **A dry run** (2 teams, 1 round, small budget), then the real season.
 
 Roughly four to five days, mostly 1, 3 and 4. Ghost runs come after the season.
