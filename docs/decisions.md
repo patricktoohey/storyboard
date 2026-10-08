@@ -29,6 +29,7 @@ models the exact requests production builds (`npm run eval`, about a cent; resul
 | D20 | One file per score (`scores/<team>/<judge>.json`); the leaderboard is computed on read | `arena-rules.test.ts` |
 | D21 | Judges are skills with public rubrics, and score a commit, never a branch | `arena-rules.test.ts` |
 | D22 | Showrunner actions are a closed set; code mandates when there's no choice, Clef chooses the rest | `arena-rules.test.ts` |
+| D24 | Staging is planned per cell and anchored like casting: scouted location references, positions and blocking stated by code, and checked by Clef | `blocking.test.ts`, `continuity-rules.test.ts` |
 
 ## D2: placeholders, not descriptions
 
@@ -156,14 +157,40 @@ First run (Silent Hive, 2 cells, `alibaba/wan-2.7-i2v` at 720P): the request ret
 both clips, with motion that followed the beat. About $0.80. The provider's fetch of the signed URL was not
 blocked by Cloudflare's bot protection (which did block Python's default user agent).
 
+## D24: staging continuity
+
+Cells render in parallel from text, so before this only characters (casting portraits) carried from frame
+to frame: the cab interior changed from shot to shot, the driver swapped sides, and both people sat in the
+back seat. Each fix below came from a frame that broke on the Night Drive concept (noir, 4 cells):
+
+- **Locations are cast like characters.** The director plans up to 3 locations (name and a look), each
+  cell names one, and a scouting step renders an empty establishing image per location in parallel with
+  casting (`bible/locations/`). WS, MS and EWS frames get it as image 0 ("the setting is the place in image
+  0"); Clef compares the frame against it (`place`, a break below 0.4).
+- **Blocking and screen positions are in the plan** (`location`, `positions`, `blocking` columns in
+  storyboard.csv). The cinematographer's brief carries them with `{{Name}}` placeholders, because "Driver on
+  the left" left the image model guessing who the driver was; neighbouring shots in the same location pass
+  on their sides (the 180° rule). Clef asks where each person is (`position.*`, a break when the planned
+  side scores under 0.3).
+- **Code states the blocking, not just the LLM.** The brief said "at the wheel... passenger behind her";
+  the cinematographer kept only left and right and both people were drawn on the back seat. Code now ends
+  every prompt with `Staging: the 42-year-old woman at the wheel facing forward; the 25-year-old man behind
+  her`, and Clef checks it (`blocking`, a break under 0.3).
+- **Whoever the blocking names is in the shot.** The director listed only the Driver on a shot blocked
+  "passenger behind her"; the renderer drew an undescribed passenger and the new head count (`people`)
+  read three people against one planned. Names in the blocking now join the cell's characters.
+
+Result (board-2026-10-08-a1360d): every cab frame in the same cab, driver at the wheel on the left,
+passenger on the right in both shots that show them, head counts as planned; the two breaks were coat
+colour, fixed by one retake each. The blocking check is lenient: it passed (0.85) a passenger who sits
+more beside the driver than behind her.
+
 ## Backlog: staging continuity and non-human characters
 
 Observed on the boards so far, not yet addressed:
 
-- **Blocking across angles**: who sits where isn't held as the camera moves (the 180° rule), and both cab
-  passengers ended up in the back seat. Needs a blocking section in the bible (seat positions and screen
-  direction per location), the cinematographer told to use it, and Clef questions like "is the person on the
-  left of frame the driver?".
+- **Chained clips**: frames are anchored, but each clip still animates on its own; where a model takes a
+  last frame, the next cell's frame could end the previous clip.
 - **Skill examples leaking into frames**: the noir skill's example "a single bare bulb above frame right"
   put a ceiling bulb inside a car. Fixed in the noir skill; the general lesson is that skill examples
   must be illustrations the model won't copy literally.

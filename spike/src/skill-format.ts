@@ -44,8 +44,8 @@ export function parseSkill(name: string, text: string, version: string): Skill {
 export const skillTrailer = (...skills: Skill[]) => skills.map((s) => `Skill: ${s.name}@${s.version}`).join("\n");
 
 /** The first ```prompt fenced block in a skill body, for skills that are templates rather than instructions. */
-export function promptTemplate(skill: Skill) {
-	const block = /```prompt\n([\s\S]*?)```/.exec(skill.body);
-	if (!block) throw new Error(`skill ${skill.name} has no \`\`\`prompt block`);
-	return block[1].trim();
+export function promptTemplate(skill: Skill, block = "prompt") {
+	const match = new RegExp("```" + block + "\\n([\\s\\S]*?)```").exec(skill.body);
+	if (!match) throw new Error(`skill ${skill.name} has no \`\`\`${block} block`);
+	return match[1].trim();
 }

@@ -43,6 +43,7 @@ test("CU asks age, look, visibility, attributes for frame and portrait, and iden
 		"look.driver",
 		"outerwear.frame.driver",
 		"outerwear.portrait.driver",
+		"people",
 		"visible.driver",
 	]);
 });
@@ -55,7 +56,7 @@ test("portrait image numbers follow the character order", () => {
 
 test("EWS skips attributes and identity: figures are too small", () => {
 	const { questions } = continuityQuestions({ beat: "b", shot: "EWS" }, [driver]);
-	assert.deepEqual(Object.keys(questions).sort(), ["age.driver", "look.driver"]);
+	assert.deepEqual(Object.keys(questions).sort(), ["age.driver", "look.driver", "people"]);
 });
 
 test("at most MAX_PORTRAITS characters are checked (Clef takes 4 images)", () => {
@@ -123,4 +124,58 @@ test("D7: hair colour isn't compared when either image reads as bald (balding re
 		undefined,
 	);
 	assert.deepEqual(v.issues, []);
+});
+
+const cab = { name: "Cab interior", look: "night, rain on the windows, worn leather seats" };
+
+test("with a location, image 2 is its reference and portraits move up; only setting shots compare the place", () => {
+	const ms = continuityQuestions({ beat: "b", shot: "MS", positions: { Driver: "left" } }, [driver, passenger], cab);
+	assert.ok(ms.placeChecked);
+	assert.match((ms.questions.place as { instructions: string }).instructions, /Image 2 is the reference/);
+	assert.match((ms.questions["hair.portrait.driver"] as { instructions: string }).instructions, /image 3/);
+	assert.ok("position.driver" in ms.questions && !("position.passenger" in ms.questions));
+	const cu = continuityQuestions({ beat: "b", shot: "CU" }, [driver], cab);
+	assert.equal(cu.placeChecked, false);
+	assert.match((cu.questions["hair.portrait.driver"] as { instructions: string }).instructions, /image 2/);
+});
+
+test("with a location, at most 2 portraits fit beside the frame and its reference", () => {
+	const three = [driver, passenger, { ...driver, name: "Third" }];
+	assert.equal(continuityQuestions({ beat: "b", shot: "WS" }, three, cab).checked.length, 2);
+});
+
+test("a frame set somewhere else is a break", () => {
+	const v = continuityVerdict({ shot: "WS" }, [], { place: { noul: 0.2 } }, undefined);
+	assert.match(v.issues[0], /setting doesn't match the location reference/);
+	assert.equal(continuityVerdict({ shot: "WS" }, [], { place: { noul: 0.8 } }, undefined).ok, true);
+});
+
+test("a character on the wrong side of the frame breaks the blocking", () => {
+	const answersFor = (pos: Record<string, number>, choice: string) =>
+		answers(HAIR_TAKE2, { "position.driver": { choice, probabilities: pos } });
+	const wrong = continuityVerdict({ shot: "MS", positions: { Driver: "left" } }, [driver], answersFor({ left: 0.1, center: 0.1, right: 0.8 }, "right"), undefined);
+	assert.match(wrong.issues.join(), /Driver is on the right but the blocking puts them on the left/);
+	const right = continuityVerdict({ shot: "MS", positions: { Driver: "left" } }, [driver], answersFor({ left: 0.7, center: 0.2, right: 0.1 }, "left"), undefined);
+	assert.equal(right.ok, true);
+});
+
+test("an extra person in the frame is a break; the planned number is fine", () => {
+	const extra = continuityVerdict({ shot: "MS" }, [driver, passenger], { people: { choice: "3", probabilities: { "2": 0.15, "3": 0.8 } } }, undefined);
+	assert.match(extra.issues.join(), /3 people are visible but the shot plans 2/);
+	const fine = continuityVerdict({ shot: "MS" }, [driver, passenger], { people: { choice: "2", probabilities: { "2": 0.9 } } }, undefined);
+	assert.equal(fine.ok, true);
+	// Fewer than planned isn't a head-count break (the look and identity checks cover a missing person)
+	assert.equal(continuityVerdict({ shot: "MS" }, [driver, passenger], { people: { choice: "1", probabilities: { "1": 0.9 } } }, undefined).ok, true);
+});
+
+test("blocking is checked in plain words where people have room to be staged, and a mismatch is a break", () => {
+	const blocking = "Driver at the wheel; passenger behind her";
+	const ms = continuityQuestions({ beat: "b", shot: "MS", blocking }, [driver, passenger]);
+	assert.ok(ms.blockingChecked);
+	assert.equal(ms.state.blocking, "the 58-year-old woman at the wheel; the 42-year-old man behind her");
+	assert.equal(continuityQuestions({ beat: "b", shot: "ECU", blocking }, [driver]).blockingChecked, false);
+	assert.equal(continuityQuestions({ beat: "b", shot: "MS" }, [driver, passenger]).blockingChecked, false);
+	// Both people side by side on the back seat when the plan has one at the wheel
+	assert.match(continuityVerdict({ shot: "MS" }, [], { blocking: { noul: 0.1 } }, undefined).issues.join(), /staging doesn't follow the blocking/);
+	assert.equal(continuityVerdict({ shot: "MS" }, [], { blocking: { noul: 0.7 } }, undefined).ok, true);
 });

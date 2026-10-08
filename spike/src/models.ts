@@ -1,8 +1,9 @@
 // The model roles from docs/design.md: director, casting, cinematographer, renderer, critic, continuity.
 // Director, cinematographer and casting take their craft from a skill in the board repo (skills.ts);
 // what stays here is each role's output contract, which code depends on.
-import { continuityQuestions, continuityVerdict } from "./continuity-rules.ts";
+import { SETTING_SHOTS, continuityQuestions, continuityVerdict } from "./continuity-rules.ts";
 import { llmFor } from "./crew-env";
+import { normalizePositions, withBlocking, withStaged } from "./blocking.ts";
 import { insertLooks } from "./looks";
 import { type NoteAction, routerRequest } from "./router.ts";
 import { type Skill, promptTemplate } from "./skills";
@@ -11,6 +12,8 @@ import {
 	type Cell,
 	type Character,
 	type ClefAnswer,
+	type Location,
+	type LocationReference,
 	type Reference,
 	AGE_BANDS,
 	AGE_WORDS,
@@ -70,11 +73,16 @@ export async function direct(env: Env, skill: Skill, concept: string, cellCount:
 ## Output contract
 Reply with ONLY a JSON object:
 {"title": string,
- "bible": string,  // markdown style bible with two sections: ## Look (format, palette, light, lenses) and ## Locations
+ "bible": string,  // markdown style bible: ## Look (format, palette, light, lenses)
+ "locations": [{"name": string,
+                "look": string}],  // under 30 words of visual facts: the place, its architecture and layout, key props, light and time of day
  "characters": [{"name": string, "age_band": one of ${Object.keys(AGE_BANDS).join("|")},
                  "look": string}],  // under 30 words of visual facts only, starting with exact age and sex ("58-year-old woman, ..."), then face, hair, build, wardrobe
  "cells": [{"beat": string, "shot": one of ${SHOT_ORDER.join("|")}, "camera": string, "duration_s": number,
-            "characters": [names of characters visible in the frame]}]}
+            "characters": [names of characters visible in the frame],
+            "location": name of one of the locations,
+            "blocking": string,  // one sentence: where each person is and what they face, e.g. "Driver at the wheel facing forward; passenger behind her, leaning in"
+            "positions": {character name: "left" | "center" | "right"}}]}  // where each character is in the frame; keep sides consistent between shots in the same place
 Write exactly ${cellCount} cells.`;
 	const board = extractJson<Omit<Board, "cells"> & { cells: Omit<Cell, "id">[] }>(
 		await chat(env, llmFor(env, skill.metadata.model, env.DIRECTOR_MODEL), system, concept),
@@ -86,16 +94,27 @@ Write exactly ${cellCount} cells.`;
 		return { ...c, age_band, look: statesAge ? c.look : `${AGE_WORDS[age_band]} ${c.look}` };
 	});
 	const known = new Set(characters.map((c) => c.name));
+	const locations = (board.locations ?? []).filter((l) => l?.name && l?.look).slice(0, 3);
+	const places = new Set(locations.map((l) => l.name));
 	return {
 		title: board.title,
 		bible: board.bible,
 		characters,
-		cells: board.cells.slice(0, cellCount).map((c, i) => ({
-			...c,
-			id: String(i + 1).padStart(2, "0"),
-			shot: c.shot in SHOT_SIZES ? c.shot : "MS",
-			characters: (c.characters ?? []).filter((n) => known.has(n)),
-		})),
+		locations,
+		cells: board.cells.slice(0, cellCount).map((c, i) => {
+			const blocking = typeof c.blocking === "string" ? c.blocking.slice(0, 300) : undefined;
+			// Anyone the blocking stages is in the shot, even if the director left them off the list
+			const inShot = withStaged((c.characters ?? []).filter((n) => known.has(n)), blocking, [...known]);
+			return {
+				...c,
+				id: String(i + 1).padStart(2, "0"),
+				shot: c.shot in SHOT_SIZES ? c.shot : "MS",
+				characters: inShot,
+				location: c.location && places.has(c.location) ? c.location : locations[0]?.name,
+				blocking,
+				positions: normalizePositions(c.positions, inShot),
+			};
+		}),
 	};
 }
 
@@ -106,6 +125,7 @@ export async function cinematograph(
 	cast: Character[],
 	cell: Cell,
 	direction?: string,
+	staging?: string,
 ) {
 	const castLines = cast.map((c) => `- {{${c.name}}}`).join("\n");
 	const system = `${skill.body}
@@ -119,7 +139,7 @@ ${castLines}`
 		: "No characters are visible in this frame; do not add people."
 }
 Reply with ONLY the prompt text.
-
+${staging ? `\n## Staging (follow exactly; describe the place as written)\n${staging}\n` : ""}
 ## Style bible
 ${bible}`;
 	const brief = [`Beat: ${cell.beat}`, `Camera: ${cell.camera}`];
@@ -127,7 +147,8 @@ ${bible}`;
 	const draft = (await chat(env, llmFor(env, skill.metadata.model, env.CINEMATOGRAPHER_MODEL), system, brief.join("\n")))
 		.trim()
 		.replace(/^"|"$/g, "");
-	return insertLooks(draft, cast);
+	// The blocking goes in once more in plain words: the LLM tends to drop depth and keep only left/right
+	return withBlocking(insertLooks(draft, cast), cell, cast);
 }
 
 async function encode(env: Env, image: Uint8Array, format: "image/webp" | "image/jpeg", width?: number) {
@@ -146,7 +167,7 @@ function toBase64(bytes: Uint8Array) {
 interface RenderOptions {
 	width: number;
 	height: number;
-	references?: Reference[];
+	references?: { jpeg: Uint8Array }[];
 }
 
 /** Each attempt gets a fresh seed, so a flagged output (3030) can come out clean on retry. */
@@ -189,6 +210,21 @@ export async function cast(env: Env, skill: Skill, character: Character): Promis
 	return { ...reference, webp };
 }
 
+/** Location scouting: one wide, empty establishing image per location, the anchor for its sets. */
+export async function scout(env: Env, skill: Skill, location: Location) {
+	const prompt = promptTemplate(skill, "location").replace("{{look}}", location.look);
+	const { bytes: source } = await runImageModel(env, prompt, { width: 1024, height: 448 });
+	const [webp, reference] = await Promise.all([encode(env, source, "image/webp"), locationReference(env, location, source)]);
+	return { ...reference, webp };
+}
+
+export const locationPath = (location: Location) => `bible/locations/${slug(location.name)}.webp`;
+
+export async function locationReference(env: Env, location: Location, image: Uint8Array): Promise<LocationReference> {
+	const [jpeg, preview] = await Promise.all([encode(env, image, "image/jpeg", 496), encode(env, image, "image/webp", 384)]);
+	return { location, path: locationPath(location), jpeg, previewBase64: toBase64(preview) };
+}
+
 export const portraitPath = (character: Character) => `bible/refs/${slug(character.name)}.webp`;
 
 /** Turns a portrait (fresh from casting, or read back from the repo) into render and Clef inputs. */
@@ -197,17 +233,22 @@ export async function portraitReference(env: Env, character: Character, image: U
 	return { character, path: portraitPath(character), jpeg, previewBase64: toBase64(preview) };
 }
 
-export async function render(env: Env, cell: Cell, prompt: string, references: Reference[]) {
+export async function render(env: Env, cell: Cell, prompt: string, references: Reference[], location?: LocationReference) {
 	const started = Date.now();
-	const refs = usesPortraits(cell.shot) ? references.slice(0, 4) : [];
+	// The location's reference anchors the set for shots wide enough to show it; portraits anchor faces
+	const place = location && SETTING_SHOTS.includes(cell.shot) ? location : undefined;
+	const refs = usesPortraits(cell.shot) ? references.slice(0, place ? 3 : 4) : [];
 	// Image models don't know "EWS"; spell the framing out first
 	const framed = `${SHOT_SIZES[cell.shot]}. ${prompt}`;
 	// Tie each reference image to the description it anchors
-	const anchored = refs.length
-		? `${framed} ${refs.map((r, i) => `The ${r.character.look.split(",")[0]} is the person in image ${i}: keep the same face, hair and wardrobe.`).join(" ")}`
-		: framed;
+	const offset = place ? 1 : 0;
+	const anchors = [
+		...(place ? [`The setting is the place in image 0: keep its architecture, layout, props and light.`] : []),
+		...refs.map((r, i) => `The ${r.character.look.split(",")[0]} is the person in image ${i + offset}: keep the same face, hair and wardrobe.`),
+	];
+	const anchored = anchors.length ? `${framed} ${anchors.join(" ")}` : framed;
 	// 1344x576 is close to 2.39:1 anamorphic and divisible by 16
-	const { bytes: source, seed, attempts } = await runImageModel(env, anchored, { width: 1344, height: 576, references: refs });
+	const { bytes: source, seed, attempts } = await runImageModel(env, anchored, { width: 1344, height: 576, references: [...(place ? [place] : []), ...refs] });
 	// 384px for the per-frame critic; 640px for continuity, where hair and clothing need to be legible
 	const [frame, preview, detail] = await Promise.all([
 		encode(env, source, "image/webp"),
@@ -224,7 +265,7 @@ export async function render(env: Env, cell: Cell, prompt: string, references: R
 			attempts,
 			width: 1344,
 			height: 576,
-			references: refs.map((r) => r.path),
+			references: [...(place ? [place.path] : []), ...refs.map((r) => r.path)],
 			prompt_sent: anchored,
 			bytes: { source: source.byteLength, frame_webp: frame.byteLength, preview_webp: preview.byteLength },
 			elapsed_ms: Date.now() - started,
@@ -279,14 +320,20 @@ export async function checkContinuity(
 	refs: Reference[],
 	detailBase64: string,
 	framing: ClefAnswer | undefined,
+	location?: LocationReference,
 ) {
 	const characters = refs.map((r) => r.character);
-	if (!characters.length) {
+	// Nothing to compare: no characters, and no location reference for a shot that shows the setting
+	if (!characters.length && !(location && SETTING_SHOTS.includes(cell.shot))) {
 		const { ok, issues } = continuityVerdict(cell, [], {}, framing);
 		return { ok, issues, checked: "framing only: no characters in frame" };
 	}
-	const asked = continuityQuestions(cell, characters);
-	const images = [detailBase64, ...refs.slice(0, asked.checked.length).map((r) => r.previewBase64)];
+	const asked = continuityQuestions(cell, characters, location?.location);
+	const images = [
+		detailBase64,
+		...(asked.placeChecked && location ? [location.previewBase64] : []),
+		...refs.slice(0, asked.checked.length).map((r) => r.previewBase64),
+	];
 	const { answers, elapsed_ms } = await clef(env, asked.state, images, asked.questions);
 	const verdict = continuityVerdict(cell, characters, answers, framing);
 	return { ...verdict, identity_checked: asked.identityChecked, model: env.CLEF_MODEL, elapsed_ms, answers };

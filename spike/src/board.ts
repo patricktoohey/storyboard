@@ -5,11 +5,14 @@ import { type CsvRow, parseCsv, toCsv } from "./csv.ts";
 import { WorkingTree, type Files, type Remote } from "./git";
 import type { JobRequest, TakeOptions, TakeResult } from "./jobs";
 import { noteHistory, noteLine, notesHeader } from "./notes.ts";
+import { decodePositions, encodePositions, stagingBrief } from "./blocking.ts";
 import { cellsToReshoot } from "./router.ts";
 import {
 	type Board,
 	type Cell,
 	type Character,
+	type Location,
+	type LocationReference,
 	type Reference,
 	type ShotSize,
 	AGE_BANDS,
@@ -20,6 +23,9 @@ import {
 	direct,
 	editBible,
 	portraitPath,
+	locationPath,
+	locationReference,
+	scout,
 	portraitReference,
 	render,
 	review,
@@ -40,6 +46,9 @@ function storyboardCsv(board: Board) {
 			shot: c.shot,
 			camera: c.camera,
 			characters: c.characters.join(";"),
+			location: c.location ?? "",
+			positions: encodePositions(c.positions),
+			blocking: c.blocking ?? "",
 			beat: c.beat,
 			status: "draft",
 			take: "",
@@ -55,13 +64,19 @@ const cellFromRow = (r: CsvRow): Cell => ({
 	camera: r.camera,
 	duration_s: Number(r.duration_s),
 	characters: r.characters ? r.characters.split(";") : [],
+	location: r.location || undefined,
+	blocking: r.blocking || undefined,
+	positions: decodePositions(r.positions),
 });
 
-function bibleMd(title: string, bible: string, characters: Character[]) {
+function bibleMd(title: string, bible: string, characters: Character[], locations: Location[] = []) {
 	const lines = characters.map(
 		(c) => `- **${c.name}** (${AGE_BANDS[c.age_band].toLowerCase()}): ${c.look}  \n  ![${c.name}](${portraitPath(c)})`,
 	);
-	return `# Style bible: ${title}\n\n${bible.trim()}\n\n## Characters\n\n${lines.join("\n")}\n`;
+	const places = locations.map((l) => `- **${l.name}**: ${l.look}  \n  ![${l.name}](${locationPath(l)})`);
+	// A director that still writes its own "## Locations" section (older plans) keeps it; the list wins
+	const look = places.length ? bible.split(/\n## Locations\b/)[0].trim() : bible.trim();
+	return `# Style bible: ${title}\n\n${look}\n\n${places.length ? `## Locations\n\n${places.join("\n")}\n\n` : ""}## Characters\n\n${lines.join("\n")}\n`;
 }
 
 /** The bible minus the generated characters section, for the director to revise. */
@@ -76,6 +91,7 @@ interface BoardConfig {
 interface LoadedBoard {
 	board: Board;
 	refs: Reference[];
+	places: LocationReference[];
 	config: BoardConfig;
 	rows: CsvRow[];
 }
@@ -95,7 +111,15 @@ async function loadBoard(env: Env, tree: WorkingTree): Promise<LoadedBoard> {
 			),
 		)
 	).filter((r) => r !== undefined);
-	return { board: { title: bibleTitle(bible), bible, characters, cells: rows.map(cellFromRow) }, refs, config, rows };
+	const locations = (await tree.exists("locations.json")) ? (JSON.parse(await tree.read("locations.json")) as Location[]) : [];
+	const places = (
+		await Promise.all(
+			locations.map(async (l) =>
+				(await tree.exists(locationPath(l))) ? locationReference(env, l, await tree.readBytes(locationPath(l))) : undefined,
+			),
+		)
+	).filter((r) => r !== undefined);
+	return { board: { title: bibleTitle(bible), bible, characters, locations, cells: rows.map(cellFromRow) }, refs, places, config, rows };
 }
 
 /**
@@ -145,6 +169,24 @@ export const TAKE_OUTPUTS = ["frame.webp", "render.json", "review.json", "contin
 export type Progress = (detail: string) => Promise<unknown>;
 const quiet: Progress = async () => {};
 
+/** Location scouting: one empty establishing image per location, in parallel, committed to main. */
+async function scoutLocations(env: Env, remote: Remote, locations: Location[], skillName: string) {
+	if (!locations.length) return [];
+	const tree = await WorkingTree.clone(remote, "main");
+	const skill = await loadSkill(tree, skillName);
+	const results = await Promise.allSettled(locations.map((l) => scout(env, skill, l)));
+	const found = results.flatMap((r) => (r.status === "fulfilled" ? [r.value] : []));
+	if (!found.length) return [];
+	await onMain(remote, (t) =>
+		t.commit(
+			{ name: "casting" },
+			`Scout ${found.map((f) => f.location.name).join(", ")}\n\n${skillTrailer(skill)}`,
+			Object.fromEntries(found.map((f) => [f.path, f.webp])),
+		),
+	);
+	return found.map((f) => f.location.name);
+}
+
 interface Take {
 	cell: Cell;
 	take: number;
@@ -155,6 +197,7 @@ interface Take {
 	previewBase64: string;
 	detailBase64: string;
 	refs: Reference[];
+	place?: LocationReference;
 	tree: WorkingTree;
 	continuity?: Awaited<ReturnType<typeof checkContinuity>>;
 }
@@ -172,8 +215,12 @@ async function shootCell(
 	opts: TakeOptions = {},
 	progress: Progress = quiet,
 ): Promise<Take> {
-	const { board, refs, config } = loaded;
+	const { board, refs, places, config } = loaded;
 	const branch = `cell/${cell.id}/take-${take}`;
+	// Staging: this cell's location and blocking, and its neighbours' screen positions in the same place
+	const index = board.cells.findIndex((c) => c.id === cell.id);
+	const staging = stagingBrief(cell, board.locations ?? [], board.cells[index - 1], board.cells[index + 1]);
+	const place = places.find((p) => p.location.name === cell.location);
 	const dir = `cells/${cell.id}`;
 	const tree = await WorkingTree.clone(remote, "main", branch);
 	const skillName = opts.skill ?? config.skills.cinematographer;
@@ -204,7 +251,7 @@ async function shootCell(
 		const brief = [earlier.length ? `Director's notes on this shot so far (all still apply):\n${earlier.join("\n")}` : "", opts.note ?? ""]
 			.filter(Boolean)
 			.join("\n\n");
-		prompt = await cinematograph(env, skill, bible, castList, cell, brief || undefined);
+		prompt = await cinematograph(env, skill, bible, castList, cell, brief || undefined, staging || undefined);
 		const subject = `Cell ${cell.id} take ${take}: shot prompt${opts.note ? ` (with notes)\n\n${opts.note}` : ""}`;
 		await tree.commit(
 			{ name: `cinematographer-${cell.id}` },
@@ -216,7 +263,7 @@ async function shootCell(
 	await tree.push(branch);
 
 	await progress("renderer rendering the frame");
-	const frame = await render(env, cell, prompt, cellRefs);
+	const frame = await render(env, cell, prompt, cellRefs, place);
 	await tree.commit({ name: `renderer-${cell.id}` }, `Cell ${cell.id} take ${take}: render`, {
 		[`${dir}/frame.webp`]: frame.frame,
 		[`${dir}/render.json`]: JSON.stringify({ ...frame.meta, branch, skill: `${skill.name}@${skill.version}` }, null, 2) + "\n",
@@ -240,6 +287,7 @@ async function shootCell(
 		previewBase64: frame.previewBase64,
 		detailBase64: frame.detailBase64,
 		refs: cellRefs,
+		place,
 		tree,
 	};
 }
@@ -247,7 +295,7 @@ async function shootCell(
 /** Continuity agent: commits its verdict onto the take branch it judged. */
 async function judgeContinuity(env: Env, take: Take, progress: Progress = quiet) {
 	await progress("continuity checking against the bible");
-	const verdict = await checkContinuity(env, take.cell, take.refs, take.detailBase64, take.review.framing);
+	const verdict = await checkContinuity(env, take.cell, take.refs, take.detailBase64, take.review.framing, take.place);
 	const summary = verdict.ok ? "ok" : verdict.issues.join("; ");
 	await take.tree.commit(
 		{ name: `continuity-${take.cell.id}` },
@@ -336,9 +384,10 @@ export async function runBoardJob(
 		const files: Files = {
 			"concept.md": `# Concept\n\n${concept}\n`,
 			"board.json": JSON.stringify({ ...existing, skills: choice }, null, 2) + "\n",
-			"bible.md": bibleMd(board.title, board.bible, board.characters),
+			"bible.md": bibleMd(board.title, board.bible, board.characters, board.locations),
 			// The source of truth for continuity checks; bible.md is the human-readable view of it
 			"characters.json": JSON.stringify(board.characters, null, 2) + "\n",
+			"locations.json": JSON.stringify(board.locations ?? [], null, 2) + "\n",
 			"storyboard.csv": storyboardCsv(board),
 		};
 		for (const c of board.cells) files[`cells/${c.id}/beat.md`] = `${c.beat}\n`;
@@ -346,7 +395,13 @@ export async function runBoardJob(
 		return { board, choice };
 	});
 	await progress(`casting ${directed.board.characters.map((c) => c.name).join(", ") || "nobody"}`);
-	await castCharacters(env, remote, directed.board.characters, directed.choice.casting, "Cast");
+	// Casting and scouting in parallel: portraits anchor faces, location references anchor sets
+	await Promise.all([
+		castCharacters(env, remote, directed.board.characters, directed.choice.casting, "Cast"),
+		progress(`scouting ${(directed.board.locations ?? []).map((l) => l.name).join(", ") || "no locations"}`).then(() =>
+			scoutLocations(env, remote, directed.board.locations ?? [], directed.choice.casting),
+		),
+	]);
 	return { title: directed.board.title, cells: directed.board.cells.map((c) => c.id) };
 }
 
@@ -425,7 +480,7 @@ export async function runBibleJob(env: Env, repo: string, cellId: string, note: 
 		// Backstop for a misroute: the director says the bible already covers this. Commit nothing.
 		if (!revised.changed) return { unchanged: true as const, summary: revised.summary };
 		await tree.commit({ name: "director" }, `Bible: ${revised.summary}\n\nNote: ${note}\n${skillTrailer(skill)}`, {
-			"bible.md": bibleMd(current.board.title, revised.bible, revised.characters),
+			"bible.md": bibleMd(current.board.title, revised.bible, revised.characters, current.board.locations),
 			"characters.json": JSON.stringify(revised.characters, null, 2) + "\n",
 		});
 		const changed = revised.characters.filter((c, i) => c.look !== current.board.characters[i]?.look);
@@ -636,6 +691,7 @@ export async function boardState(env: Env, repoName: string) {
 		concept: (await tree.read("concept.md")).replace(/^# Concept\s*/, "").trim(),
 		bible: board.bible,
 		characters: board.characters.map((c) => ({ ...c, portrait: portraitPath(c) })),
+		locations: (board.locations ?? []).map((l) => ({ ...l, image: locationPath(l) })),
 		skills: { chosen: config.skills, available: skills },
 		cells: board.cells.map((c, i) => ({
 			...c,

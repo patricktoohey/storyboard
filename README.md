@@ -38,7 +38,9 @@ Working and deployed (Workers, Artifacts, Queues, Workers AI, AI Gateway, Images
 - **Skills** in each board repo (`skills/*/SKILL.md`): director, casting, three cinematographer styles,
   three showrunners, two judges. Edit them per board; promote good ones to the template.
 - **Continuity**: characters stay the same person across frames (casting portraits as references, Clef
-  comparing hair and outerwear against the portrait). Sets and staging still drift; see "Next" below.
+  comparing hair and outerwear against the portrait), and so do sets and staging: scouted location
+  references, blocking and screen positions in the plan, and Clef checking place, sides, blocking and head
+  count before a take can print.
 - **Video**: printed frames animated with Wan 2.7 or Hailuo 2.3 and assembled into `cut/vN` with an edit
   decision list. Veo, LTX and Seedance were tested and are excluded for now (docs/arena.md says why).
 - **Jobs**: every unit of work is a queued job coordinated through the jobs ledger; a 6-cell board with
@@ -48,10 +50,9 @@ Working and deployed (Workers, Artifacts, Queues, Workers AI, AI Gateway, Images
   Two arenas run so far; in the second, the premium crew won 71% of side-by-side matchups.
 - **Seasons**: built and unit-tested (retrospectives that rewrite each team's strategy, rounds that start
   themselves); a first live season is next.
-- **Tests**: 75 unit tests (`npm test`), live model evals (`npm run eval`), an end-to-end smoke test.
+- **Tests**: 89 unit tests (`npm test`), live model evals (`npm run eval`), an end-to-end smoke test.
 
-Next: continuity across frames (location references, blocking in the plan, neighbour checks), a live
-season, and the demo video.
+Next: a live season, chained video, and the demo video.
 
 ## Try it
 

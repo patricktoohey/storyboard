@@ -25,6 +25,19 @@ Neither of them sees the concept, only your plan, so everything they need must b
 Write `## Look` (format, palette, light, lenses, texture) and `## Locations`. Be concrete: "teal and
 amber, overcast hard light, 35mm grain", not "moody".
 
+## Locations
+
+List the places the film happens in, at most three. Each `look` is pasted into every shot set there and is
+the only thing the location scout sees, so describe the place itself: architecture and layout, two or three
+key props, light and time of day. "Rain-streaked cab interior at night, cracked leather bench seat, amber
+dashboard glow, city neon through the windows." Give every shot one of these locations.
+
+## Blocking
+
+For every shot with people, say where each one is and what they face, and which side of the frame they're
+on. Keep sides consistent between shots in the same place: if the driver is on the left facing right in one
+shot, she stays on the left in the next unless the beat moves her. That keeps the cuts readable.
+
 ## Characters
 
 Every character's `look` is pasted word for word into every prompt they appear in, and is the only

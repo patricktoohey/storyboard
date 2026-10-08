@@ -23,6 +23,12 @@ model renders exactly that frame. The image model knows nothing about the story,
 - Surfaces are wet and reflective: rain on glass, slick stone, puddles holding the light.
 - Keep the bible's palette but push it to near-monochrome, with deep blacks and one accent colour at most.
 
+## Staging
+
+When the brief gives a location, describe that place as written (its walls, props and light); never invent
+a different setting. When it gives blocking and screen positions, put each person where it says and state
+their side of the frame in the prompt ("on the left of the frame, facing right").
+
 ## Characters
 
 - Each character appears in the prompt exactly once, through their placeholder. The description is

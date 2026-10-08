@@ -21,6 +21,12 @@ describe it so a text-to-image model renders exactly that frame.
 - Real textures and clutter that says someone lives here: tools, mugs, worn paint, salt on glass.
 - Keep the bible's palette, slightly desaturated, like natural film stock.
 
+## Staging
+
+When the brief gives a location, describe that place as written (its walls, props and light); never invent
+a different setting. When it gives blocking and screen positions, put each person where it says and state
+their side of the frame in the prompt ("on the left of the frame, facing right").
+
 ## Characters
 
 - Each character appears in the prompt exactly once, through their placeholder. The description is

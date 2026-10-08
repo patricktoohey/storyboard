@@ -398,10 +398,11 @@ and strategies; writes three lessons, rewrites only its skill's `## Strategy` se
 rival's cinematographer, with a `Learned-From` trailer), then start the next round. The season page shows
 standings per round and each team's strategy as it changed, read from its repo's history.
 
-## Next: continuity across frames
+## Continuity across frames (D24, 2026-10-08)
 
-Only characters are anchored across frames today (casting portraits, MS/CU). Sets, light and staging drift
-between shots because each cell renders from text plus portraits, in parallel. Planned, keeping cells
-parallel: location reference images (a "scouting" step like casting), blocking per cell in the plan (location,
-positions, screen direction), a Clef check of each frame against its printed neighbour, and later chained
-video (the next frame as a clip's last frame where the model supports it).
+Characters were already anchored by casting portraits; sets and staging now are too, and cells still
+render in parallel. The director plans locations and per-cell blocking with screen positions; a scouting
+step renders each location empty, as casting does for people; setting shots render against that reference;
+code appends the blocking to every prompt in plain words; and Clef checks each frame for its place, each
+person's side of the frame, the blocking and the head count. docs/decisions.md D24 has the frames that
+drove each step. Still open: chained video (a clip ending on the next frame) and a stricter blocking check.

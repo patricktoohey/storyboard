@@ -40,6 +40,20 @@ export interface Character {
 	look: string;
 }
 
+// Screen positions for blocking: where a character is in the frame (the 180-degree rule, made checkable)
+export const SCREEN = {
+	left: "In the left third of the frame",
+	center: "In the center of the frame",
+	right: "In the right third of the frame",
+} as const;
+export type ScreenPos = keyof typeof SCREEN;
+
+export interface Location {
+	name: string;
+	// Visual description of the place, pasted into every shot set there and used to scout its reference
+	look: string;
+}
+
 export interface Cell {
 	id: string;
 	beat: string;
@@ -47,12 +61,17 @@ export interface Cell {
 	camera: string;
 	duration_s: number;
 	characters: string[];
+	// Staging from the director's plan; absent on boards planned before locations existed
+	location?: string;
+	blocking?: string;
+	positions?: Record<string, ScreenPos>;
 }
 
 export interface Board {
 	title: string;
 	bible: string;
 	characters: Character[];
+	locations?: Location[];
 	cells: Cell[];
 }
 
@@ -61,6 +80,14 @@ export interface Reference {
 	character: Character;
 	path: string;
 	// <512px JPEG: flux-2 reference inputs must be smaller than 512x512
+	jpeg: Uint8Array;
+	previewBase64: string;
+}
+
+/** A location's scouted reference image: the anchor for its sets, light and props. */
+export interface LocationReference {
+	location: Location;
+	path: string;
 	jpeg: Uint8Array;
 	previewBase64: string;
 }

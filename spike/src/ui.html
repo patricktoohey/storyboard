@@ -641,7 +641,8 @@ function render() {
       <div>
         <h2>${esc(s.title)}</h2>
         <div class="muted">${esc(s.concept)}</div>
-        <div class="cast">${s.characters.map((c) => `<figure><img data-ref="main" data-path="${esc(c.portrait)}" alt=""><figcaption><b>${esc(c.name)}</b><br><span class="small muted">${esc(c.look)}</span></figcaption></figure>`).join("")}</div>
+        <div class="cast">${s.characters.map((c) => `<figure><img data-ref="main" data-path="${esc(c.portrait)}" alt=""><figcaption><b>${esc(c.name)}</b><br><span class="small muted">${esc(c.look)}</span></figcaption></figure>`).join("")}
+          ${(s.locations || []).map((l) => `<figure><img data-ref="main" data-path="${esc(l.image)}" alt="" style="border-radius:6px;width:96px"><figcaption><b>${esc(l.name)}</b><br><span class="small muted">${esc(l.look)}</span></figcaption></figure>`).join("")}</div>
       </div>
       <div class="roles"><span class="small muted">Skills on this board</span>${["director", "cinematographer", "casting"].map(roleSelect).join("")}
         ${makeVideoButton(s)}</div>
@@ -722,6 +723,7 @@ function cellHtml(cell) {
         ${t?.adherence != null ? `<span class="pill">adherence ${t.adherence.toFixed(2)}</span>` : ""}
         ${t?.skill ? `<span class="pill">${esc(t.skill)}</span>` : ""}
         ${cell.characters.length ? `<span class="pill">${esc(cell.characters.join(", "))}</span>` : ""}
+        ${cell.location ? `<span class="pill" title="${esc(cell.blocking || "")}">${esc(cell.location)}${cell.positions && Object.keys(cell.positions).length ? ` · ${esc(Object.entries(cell.positions).map(([n, p]) => `${n} ${p}`).join(", "))}` : ""}</span>` : ""}
       </div>
       <div class="takes">${cell.takes.map((k) => `
         <button class="take ${t && k.take === t.take ? "sel" : ""}" data-take="${k.take}" title="${esc(k.branch)}">

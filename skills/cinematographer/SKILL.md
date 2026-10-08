@@ -22,6 +22,12 @@ The image model knows nothing about the story, the characters' names or film jar
 - Use the bible's palette, lenses and texture in every frame, so the board looks like one film.
 - Show emotion through posture, hands, and composition, not adjectives the model can't draw.
 
+## Staging
+
+When the brief gives a location, describe that place as written (its walls, props and light); never invent
+a different setting. When it gives blocking and screen positions, put each person where it says and state
+their side of the frame in the prompt ("on the left of the frame, facing right").
+
 ## Characters
 
 - Each character appears in the prompt exactly once, through their placeholder. The description

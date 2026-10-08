@@ -17,3 +17,15 @@ Character reference portrait, head and shoulders, facing camera, neutral express
 
 Keep the background plain and the expression neutral. Anything scene-specific here (rain, a lighthouse,
 a smile) leaks into every frame the portrait is used in.
+
+## Locations
+
+Each location gets one establishing image, scouted before any shot is drawn. It anchors the set for every
+wide and medium shot there: the same walls, props, windows and light. `{{look}}` is the location's look.
+
+```location
+Establishing shot of an empty location, wide angle, eye level, no people, natural light consistent with the description, photographic, film still. {{look}}.
+```
+
+No people, no action: anything in this image appears in every shot set there.
+

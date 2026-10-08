@@ -3,7 +3,8 @@
 // dependencies.
 
 const csvField = (v: string | number) => (/[",\n]/.test(String(v)) ? `"${String(v).replace(/"/g, '""')}"` : String(v));
-export const CSV_HEADER = ["id", "order", "duration_s", "shot", "camera", "characters", "beat", "status", "take"];
+// location, blocking and positions (staging) were added later; older boards' rows simply lack them
+export const CSV_HEADER = ["id", "order", "duration_s", "shot", "camera", "characters", "location", "positions", "blocking", "beat", "status", "take"];
 export type CsvRow = Record<(typeof CSV_HEADER)[number], string>;
 
 /** Rows to CSV under a fixed header (storyboard.csv's by default); missing fields are empty. */

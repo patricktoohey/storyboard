@@ -6,6 +6,9 @@ import {
 	type Cell,
 	type Character,
 	type ClefAnswer,
+	type Location,
+	SCREEN,
+	type ScreenPos,
 	type ShotSize,
 	AGE_BANDS,
 	AGE_ORDER,
@@ -16,6 +19,7 @@ import {
 	slug,
 	usesPortraits,
 } from "./vocab.ts";
+import { blockingInWords } from "./blocking.ts";
 
 // Clef takes at most 4 images: the frame plus up to 3 casting portraits
 export const MAX_PORTRAITS = 3;
@@ -29,16 +33,49 @@ const who = (c: Character) => c.look.split(",")[0].trim();
  * Questions for one frame. Images are ordered [frame, portrait of characters[0], portrait of characters[1], ...];
  * only the first MAX_PORTRAITS characters are checked.
  */
-export function continuityQuestions(cell: Pick<Cell, "beat" | "shot">, characters: Character[]) {
-	const checked = characters.slice(0, MAX_PORTRAITS);
-	const state = { beat: cell.beat, characters: Object.fromEntries(checked.map((c) => [c.name, c.look])) };
+export const HEADCOUNT = { "0": "No people", "1": "One person", "2": "Two people", "3": "Three people", "4": "Four or more people" } as const;
+
+// Shots where the setting is visible enough to compare with the location's reference image
+export const SETTING_SHOTS: Cell["shot"][] = ["EWS", "WS", "MS"];
+// Below this, the frame is unlikely to be set in its planned location
+export const PLACE_MATCH_MIN = 0.4;
+// Below this, the frame is unlikely to be staged as the blocking says (who sits where, who faces whom)
+export const BLOCKING_MATCH_MIN = 0.3;
+
+export function continuityQuestions(cell: Pick<Cell, "beat" | "shot" | "positions" | "blocking">, characters: Character[], location?: Location) {
+	// Images: 1 is the frame, 2 the location reference (when compared), then the casting portraits; at most 4
+	const placeChecked = Boolean(location) && SETTING_SHOTS.includes(cell.shot);
+	const firstPortrait = placeChecked ? 3 : 2;
+	const checked = characters.slice(0, MAX_PORTRAITS - (placeChecked ? 1 : 0));
+	// Staging needs people and some room around them: not an extreme close-up, not tiny figures in an EWS
+	const blockingChecked = Boolean(cell.blocking?.trim()) && checked.length > 0 && !["ECU", "EWS"].includes(cell.shot);
+	const state = {
+		beat: cell.beat,
+		characters: Object.fromEntries(checked.map((c) => [c.name, c.look])),
+		...(placeChecked ? { location: { name: location!.name, look: location!.look } } : {}),
+		...(blockingChecked ? { blocking: blockingInWords(cell.blocking!, checked) } : {}),
+	};
 	const questions: Record<string, unknown> = {};
 	const faces = usesPortraits(cell.shot);
 	// In an extreme wide shot figures are too small for colours to be reliable
 	const attributes = cell.shot !== "EWS";
+	// A head count: extra people (a stranger in the back seat) are a continuity break
+	if (cell.shot !== "ECU") questions.people = { type: "choice", instructions: "How many people are visible in image 1?", criteria: HEADCOUNT };
+	if (placeChecked) {
+		questions.place = {
+			type: "noul",
+			instructions: "Image 2 is the reference for `location`. Is image 1 set in that same place (architecture, layout, props, light)?",
+		};
+	}
+	if (blockingChecked) {
+		questions.blocking = {
+			type: "noul",
+			instructions: "Is image 1 staged as `blocking` describes (where each person is, how they sit or stand, which way they face)?",
+		};
+	}
 	checked.forEach((c, i) => {
 		const id = slug(c.name);
-		const portrait = i + 2;
+		const portrait = i + firstPortrait;
 		questions[`age.${id}`] = {
 			type: "choice",
 			instructions: `Find the person in image 1 who is most likely \`characters.${c.name}\`. What is their apparent age?`,
@@ -50,6 +87,9 @@ export function continuityQuestions(cell: Pick<Cell, "beat" | "shot">, character
 		};
 		if (attributes) {
 			questions[`visible.${id}`] = { type: "noul", instructions: `Is a ${who(c)} clearly visible in image 1?` };
+			if (cell.positions?.[c.name]) {
+				questions[`position.${id}`] = { type: "choice", instructions: `Where in image 1 is the ${who(c)}?`, criteria: SCREEN };
+			}
 			for (const [attr, { criteria, ask }] of Object.entries(ATTRIBUTES)) {
 				questions[`${attr}.frame.${id}`] = {
 					type: "choice",
@@ -70,14 +110,14 @@ export function continuityQuestions(cell: Pick<Cell, "beat" | "shot">, character
 			};
 		}
 	});
-	return { state, questions, checked, identityChecked: faces, attributesChecked: attributes };
+	return { state, questions, checked, identityChecked: faces, attributesChecked: attributes, placeChecked, blockingChecked };
 }
 
 export type AttributeReport = Record<string, Record<string, { frame?: string; portrait?: string; p_match: number }>>;
 
 /** Turns Clef's answers (plus the critic's framing answer) into continuity issues. */
 export function continuityVerdict(
-	cell: Pick<Cell, "shot">,
+	cell: Pick<Cell, "shot" | "positions"> & { characters?: string[] },
 	characters: Character[],
 	answers: Record<string, ClefAnswer | undefined>,
 	framing: ClefAnswer | undefined,
@@ -88,6 +128,19 @@ export function continuityVerdict(
 		issues.push(`framing reads as ${seenShot} but the shot is ${cell.shot} (${SHOT_SIZES[cell.shot]})`);
 	}
 	const attributes: AttributeReport = {};
+	const people = answers.people;
+	const expected = Math.min(4, characters.length || cell.characters?.length || 0);
+	if (people?.choice && Number(people.choice) > expected && (people.probabilities?.[String(expected)] ?? 0) < ATTRIBUTE_MATCH_MIN) {
+		issues.push(`${people.choice === "4" ? "four or more" : people.choice} people are visible but the shot plans ${expected}`);
+	}
+	const place = answers.place?.noul;
+	if (place !== undefined && place < PLACE_MATCH_MIN) {
+		issues.push(`the setting doesn't match the location reference (p=${place.toFixed(2)})`);
+	}
+	const blocking = answers.blocking?.noul;
+	if (blocking !== undefined && blocking < BLOCKING_MATCH_MIN) {
+		issues.push(`the staging doesn't follow the blocking (p=${blocking.toFixed(2)})`);
+	}
 	for (const c of characters.slice(0, MAX_PORTRAITS)) {
 		const id = slug(c.name);
 		const seen = answers[`age.${id}`]?.choice as AgeBand | undefined;
@@ -103,6 +156,15 @@ export function continuityVerdict(
 		}
 		// Attribute checks only when the character is actually in frame; Clef must answer a choice either way
 		if ((answers[`visible.${id}`]?.noul ?? 0) < 0.5) continue;
+		// Blocking: the character should be where the plan puts them (screen direction across cuts)
+		const planned = cell.positions?.[c.name] as ScreenPos | undefined;
+		const seenAt = answers[`position.${id}`];
+		if (planned && seenAt) {
+			const pPlanned = seenAt.probabilities?.[planned] ?? 0;
+			if (pPlanned < ATTRIBUTE_MATCH_MIN) {
+				issues.push(`${c.name} is ${seenAt.choice === "center" ? "in the center" : `on the ${seenAt.choice}`} but the blocking puts them ${planned === "center" ? "in the center" : `on the ${planned}`} (p=${pPlanned.toFixed(2)})`);
+			}
+		}
 		attributes[c.name] = {};
 		for (const attr of Object.keys(ATTRIBUTES)) {
 			const frame = answers[`${attr}.frame.${id}`];

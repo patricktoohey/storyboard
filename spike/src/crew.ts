@@ -134,13 +134,15 @@ const llmCall = (crew: Crew, call: keyof typeof CALLS) => {
 // Clef routing (notes router, showrunner decisions, blast radius) is the arena's fixed model
 const ROUTER = 0.002;
 const CHARACTERS = 2;
+// Location scouting: one establishing image per location, typically two
+const LOCATIONS = 2;
 
 /** What each kind of job costs with this crew, in USD. */
 export function crewCosts(crew: Crew) {
 	const renderer: RendererOption = MENU.renderer[crew.renderer];
 	const critic: CriticOption = MENU.critic[crew.critic];
 	return {
-		board: llmCall(crew, "director") + CHARACTERS * renderer.perPortrait,
+		board: llmCall(crew, "director") + (CHARACTERS + LOCATIONS) * renderer.perPortrait,
 		take: renderer.perFrame + llmCall(crew, "cinematographer") + critic.perTake,
 		bible: llmCall(crew, "revision") + renderer.perPortrait + ROUTER,
 		turn: ROUTER + llmCall(crew, "note"),

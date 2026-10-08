@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { type CsvRow, CSV_HEADER, parseCsv, toCsv } from "../src/csv.ts";
 
 const row = (over: Partial<CsvRow>): CsvRow =>
-	({ id: "01", order: "1", duration_s: "5", shot: "MS", camera: "static", characters: "", beat: "", status: "draft", take: "", ...over }) as CsvRow;
+	({ id: "01", order: "1", duration_s: "5", shot: "MS", camera: "static", characters: "", location: "", positions: "", blocking: "", beat: "", status: "draft", take: "", ...over }) as CsvRow;
 
 test("round-trips beats with commas, quotes and newlines", () => {
 	const rows = [
@@ -23,4 +23,11 @@ test("parses CRLF files and missing trailing newline", () => {
 		{ id: "01", beat: "a" },
 		{ id: "02", beat: "b, c" },
 	]);
+});
+
+test("a board planned before staging existed still parses; its staging fields are just absent", () => {
+	const old = "id,order,duration_s,shot,camera,characters,beat,status,take\n01,1,5,WS,static,Driver,The cab drives,printed,1\n";
+	const [r] = parseCsv(old);
+	assert.equal(r.beat, "The cab drives");
+	assert.equal(r.location, undefined);
 });
