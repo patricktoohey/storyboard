@@ -232,7 +232,10 @@ export async function seasonState(env: Env, season: string) {
 			const log = (await handle.log({ ref: "main", limit: 50 })) as unknown as { hash: string; author: { name: string }; message: string; authoredAt: number }[];
 			const retros = log.filter((c) => c.author.name === "retrospective").reverse();
 			const skillPath = `skills/showrunner-${t.team}/SKILL.md`;
-			const firstSkill = await readText(env, t.repo, skillPath, log[log.length - 1]?.hash ?? "main");
+			// The strategy the team started the season with: its skill at the commit that made it a team (the
+			// oldest commit in the log is a template seed from before the showrunner skills existed)
+			const start = log.find((c) => c.author.name === "season") ?? log[log.length - 1];
+			const firstSkill = await readText(env, t.repo, skillPath, start?.hash ?? "main");
 			const strategies = [
 				{ after: 0, message: "starting strategy", strategy: strategyOf(firstSkill ?? "") },
 				...(await Promise.all(

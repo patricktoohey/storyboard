@@ -41,7 +41,7 @@ async function withRetry<T>(fn: (attempt: number) => Promise<T>, retryOn = TRANS
 	}
 }
 
-async function chat(env: Env, model: string, system: string, user: string) {
+async function chat(env: Env, model: string, system: string, user: string, maxTokens = 8192): Promise<string> {
 	const messages = [
 		{ role: "system", content: system },
 		{ role: "user", content: user },
@@ -49,14 +49,17 @@ async function chat(env: Env, model: string, system: string, user: string) {
 	// Reasoning models (Gemma 4, Kimi) think before answering, in the same token budget: at 2048 the director's
 	// plan came back empty, all of it spent on reasoning
 	const out = (await withRetry(() =>
-		env.AI.run(model as keyof AiModels, { messages, max_tokens: 8192 } as never),
-	)) as { response?: unknown; choices?: { message?: { content?: string } }[] };
+		env.AI.run(model as keyof AiModels, { messages, max_tokens: maxTokens } as never),
+	)) as { response?: unknown; choices?: { message?: { content?: string | null } }[] };
 	// Workers AI models answer in `response` (sometimes already-parsed JSON); OpenAI-style ones (Gemma 4,
 	// Kimi, Nemotron) in choices[0].message.content
 	if (typeof out.response === "string") return out.response;
 	if (out.response !== undefined && out.response !== null) return JSON.stringify(out.response);
 	const content = out.choices?.[0]?.message?.content;
-	if (typeof content === "string") return content;
+	if (typeof content === "string" && content.trim()) return content;
+	// Empty: the reasoning used the whole budget. Kimi did this at 8192 once the plan gained locations and
+	// blocking (season-2026-10-08-0a8064, round 1); one retry with double the room
+	if (out.choices && maxTokens < 16384) return chat(env, model, system, user, maxTokens * 2);
 	throw new Error(`${model} returned no text: ${JSON.stringify(out).slice(0, 200)}`);
 }
 
