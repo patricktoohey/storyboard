@@ -4,11 +4,11 @@
 // the team repos. When a round's final judging finishes, a season_step job records the round, runs every
 // team's retrospective (lessons, a rewritten Strategy section, perhaps a rival's cinematographer), and
 // starts the next round. The skill's history in the team repo is the team learning.
-import { arenaState, createArena, DEFAULT_TEAMS, readRules } from "./arena";
+import { arenaState, createArena, DEFAULT_TEAMS, readRules, type TeamSpec, teamSpec } from "./arena";
 import { type RoundResult, replaceStrategy, seasonStandings, strategyOf } from "./arena-rules.ts";
 import { onMain } from "./board";
 import { ledger } from "./coordinator";
-import { isCrew } from "./crew.ts";
+import { crewFrom } from "./crew.ts";
 import { withCrew } from "./crew-env";
 import { WorkingTree } from "./git";
 import { retrospect } from "./models";
@@ -22,7 +22,7 @@ export interface Season {
 	minutes: number;
 	budget: number;
 	cells: number;
-	teams: { team: string; repo: string }[];
+	teams: { team: string; repo: string; lead?: string }[];
 	origin: string;
 	created: string;
 	arenas: { round: number; arena: string; brief: string }[];
@@ -54,30 +54,35 @@ async function updateSeason(env: Env, season: string, message: string, change: (
 /** Creates the season repo and a repo per team, then starts round 1. */
 export async function createSeason(
 	env: Env,
-	opts: { briefs: string[]; rounds: number; minutes: number; budget: number; cells: number; teams?: string[]; origin: string },
+	opts: { briefs: string[]; rounds: number; minutes: number; budget: number; cells: number; teams?: (string | TeamSpec)[]; origin: string },
 ) {
 	const id = stamp();
 	const season = `season-${id}`;
 	const teams = await Promise.all(
-		(opts.teams ?? DEFAULT_TEAMS).map(async (team) => {
+		(opts.teams ?? DEFAULT_TEAMS).map(teamSpec).map(async ({ team, showrunner, lead }) => {
 			const repo = `team-${team}-${id}`;
 			const remote = await forkBoard(env, repo, `${team}, ${season}`);
 			const tree = await WorkingTree.clone(remote, "main");
-			const skill = await loadSkill(tree, `showrunner-${team}`);
+			// Every team's showrunner skill is its own file, showrunner-<team>, which its retrospectives rewrite.
+			// Teams that start from a shared skill (to compare their lead models) get their own copy of it.
+			const own = `showrunner-${team}`;
+			const base = showrunner ?? own;
+			const skill = await loadSkill(tree, base);
+			const copy =
+				base === own ? {} : { [`skills/${own}/SKILL.md`]: (await tree.read(`skills/${base}/SKILL.md`)).replace(/^name: .*$/m, `name: ${own}`) };
 			await onMain(remote, (t) =>
-				t.commit({ name: "season" }, `Team ${team} for ${season}`, {
-					"team.json": json({ team, season, showrunner: `showrunner-${team}`, cinematographer: skill.metadata.cinematographer ?? "cinematographer" }),
+				t.commit({ name: "season" }, `Team ${team} for ${season}${base === own ? "" : ` (from ${base})`}${lead ? `, led by ${lead}` : ""}`, {
+					...copy,
+					"team.json": json({ team, season, showrunner: own, cinematographer: skill.metadata.cinematographer ?? "cinematographer", ...(lead ? { lead } : {}) }),
 					"lessons.md": `# Lessons: ${team}\n\nNothing yet: round 1 is the first.\n`,
 				}),
 			);
-			return { team, repo };
+			return { team, repo, ...(lead ? { lead } : {}) };
 		}),
 	);
 	const created = await env.ARTIFACTS.create(season, { description: `Season: ${opts.rounds} rounds, ${teams.length} teams` });
 	const tree = await WorkingTree.init({ url: created.remote, token: created.token });
 	const s: Season = { season, ...opts, teams, created: new Date().toISOString(), arenas: [], results: [] };
-	delete (s as Partial<Season> & { teams?: unknown }).teams;
-	s.teams = teams;
 	await tree.commit({ name: "season" }, `Season: ${opts.rounds} rounds, ${teams.map((t) => t.team).join(", ")}`, { "season.json": json(s) });
 	await tree.push("main");
 	const round = await startRound(env, s, 1);
@@ -95,7 +100,7 @@ async function startRound(env: Env, s: Season, round: number) {
 		minutes: s.minutes,
 		budget: s.budget,
 		cells: s.cells,
-		teams: s.teams.map((t) => t.team),
+		teams: s.teams.map((t) => ({ team: t.team, ...(t.lead ? { lead: t.lead } : {}) })),
 		origin: s.origin,
 		id: `${s.season.replace("season-", "")}-r${round}`,
 		season: {
@@ -167,6 +172,25 @@ async function runRetrospective(env: Env, s: Season, team: { team: string; repo:
 			}),
 	);
 	const byCriterion = state.comparative?.winRates?.byCriterion?.[team.team];
+	// The team's strategies so far, each beside the round it played and how that went: a version that did
+	// better than the latest can be returned to, the way a board version can be restored
+	using teamRepo = await env.ARTIFACTS.get(team.repo);
+	const teamLog = (await teamRepo.log({ ref: "main", limit: 50 })) as unknown as { hash: string; author: { name: string } }[];
+	const versions = [teamLog.find((c) => c.author.name === "season"), ...teamLog.filter((c) => c.author.name === "retrospective").reverse()].filter(
+		(c) => c !== undefined,
+	);
+	const strategyHistory = await Promise.all(
+		versions.map(async (c, i) => {
+			const r = s.results.find((x) => x.round === i + 1);
+			const at = r?.ranking.findIndex((x) => x.team === team.team) ?? -1;
+			return {
+				version: c.hash.slice(0, 7),
+				played_round: i + 1,
+				result: r && at >= 0 ? { place: at + 1, win_rate: r.ranking[at].winRate, disqualified: r.ranking[at].disqualified ?? null } : null,
+				strategy: strategyOf((await readText(env, team.repo, skillPath, c.hash)) ?? ""),
+			};
+		}),
+	);
 	const context = JSON.stringify(
 		{
 			round: result.round,
@@ -185,13 +209,14 @@ async function runRetrospective(env: Env, s: Season, team: { team: string; repo:
 				failed_jobs: me.failedJobs,
 			},
 			your_current_strategy: strategyOf(skillText),
+			your_strategy_history: strategyHistory,
 			your_lessons_so_far: (await readText(env, team.repo, "lessons.md")) ?? "",
 			rivals,
 		},
 		null,
 		2,
 	);
-	const retro = await retrospect(withCrew(env, isCrew(me.crew) ? me.crew : undefined), skill, context);
+	const retro = await retrospect(withCrew(env, crewFrom(me.crew)), skill, context);
 
 	const available = new Set(await tree.list("skills"));
 	const adopt = retro.adopt_cinematographer && available.has(retro.adopt_cinematographer) && retro.adopt_cinematographer.startsWith("cinematographer")
@@ -200,12 +225,14 @@ async function runRetrospective(env: Env, s: Season, team: { team: string; repo:
 	const from = adopt ? rivals.find((r) => r.cinematographer === adopt)?.team : undefined;
 	const teamJson = JSON.parse(await tree.read("team.json"));
 	const lessons = await tree.read("lessons.md");
-	const newSkill = replaceStrategy(skillText, retro.strategy);
+	// Returning to an earlier strategy: its text, exactly, from the team's history
+	const back = retro.revert_to ? strategyHistory.find((v) => retro.revert_to!.startsWith(v.version) || v.version.startsWith(retro.revert_to!)) : undefined;
+	const newSkill = replaceStrategy(skillText, back ? back.strategy : retro.strategy);
 	const header = `Retrospective after round ${result.round}: place ${place + 1} of ${result.ranking.length}, win rate ${((result.ranking[place]?.winRate ?? 0) * 100).toFixed(0)}%`;
 	await onMain(remote, (t) =>
 		t.commit(
 			{ name: "retrospective" },
-			`${header}\n\n${retro.lessons.map((l) => `- ${l}`).join("\n")}${newSkill === skillText ? "\n\nStrategy unchanged (rewrite rejected)" : ""}${adopt ? `\n\nAdopted: ${adopt}${from ? `\nLearned-From: ${from}` : ""}` : ""}`,
+			`${header}\n\n${retro.lessons.map((l) => `- ${l}`).join("\n")}${back ? `\n\nReturned to the strategy of ${back.version} (played round ${back.played_round})` : ""}${newSkill === skillText ? "\n\nStrategy unchanged (rewrite rejected)" : ""}${adopt ? `\n\nAdopted: ${adopt}${from ? `\nLearned-From: ${from}` : ""}` : ""}`,
 			{
 				[skillPath]: newSkill,
 				"lessons.md": `${lessons.trimEnd().replace("Nothing yet: round 1 is the first.", "").trimEnd()}\n\n## After round ${result.round} (${state.rules.brief})\n\n${retro.lessons.map((l) => `- ${l}`).join("\n")}\n`,
@@ -213,7 +240,7 @@ async function runRetrospective(env: Env, s: Season, team: { team: string; repo:
 			},
 		),
 	);
-	return `${newSkill === skillText ? "kept strategy" : "new strategy"}${adopt ? `, adopted ${adopt}` : ""}`;
+	return `${back ? `returned to ${back.version}` : newSkill === skillText ? "kept strategy" : "new strategy"}${adopt ? `, adopted ${adopt}` : ""}`;
 }
 
 // ── Read model ─────────────────────────────────────────────────────────────────────────────────────

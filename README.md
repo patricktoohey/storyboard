@@ -48,11 +48,14 @@ Working and deployed (Workers, Artifacts, Queues, Workers AI, AI Gateway, Images
 - **Arenas**: three showrunner teams, $5 and 20 minutes each, crews drafted from a priced menu, live
   scoring, comparative judging (boards side by side, both ways round), replays recorded into the arena repo.
   Two arenas run so far; in the second, the premium crew won 71% of side-by-side matchups.
-- **Seasons**: built and unit-tested (retrospectives that rewrite each team's strategy, rounds that start
-  themselves); a first live season is next.
-- **Tests**: 89 unit tests (`npm test`), live model evals (`npm run eval`), an end-to-end smoke test.
+- **Lead models and Git as a tool**: each team's lead (open models up to Claude Opus 5.5 and GPT-6.1 Sol)
+  decides every turn from a manual of tools that includes Git: save a version, restore an earlier one,
+  have the judges compare two, print an earlier take, submit an earlier cut.
+- **Seasons**: teams over several rounds; retrospectives rewrite each team's strategy, or return to an
+  earlier version that did better. The first live season ran 2026-10-08.
+- **Tests**: 99 unit tests (`npm test`), live model evals (`npm run eval`), an end-to-end smoke test.
 
-Next: a live season, chained video, and the demo video.
+Next: a season of frontier against open lead models, chained video, and the demo video.
 
 ## Try it
 

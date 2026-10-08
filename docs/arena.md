@@ -406,3 +406,16 @@ step renders each location empty, as casting does for people; setting shots rend
 code appends the blocking to every prompt in plain words; and Clef checks each frame for its place, each
 person's side of the frame, the blocking and the head count. docs/decisions.md D24 has the frames that
 drove each step. Still open: chained video (a clip ending on the next frame) and a stricter blocking check.
+
+## Git-native showrunners and frontier leads (D25, 2026-10-08)
+
+Each team's **lead** model (Llama, Kimi, Gemma, Nemotron, GPT-5.4 mini, GPT-6.1 Sol, Claude Sonnet 5.5 or
+Opus 5.5) plans, decides every turn and writes the retrospectives; the cinematographer slot stays separate,
+since it runs once per take. A turn shows the lead its board's Git history and a manual of tools, Git ones
+included, and the lead answers with an action, its arguments and a reason, which go into the team's log.
+A season can pin each team's lead and give every team the same starting skill (`showrunner`), so the lead
+model is the only difference: `{"teams": [{"team": "opus", "showrunner": "showrunner", "lead":
+"claude-opus-5.5"}, ...]}`. Retrospectives see every strategy version beside its round result and may
+return to one (`revert_to`) instead of rewriting.
+
+First smoke run: Opus 92%, Llama 8% of side-by-side judgments; Opus spent $1.01 of $2, Llama $0.65.

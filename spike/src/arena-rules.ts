@@ -3,14 +3,27 @@
 
 // ── Showrunner actions ──────────────────────────────────────────────────────────────────────────────
 
+// A self-comparison: the judges' rubric questions on two contact sheets, both ways round
+export const COMPARE_USD = 0.02;
+
+// The showrunner's tools, as its lead model reads them each turn (args in braces). The board is a Git
+// repo, and several tools are Git itself: every take is a branch, printing is a merge, versions can be
+// saved as branches, compared, and restored, and nothing is ever lost.
 export const ACTIONS = {
 	draft: "Choose the crew: which model fills each slot, within the budget",
-	plan: "Plan the board from the brief: director and casting, then every cell's first take",
-	note: "Give a director's note on the weakest cell, so it is re-shot",
-	retake: "Re-shoot the weakest cell as it is, hoping for a better render",
-	print: "Print the best finished take of each cell that has a better take than its printed one",
-	cut: "Make the video: animate every printed frame and assemble the cut",
-	submit: "Submit the finished cut; the team stops working",
+	plan: "Plan the board from the brief: director, casting and scouting, then every cell's first take",
+	replan:
+		'{"direction": string} Plan the whole board again, in a new direction you describe (a different idea, structure or tone). The current board is saved first as a branch, so you can compare the two and restore either',
+	note: '{"cell": "02", "note": string} Give a director\'s note on one cell, so it is re-shot with the note. Any cell, not only broken ones',
+	retake: '{"cell": "02"} Re-shoot one cell as it is, for a different render',
+	print:
+		'{"takes"?: {"02": 1, ...}} Print takes onto the board (a merge). Default: the best finished take of each cell. Name a take per cell to print a specific one, including an earlier take: every take is kept on its own branch',
+	cut: "Make the video: animate every printed frame and assemble a new cut (cut/v1, cut/v2, ...)",
+	submit: '{"cut"?: "v1"} Submit a cut; the team stops working. Default: the latest cut; any earlier cut can be submitted instead',
+	save: '{"name": string} Save the board as it is now under a name (a branch), to compare against or come back to later. Free',
+	restore:
+		'{"version": string} Bring the board back to an earlier version: a commit from your history or a saved name. Recorded as a new commit, so nothing is lost and you can restore forward again. Free',
+	compare: `{"a": string, "b": string} Have the judges compare two versions of your board side by side (commits, saved names, or "main" for now); the verdict appears in your history. About $${COMPARE_USD.toFixed(2)}`,
 	wait: "Do nothing now; let running work finish or think again shortly",
 } as const;
 export type Action = keyof typeof ACTIONS;
@@ -27,8 +40,9 @@ export interface BoardSummary {
 		printed?: number;
 		takes: { take: number; done: boolean; ok: boolean; stale: boolean; issues: string[] }[];
 	}[];
-	// Latest assembled cut, and whether a cut is still rendering
+	// Latest assembled cut, every assembled cut, and whether a cut is still rendering
 	cut?: string;
+	cuts?: string[];
 	cutRunning: boolean;
 	submitted: boolean;
 	// Jobs still queued or running on the board, other than showrunner turns
@@ -39,8 +53,8 @@ export interface BoardSummary {
 	deadline: number;
 	// Video seconds a cut of the whole board would need (each cell's clip, capped)
 	cutSeconds: number;
-	// The crew's prices: one take, one turn, and the whole cut at its video model's billing
-	prices: { take: number; turn: number; cut: number };
+	// The crew's prices: one take, one turn, the whole cut at its video model's billing, and a new plan
+	prices: { take: number; turn: number; cut: number; board?: number };
 }
 
 // A cut takes ~5 minutes to render (clips run in parallel) plus assembly; leave a margin on top
@@ -80,32 +94,132 @@ export function allowedActions(s: BoardSummary): Action[] {
 	if (!s.drafted) return ["draft"];
 	if (!s.planRequested) return ["plan"];
 	if (!s.planned || s.cutRunning) return ["wait"];
-	// Video is required: a finished cut is submitted at once
-	if (s.cut) return ["submit"];
 
 	const timeLeft = (s.deadline - s.now) / 1000;
 	const videoCost = s.prices.cut;
 	const allPrinted = s.cells.every((c) => c.printed !== undefined);
 	const picks = printPicks(s);
 	const canCut = allPrinted && s.spent + videoCost <= s.budget;
+	const cutTime = CUT_WALL_S + CUT_MARGIN_S;
 
-	// Out of time: finish the board and cut now, or the team has nothing to submit. This comes before
-	// waiting on running work: slow retakes must not hold up the cut (the crew arena's auteur printed with
-	// 3.5 minutes left because it waited on two retakes)
-	if (timeLeft < CUT_WALL_S + CUT_MARGIN_S) {
-		if (picks.length) return ["print"];
-		return canCut ? ["cut"] : ["wait"];
+	if (s.cut) {
+		// Video is required: with a cut in hand and no time to make a better one, submit. Otherwise the team
+		// may keep working toward another cut, and choose which cut to submit
+		if (timeLeft < 2 * cutTime) return ["submit"];
+		if (s.openJobs > 0) return ["wait", "submit"];
+	} else {
+		// Out of time: finish the board and cut now, or the team has nothing to submit. This comes before
+		// waiting on running work: slow retakes must not hold up the cut (the crew arena's auteur printed with
+		// 3.5 minutes left because it waited on two retakes)
+		if (timeLeft < cutTime) {
+			if (picks.length) return ["print"];
+			return canCut ? ["cut"] : ["wait"];
+		}
+		if (s.openJobs > 0) return ["wait"];
 	}
-	if (s.openJobs > 0) return ["wait"];
 
 	const actions: Action[] = [];
-	// Notes and retakes may never eat the money the required video needs
+	// Work may never eat the money the required video needs (a further cut, when one exists)
 	const affordWork = s.spent + s.prices.take + s.prices.turn + videoCost <= s.budget;
-	if (affordWork && weakCells(s).length) actions.push("note", "retake");
-	if (picks.length) actions.push("print");
+	if (affordWork && s.cells.length) actions.push("note", "retake");
+	// A new plan needs a plan, a take per cell and a cut, and the time to shoot and cut them
+	const replanCost = (s.prices.board ?? 0) + s.cells.length * s.prices.take + videoCost;
+	if (s.prices.board !== undefined && s.spent + replanCost <= s.budget && timeLeft > cutTime + 240) actions.push("replan");
+	if (s.cells.some((c) => c.takes.some((t) => t.done && t.take !== c.printed))) actions.push("print");
 	if (canCut) actions.push("cut");
+	if (s.cut) actions.push("submit");
+	actions.push("save", "restore");
+	if (s.spent + COMPARE_USD + videoCost <= s.budget) actions.push("compare");
 	actions.push("wait");
 	return actions;
+}
+
+/** The lead model's answer, checked: an allowed action with valid arguments. */
+export interface Decision {
+	action: Action;
+	args: Record<string, unknown>;
+	reason: string;
+}
+
+const str = (v: unknown, max = 400) => (typeof v === "string" && v.trim() ? v.trim().slice(0, max) : undefined);
+
+/**
+ * Parses and validates a decision. Anything malformed or not allowed is an error, which the caller records
+ * (the turn waits): a model never gets to run a tool it wasn't offered, or on a cell that doesn't exist.
+ */
+export function parseDecision(text: string, allowed: Action[], s: BoardSummary): Decision | { error: string } {
+	const start = text.indexOf("{");
+	const end = text.lastIndexOf("}");
+	let raw: { action?: unknown; args?: unknown; reason?: unknown };
+	try {
+		raw = JSON.parse(text.slice(start, end + 1));
+	} catch {
+		return { error: `not JSON: ${text.slice(0, 120)}` };
+	}
+	const action = raw.action as Action;
+	if (!allowed.includes(action)) return { error: `"${String(raw.action)}" is not one of ${allowed.join(", ")}` };
+	const a = (typeof raw.args === "object" && raw.args !== null ? raw.args : {}) as Record<string, unknown>;
+	const reason = str(raw.reason, 300) ?? "";
+	const cellIds = s.cells.map((c) => c.id);
+	const cellOf = (v: unknown) => {
+		const id = typeof v === "number" ? String(v).padStart(2, "0") : str(v);
+		return id && cellIds.includes(id) ? id : undefined;
+	};
+	switch (action) {
+		case "note": {
+			const cell = cellOf(a.cell);
+			const note = str(a.note);
+			if (!cell || !note) return { error: `note needs a cell (${cellIds.join(", ")}) and a note` };
+			return { action, args: { cell, note }, reason };
+		}
+		case "retake": {
+			const cell = cellOf(a.cell);
+			if (!cell) return { error: `retake needs a cell (${cellIds.join(", ")})` };
+			return { action, args: { cell }, reason };
+		}
+		case "print": {
+			const asked = typeof a.takes === "object" && a.takes !== null ? Object.entries(a.takes as Record<string, unknown>) : [];
+			const takes: { cell: string; branch: string }[] = [];
+			for (const [k, v] of asked) {
+				const cell = cellOf(k);
+				const t = Number(v);
+				const found = cell && s.cells.find((c) => c.id === cell)?.takes.find((x) => x.take === t && x.done);
+				if (!found) return { error: `cell ${k} has no finished take ${String(v)}` };
+				takes.push({ cell: cell!, branch: `cell/${cell}/take-${t}` });
+			}
+			const picks = takes.length ? takes : printPicks(s);
+			if (!picks.length) return { error: "nothing to print: name the takes" };
+			return { action, args: { picks }, reason };
+		}
+		case "submit": {
+			const cut = str(a.cut, 20)?.replace(/^cut\//, "") ?? s.cut;
+			if (!cut || !(s.cuts ?? [s.cut]).includes(cut)) return { error: `no cut "${String(a.cut)}" (cuts: ${(s.cuts ?? []).join(", ")})` };
+			return { action, args: { cut }, reason };
+		}
+		case "save": {
+			const name = (str(a.name, 40) ?? "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+			if (!name) return { error: "save needs a name" };
+			return { action, args: { name }, reason };
+		}
+		case "restore": {
+			const version = str(a.version, 80);
+			if (!version) return { error: "restore needs a version" };
+			return { action, args: { version }, reason };
+		}
+		case "compare": {
+			const va = str(a.a, 80);
+			const vb = str(a.b, 80);
+			if (!va || !vb || va === vb) return { error: "compare needs two different versions" };
+			return { action, args: { a: va, b: vb }, reason };
+		}
+		case "replan": {
+			const direction = str(a.direction, 600);
+			if (!direction) return { error: "replan needs a direction" };
+			return { action, args: { direction }, reason };
+		}
+		default:
+			return { action, args: {}, reason };
+	}
 }
 
 // ── Judges ─────────────────────────────────────────────────────────────────────────────────────────

@@ -6,12 +6,12 @@ type CrewEnv = Env & { CREW?: Crew };
 
 export function withCrew(env: Env, crew?: Crew): Env {
 	if (!crew) return env;
-	const llm = MENU.llm[crew.llm].id;
-	// A view over env: bindings (AI, ARTIFACTS, ...) are inherited, model settings overridden
+	// A view over env: bindings (AI, ARTIFACTS, ...) are inherited, model settings overridden. The lead
+	// model directs, decides the showrunner's turns, writes notes and retrospectives; the llm writes shots.
 	return Object.assign(Object.create(env), {
 		CREW: crew,
-		DIRECTOR_MODEL: llm,
-		CINEMATOGRAPHER_MODEL: llm,
+		DIRECTOR_MODEL: MENU.lead[crew.lead].id,
+		CINEMATOGRAPHER_MODEL: MENU.llm[crew.llm].id,
 		RENDER_MODEL: MENU.renderer[crew.renderer].id,
 		CLEF_MODEL: MENU.critic[crew.critic].id,
 		VIDEO_MODEL: MENU.video[crew.video].id,

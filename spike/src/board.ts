@@ -391,7 +391,15 @@ export async function runBoardJob(
 			"storyboard.csv": storyboardCsv(board),
 		};
 		for (const c of board.cells) files[`cells/${c.id}/beat.md`] = `${c.beat}\n`;
-		await tree.commit({ name: "director" }, `Board: ${board.title} (${board.cells.length} cells)\n\n${skillTrailer(skill)}`, files);
+		// A new plan replaces the old one's cells (a replan saved them on a branch first)
+		const stale: string[] = [];
+		for (const dir of await tree.list("cells")) for (const f of await tree.list(`cells/${dir}`)) stale.push(`cells/${dir}/${f}`);
+		await tree.commit(
+			{ name: "director" },
+			`Board: ${board.title} (${board.cells.length} cells)\n\n${skillTrailer(skill)}`,
+			files,
+			stale.filter((p) => !(p in files)),
+		);
 		return { board, choice };
 	});
 	await progress(`casting ${directed.board.characters.map((c) => c.name).join(", ") || "nobody"}`);

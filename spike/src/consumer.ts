@@ -120,7 +120,7 @@ async function consumeOne(msg: Message<Job>, env: Env) {
 			const jobEnv = job.kind === "judge" ? env : withCrew(env, (await limitsOf(env, job.repo)).crew);
 			// No separate "started" report: every job reports its first stage straight away, and each report is a commit
 			const out = await run(jobEnv, job);
-			await report(env, job, "done", out.detail, "result" in out ? out.result : undefined);
+			await report(env, job, "done", out.detail, "result" in out ? out.result : undefined, "cost" in out ? (out.cost as number | undefined) : undefined);
 		}
 	} catch (err) {
 		console.error(job.kind, job.id, err);

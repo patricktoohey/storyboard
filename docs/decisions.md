@@ -29,6 +29,9 @@ models the exact requests production builds (`npm run eval`, about a cent; resul
 | D20 | One file per score (`scores/<team>/<judge>.json`); the leaderboard is computed on read | `arena-rules.test.ts` |
 | D21 | Judges are skills with public rubrics, and score a commit, never a branch | `arena-rules.test.ts` |
 | D22 | Showrunner actions are a closed set; code mandates when there's no choice, Clef chooses the rest | `arena-rules.test.ts` |
+| D25 | The team's lead model decides each turn from a manual of tools that includes Git (save, restore, compare, any take, any cut); code checks every decision | `arena-rules.test.ts` |
+| D26 | A cut assembled before the deadline counts as the team's submission | live run (see below) |
+| D27 | A job reports what it really cost: turns pay for the lead model's tokens, and nothing when they only wait | `ledger.test.ts`, `llm.test.ts` |
 | D24 | Staging is planned per cell and anchored like casting: scouted location references, positions and blocking stated by code, and checked by Clef | `blocking.test.ts`, `continuity-rules.test.ts` |
 
 ## D2: placeholders, not descriptions
@@ -184,6 +187,35 @@ Result (board-2026-10-08-a1360d): every cab frame in the same cab, driver at the
 passenger on the right in both shots that show them, head counts as planned; the two breaks were coat
 colour, fixed by one retake each. The blocking check is lenient: it passed (0.85) a passenger who sits
 more beside the driver than behind her.
+
+## D25: the lead decides, with Git as a tool
+
+Until now Clef picked each showrunner action from a closed list, and the board's history was only a record:
+nothing ever went back to an old version. Now each team has a **lead** model (a crew slot, from open models
+to Claude Opus 5.5 and GPT-6.1 Sol through AI Gateway's unified billing) that plans the board, decides every
+turn, writes notes and runs retrospectives. Each turn it reads the board, clock, budget, scores and its
+history (recent commits with any judged score, saved versions, cuts, its own comparisons) and a manual of
+tools; the Git ones are `save` (a branch), `restore` (old content back as a new commit), `compare` (judges on
+two versions), `replan` (after saving), `print` with any earlier take, and `submit` with any cut. Code still
+mandates the draft, the plan and the deadline, and checks every decision (`parseDecision`): only offered
+tools, real cells and takes, existing cuts. Instructions to use history live in code, so every skill gets them.
+
+First run (arena-2026-10-08-7d57a2, same neutral skill, 15 minutes, $2): Opus drafted from the prices ("Wan
+would push a minimal film to $2.06"), saved `alt/safe-v1` as a baseline on its first free turn, wrote notes
+aimed at its weakest criteria, and won 92% of side-by-side judgments against Llama 3.3, which gave the same
+lighting note four times. 15 minutes left no room to compare and restore: rounds need about 30.
+
+## D26: a finished cut counts
+
+In the first season's round 2, safe's cut finished as the clock ran out, before its next turn could
+submit it, and it was disqualified for "no video". At the close, a team without a submission is now
+recorded at its newest cut whose assembly commit predates the deadline.
+
+## D27: costs as billed
+
+Turns were charged a fixed estimate whether they decided or waited. With frontier leads a decision costs
+about 2¢ and a wait nothing, so a turn reserves a decision and then reports its real cost from the tokens
+the provider returned (`llmUsage`); the reported cost replaces the reservation in the ledger.
 
 ## Backlog: staging continuity and non-human characters
 

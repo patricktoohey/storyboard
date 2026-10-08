@@ -67,3 +67,12 @@ test("anyone the blocking stages joins the shot's characters", () => {
 	// Whole words only
 	assert.deepEqual(withStaged(["Ann"], "Ann waves at the Annex", ["Ann", "Annex Guard"]), ["Ann"]);
 });
+
+test("a restored version is its plan, bible and cells, from its own plan; never the team's files", async () => {
+	const { versionPaths } = await import("../src/versions.ts");
+	const csv = "id,order,duration_s,shot,camera,characters,location,positions,blocking,beat,status,take\n01,1,4,WS,static,,Street,,,b,printed,1\n";
+	const paths = versionPaths(csv, [{ name: "Old Driver" }], [{ name: "City Street" }]);
+	assert.ok(paths.includes("cells/01/frame.webp") && paths.includes("cells/01/notes.md"));
+	assert.ok(paths.includes("bible/refs/old-driver.webp") && paths.includes("bible/locations/city-street.webp"));
+	for (const team of ["board.json", "lessons.md", "skills/showrunner/SKILL.md", "reviews/comparisons.json"]) assert.ok(!paths.includes(team), team);
+});

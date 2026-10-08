@@ -99,7 +99,7 @@ export function appendJobs(
 export function recordProgress(
 	rows: LedgerRow[],
 	id: string,
-	update: { status: JobStatus; detail?: string; result?: string; now: string },
+	update: { status: JobStatus; detail?: string; result?: string; now: string; cost?: number },
 ): { followUps: JobRequest[] } {
 	const job = rows.find((r) => r.id === id && r.kind !== "group");
 	if (!job) return { followUps: [] };
@@ -108,6 +108,9 @@ export function recordProgress(
 	job.status = update.status;
 	if (update.detail !== undefined) job.detail = update.detail;
 	if (update.result !== undefined) job.result = update.result;
+	// What the job really cost replaces its reservation: a turn reserves a lead-model decision, and pays
+	// nothing when it only waits, or the tokens it used when it decides
+	if (update.cost !== undefined) job.cost_est = update.cost.toFixed(4);
 	job.updated = update.now;
 
 	const group = job.group && rows.find((r) => r.kind === "group" && r.id === job.group);

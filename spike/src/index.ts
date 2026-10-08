@@ -31,7 +31,7 @@
 //   POST /template[?reset=1]                   create the template / add newly bundled skills (reset: overwrite with bundled)
 // Every route except GET / requires `Authorization: Bearer $SPIKE_KEY`.
 import { addNote, boardState, chooseSkill, editSkill, listBoards, printTake, startBoard, startCut } from "./board";
-import { arenaState, closeArena, createArena, listArenas } from "./arena";
+import { type TeamSpec, arenaState, closeArena, createArena, listArenas, teamSpec } from "./arena";
 import { arenaTimeline, saveReplay } from "./replay";
 import { createSeason, listSeasons, seasonState } from "./season";
 import { consume } from "./consumer";
@@ -43,8 +43,18 @@ import { isRole, listSkills } from "./skills";
 import { TEMPLATE, ensureTemplate, promoteSkill, repoRemote } from "./template";
 import ui from "./ui.html?raw";
 import { animate, frameJpeg, frameUrl, verifyFrame } from "./video";
-import { type Crew, DEFAULT_CREW, isCrew } from "./crew.ts";
+import { type Crew, DEFAULT_CREW, MENU, isCrew } from "./crew.ts";
+
+/** A request's team specs: names are slugs, and a pinned lead must be on the menu. */
+function badTeams(teams: (string | TeamSpec)[] | undefined) {
+	for (const t of (teams ?? []).map(teamSpec)) {
+		if (!/^[a-z0-9-]{1,24}$/.test(t.team ?? "")) return `team names are lowercase slugs: "${t.team}"`;
+		if (t.lead && !(t.lead in MENU.lead)) return `no lead model "${t.lead}"; choose from ${Object.keys(MENU.lead).join(", ")}`;
+	}
+	return undefined;
+}
 import { withCrew } from "./crew-env";
+import { probeLlm } from "./models";
 
 const json = async <T>(request: Request) => (await request.json().catch(() => ({}))) as T;
 
@@ -79,7 +89,9 @@ export default {
 			if (root === "seasons") {
 				if (method === "GET" && !repoName) return Response.json(await listSeasons(env));
 				if (method === "POST" && !repoName) {
-					const body = await json<{ brief?: string; briefs?: string[]; rounds?: number; minutes?: number; budget?: number; cells?: number; teams?: string[] }>(request);
+					const body = await json<{ brief?: string; briefs?: string[]; rounds?: number; minutes?: number; budget?: number; cells?: number; teams?: (string | TeamSpec)[] }>(request);
+					const bad = badTeams(body.teams);
+					if (bad) return Response.json({ error: bad }, { status: 400 });
 					const briefs = body.briefs?.length ? body.briefs : body.brief ? [body.brief] : [];
 					if (!briefs.length) return Response.json({ error: "brief or briefs is required" }, { status: 400 });
 					const created = await createSeason(env, {
@@ -98,7 +110,9 @@ export default {
 			if (root === "arenas") {
 				if (method === "GET" && !repoName) return Response.json(await listArenas(env));
 				if (method === "POST" && !repoName) {
-					const body = await json<{ brief?: string; minutes?: number; budget?: number; cells?: number; teams?: string[] }>(request);
+					const body = await json<{ brief?: string; minutes?: number; budget?: number; cells?: number; teams?: (string | TeamSpec)[] }>(request);
+					const bad = badTeams(body.teams);
+					if (bad) return Response.json({ error: bad }, { status: 400 });
 					if (!body.brief) return Response.json({ error: "brief is required" }, { status: 400 });
 					const created = await createArena(env, {
 						brief: body.brief,
@@ -127,6 +141,13 @@ export default {
 				}
 			}
 			// Checks one video model's adapter on an existing printed frame: renders, downloads, discards
+			if (method === "POST" && root === "debug" && repoName === "llm") {
+				const body = await json<{ model: string; system?: string; user?: string; max_tokens?: number }>(request);
+				const r = await probeLlm(env, body.model, body.system ?? "Answer in one short sentence.", body.user ?? "What is a storyboard?", body.max_tokens ?? 1024).catch(
+					(e) => ({ model: body.model, error: String(e) }),
+				);
+				return Response.json(r);
+			}
 			if (method === "POST" && root === "debug" && repoName === "animate") {
 				const { board, cell, video, seconds = 3 } = await json<{ board?: string; cell?: string; video?: string; seconds?: number }>(request);
 				const crew = { ...DEFAULT_CREW, video } as Crew;

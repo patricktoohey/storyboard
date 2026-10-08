@@ -3,6 +3,7 @@
 // what stays here is each role's output contract, which code depends on.
 import { SETTING_SHOTS, continuityQuestions, continuityVerdict } from "./continuity-rules.ts";
 import { llmFor } from "./crew-env";
+import { llmRequest, llmText, llmUsage } from "./llm.ts";
 import { normalizePositions, withBlocking, withStaged } from "./blocking.ts";
 import { insertLooks } from "./looks";
 import { type NoteAction, routerRequest } from "./router.ts";
@@ -42,25 +43,31 @@ async function withRetry<T>(fn: (attempt: number) => Promise<T>, retryOn = TRANS
 }
 
 async function chat(env: Env, model: string, system: string, user: string, maxTokens = 8192): Promise<string> {
-	const messages = [
-		{ role: "system", content: system },
-		{ role: "user", content: user },
-	];
-	// Reasoning models (Gemma 4, Kimi) think before answering, in the same token budget: at 2048 the director's
-	// plan came back empty, all of it spent on reasoning
-	const out = (await withRetry(() =>
-		env.AI.run(model as keyof AiModels, { messages, max_tokens: maxTokens } as never),
-	)) as { response?: unknown; choices?: { message?: { content?: string | null } }[] };
-	// Workers AI models answer in `response` (sometimes already-parsed JSON); OpenAI-style ones (Gemma 4,
-	// Kimi, Nemotron) in choices[0].message.content
-	if (typeof out.response === "string") return out.response;
-	if (out.response !== undefined && out.response !== null) return JSON.stringify(out.response);
-	const content = out.choices?.[0]?.message?.content;
-	if (typeof content === "string" && content.trim()) return content;
+	return (await ask(env, model, system, user, maxTokens)).text;
+}
+
+/** A text model's answer with the tokens it used (for billing what a call really cost). */
+export async function ask(env: Env, model: string, system: string, user: string, maxTokens = 8192): Promise<{ text: string; usage: { input: number; output: number } }> {
+	// Reasoning models (Gemma 4, Kimi, GPT, Claude with thinking) think in the same token budget: at 2048 the
+	// director's plan came back empty, all of it spent on reasoning
+	const out = await withRetry(() => env.AI.run(model as keyof AiModels, llmRequest(model, system, user, maxTokens) as never));
+	const text = llmText(out);
+	const usage = llmUsage(out);
+	if (text.trim()) return { text, usage };
 	// Empty: the reasoning used the whole budget. Kimi did this at 8192 once the plan gained locations and
 	// blocking (season-2026-10-08-0a8064, round 1); one retry with double the room
-	if (out.choices && maxTokens < 16384) return chat(env, model, system, user, maxTokens * 2);
+	if (maxTokens < 16384) {
+		const again = await ask(env, model, system, user, maxTokens * 2);
+		return { text: again.text, usage: { input: usage.input + again.usage.input, output: usage.output + again.usage.output } };
+	}
 	throw new Error(`${model} returned no text: ${JSON.stringify(out).slice(0, 200)}`);
+}
+
+/** A raw call for POST /debug/llm: what a provider actually returns, and how long it took. */
+export async function probeLlm(env: Env, model: string, system: string, user: string, maxTokens = 1024) {
+	const started = Date.now();
+	const out = await env.AI.run(model as keyof AiModels, llmRequest(model, system, user, maxTokens) as never);
+	return { model, ms: Date.now() - started, text: llmText(out), usage: llmUsage(out), raw: JSON.stringify(out).slice(0, 1500) };
 }
 
 function extractJson<T>(text: string): T {
@@ -284,9 +291,10 @@ async function clef(env: Env, state: unknown, images: string[], questions: Recor
 		images: images.map((base64) => ({ content_type: "image/webp", base64 })),
 		questions,
 	};
-	const out = (await withRetry(() =>
-		env.AI.run(`@cf/cloudflare/${model}` as keyof AiModels, input as never),
-	)) as unknown as { answers: Record<string, ClefAnswer> };
+	// 5012 "Clef inference failed" came and went within a minute in the first frontier arena
+	const out = (await withRetry(() => env.AI.run(`@cf/cloudflare/${model}` as keyof AiModels, input as never), [...TRANSIENT, "5012"])) as unknown as {
+		answers: Record<string, ClefAnswer>;
+	};
 	return { answers: out.answers, elapsed_ms: Date.now() - started };
 }
 
@@ -421,6 +429,8 @@ export interface Retrospective {
 	lessons: string[];
 	strategy: string;
 	adopt_cinematographer: string | null;
+	// An earlier strategy version to return to instead of a rewrite
+	revert_to: string | null;
 }
 
 /**
@@ -437,15 +447,21 @@ doing and what to change, then rewrite your strategy for the next round. You may
 cinematographer if theirs clearly worked better; a different brief comes next round, so learn principles,
 not this round's story.
 
+Your strategies are versioned: \`your_strategy_history\` has each one beside the round it played and its
+result. If an earlier version did better than where you are now, you can return to it exactly
+("revert_to": its version) instead of writing a new one; otherwise write the strategy you believe in.
+
 ## Output contract
 Reply with ONLY a JSON object:
 {"lessons": [string, string, string],      // three short, concrete lessons from this round
  "strategy": string,                       // your new "## Strategy" section body: 3 to 6 markdown bullets
+ "revert_to": string | null,               // a version from your_strategy_history to return to instead, or null
  "adopt_cinematographer": string | null}  // a cinematographer skill name from the rivals, or null`;
 	const out = extractJson<Retrospective>(await chat(env, llmFor(env, skill.metadata.model, env.DIRECTOR_MODEL), system, context));
 	return {
 		lessons: (out.lessons ?? []).map(String).slice(0, 5),
 		strategy: String(out.strategy ?? ""),
 		adopt_cinematographer: out.adopt_cinematographer ? String(out.adopt_cinematographer) : null,
+		revert_to: out.revert_to ? String(out.revert_to) : null,
 	};
 }

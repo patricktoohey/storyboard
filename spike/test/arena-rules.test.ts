@@ -6,6 +6,7 @@ import {
 	type BoardSummary,
 	CUT_WALL_S,
 	allowedActions,
+	parseDecision,
 	leaderboard,
 	printPicks,
 	rubricOf,
@@ -47,18 +48,56 @@ test("the first turn drafts the crew, the next plans; a planned board waits whil
 	assert.deepEqual(allowedActions(board({ cutRunning: true })), ["wait"]);
 });
 
-test("video is required: a finished cut is submitted at once, and a submitted team stops", () => {
-	assert.deepEqual(allowedActions(board({ cut: "v1" })), ["submit"]);
+test("video is required: with a cut and no time for a better one, submit; a submitted team stops", () => {
+	const late = minutes((2 * (CUT_WALL_S + 90) - 60) / 60);
+	assert.deepEqual(allowedActions(board({ cut: "v1", cuts: ["v1"], deadline: late })), ["submit"]);
 	assert.deepEqual(allowedActions(board({ cut: "v1", submitted: true })), []);
 });
 
-test("with time and money, the showrunner chooses among working, cutting and waiting", () => {
-	assert.deepEqual(allowedActions(board()), ["note", "retake", "cut", "wait"]);
+test("with a cut in hand and time left, the team may keep working toward a better one, or submit", () => {
+	const s = board({ cut: "v1", cuts: ["v1"], deadline: minutes(30) });
+	const allowed = allowedActions(s);
+	for (const a of ["note", "retake", "submit", "save", "restore", "compare", "wait"]) assert.ok(allowed.includes(a as never), a);
+	// Running work after a cut: wait for it, or submit what exists
+	assert.deepEqual(allowedActions({ ...s, openJobs: 2 }), ["wait", "submit"]);
+});
+
+test("with time and money, the lead chooses among working, Git tools, cutting and waiting", () => {
+	assert.deepEqual(allowedActions(board()), ["note", "retake", "cut", "save", "restore", "compare", "wait"]);
+	// Replanning needs its price known, the money for a plan, takes and a cut, and the time to shoot them
+	assert.ok(allowedActions(board({ prices: { take: 0.03, turn: 0.005, cut: 1.0, board: 0.1 } })).includes("replan"));
+	assert.ok(!allowedActions(board({ prices: { take: 0.03, turn: 0.005, cut: 1.0, board: 0.1 }, deadline: minutes(9) })).includes("replan"));
+});
+
+test("an earlier take can be printed: any finished take other than the printed one", () => {
+	const s = board({ cells: [{ id: "01", printed: 2, takes: [take(1), take(2)] }] });
+	assert.ok(allowedActions(s).includes("print"));
 });
 
 test("notes and retakes never eat the budget the required video needs", () => {
-	// 10 s of video costs $1.00; $4.00 spent leaves exactly enough for the cut, not for more work
-	assert.deepEqual(allowedActions(board({ spent: 4.0 })), ["cut", "wait"]);
+	// 10 s of video costs $1.00; $4.00 spent leaves exactly enough for the cut, not for more work or a comparison
+	assert.deepEqual(allowedActions(board({ spent: 4.0 })), ["cut", "save", "restore", "wait"]);
+});
+
+test("the lead's decision is checked: allowed tools only, real cells and takes, sane arguments", () => {
+	const s = board({ cut: "v2", cuts: ["v2", "v1"], cells: [{ id: "01", printed: 2, takes: [take(1), take(2)] }, { id: "02", printed: 1, takes: [take(1, false)] }] });
+	const allowed = ["note", "print", "submit", "restore", "compare", "save", "wait"] as const;
+	const d = (o: unknown) => parseDecision(JSON.stringify(o), [...allowed], s);
+	assert.deepEqual(d({ action: "note", args: { cell: "02", note: "Her coat is yellow." }, reason: "r" }), { action: "note", args: { cell: "02", note: "Her coat is yellow." }, reason: "r" });
+	assert.ok("error" in d({ action: "note", args: { cell: "09", note: "x" } }));
+	assert.ok("error" in d({ action: "retake", args: { cell: "01" } }), "not offered this turn");
+	// An earlier take, named
+	assert.deepEqual((d({ action: "print", args: { takes: { "01": 1 } } }) as { args: unknown }).args, { picks: [{ cell: "01", branch: "cell/01/take-1" }] });
+	assert.ok("error" in d({ action: "print", args: { takes: { "01": 7 } } }));
+	// The earlier cut, or the latest by default
+	assert.deepEqual((d({ action: "submit", args: { cut: "cut/v1" } }) as { args: unknown }).args, { cut: "v1" });
+	assert.deepEqual((d({ action: "submit" }) as { args: unknown }).args, { cut: "v2" });
+	assert.ok("error" in d({ action: "submit", args: { cut: "v9" } }));
+	assert.deepEqual((d({ action: "save", args: { name: "Safe Version #1" } }) as { args: unknown }).args, { name: "safe-version-1" });
+	assert.ok("error" in d({ action: "compare", args: { a: "main", b: "main" } }));
+	// Prose around the JSON is tolerated; no JSON at all is an error
+	assert.equal((parseDecision(`I'll wait. {"action": "wait"}`, [...allowed], s) as { action: string }).action, "wait");
+	assert.ok("error" in parseDecision("wait", [...allowed], s));
 });
 
 test("near the deadline the clock decides: print what's finished, then cut", () => {

@@ -8,6 +8,8 @@ export interface LlmOption {
 	label: string;
 	in: number; // USD per M input tokens
 	out: number; // USD per M output tokens
+	// Reasoning tokens a call typically spends before answering, billed as output
+	thinking?: number;
 }
 export interface RendererOption {
 	id: string;
@@ -32,15 +34,26 @@ export interface VideoOption {
 	usd: (billed: number) => number;
 }
 
+const LLMS = {
+	"gemma-4": { id: "@cf/google/gemma-4-26b-a4b-it", label: "Gemma 4 26B: cheap and quick, plainer writing", in: 0.1, out: 0.3, thinking: 800 },
+	"llama-3.3-70b": { id: "@cf/meta/llama-3.3-70b-instruct-fp8-fast", label: "Llama 3.3 70B: dependable all-rounder", in: 0.293, out: 2.253 },
+	"nemotron-3-120b": { id: "@cf/nvidia/nemotron-3-120b-a12b", label: "Nemotron 3 120B: strong planner, good value", in: 0.5, out: 1.5, thinking: 800 },
+	"kimi-k2.6": { id: "@cf/moonshotai/kimi-k2.6", label: "Kimi K2.6: the strongest open model, slow (it reasons at length)", in: 0.95, out: 4.0, thinking: 2000 },
+	"gpt-5.4-mini": { id: "openai/gpt-5.4-mini", label: "GPT-5.4 mini: a small frontier model, quick", in: 0.75, out: 4.5, thinking: 300 },
+	"gpt-6.1-sol": { id: "openai/gpt-6.1-sol", label: "GPT-6.1 Sol: OpenAI's frontier model", in: 2.0, out: 10.0, thinking: 800 },
+	"claude-sonnet-5.5": { id: "anthropic/claude-sonnet-5.5", label: "Claude Sonnet 5.5: frontier, fast", in: 2.0, out: 10.0, thinking: 500 },
+	"claude-opus-5.5": { id: "anthropic/claude-opus-5.5", label: "Claude Opus 5.5: Anthropic's most capable model", in: 4.0, out: 20.0, thinking: 1000 },
+} satisfies Record<string, LlmOption>;
+
 const snapUp = (allowed: number[]) => (s: number) => allowed.find((a) => a >= s) ?? allowed[allowed.length - 1];
 
 export const MENU = {
-	llm: {
-		"gemma-4": { id: "@cf/google/gemma-4-26b-a4b-it", label: "Gemma 4 26B: cheap and quick, plainer writing", in: 0.1, out: 0.3 },
-		"llama-3.3-70b": { id: "@cf/meta/llama-3.3-70b-instruct-fp8-fast", label: "Llama 3.3 70B: dependable all-rounder", in: 0.293, out: 2.253 },
-		"nemotron-3-120b": { id: "@cf/nvidia/nemotron-3-120b-a12b", label: "Nemotron 3 120B: strong planner, good value", in: 0.5, out: 1.5 },
-		"kimi-k2.6": { id: "@cf/moonshotai/kimi-k2.6", label: "Kimi K2.6: the most capable writer, the most expensive", in: 0.95, out: 4.0 },
-	} satisfies Record<string, LlmOption>,
+	// Text models, for two slots: `lead` (the director, the showrunner's decisions and notes, bible edits,
+	// retrospectives: few calls, the ones that steer) and `llm` (the cinematographer: one call per take).
+	// Frontier models are billed through AI Gateway's unified billing (prices from Cloudflare's model
+	// catalog, 2026-10-08); each answered through env.AI.run in 2-4 s.
+	llm: LLMS,
+	lead: LLMS,
 	renderer: {
 		"flux-2-klein-4b": {
 			id: "@cf/black-forest-labs/flux-2-klein-4b",
@@ -113,7 +126,7 @@ export const SLOTS = Object.keys(MENU) as Slot[];
 export type Crew = { [S in Slot]: keyof (typeof MENU)[S] & string };
 
 /** Today's pipeline: what every board used before the draft, and what non-arena boards still use. */
-export const DEFAULT_CREW: Crew = { llm: "llama-3.3-70b", renderer: "flux-2-klein-9b", critic: "clef", video: "wan-2.7-i2v" };
+export const DEFAULT_CREW: Crew = { llm: "llama-3.3-70b", lead: "llama-3.3-70b", renderer: "flux-2-klein-9b", critic: "clef", video: "wan-2.7-i2v" };
 
 /** Options the draft may offer for a slot: everything except video models that don't work right now. */
 export function draftOptions(slot: Slot): string[] {
@@ -125,11 +138,22 @@ export function draftOptions(slot: Slot): string[] {
 export const isCrew = (c: unknown): c is Crew =>
 	typeof c === "object" && c !== null && SLOTS.every((s) => (c as Record<string, string>)[s] in MENU[s]);
 
-// Token budgets of this pipeline's LLM calls (input, output)
-const CALLS = { director: [1500, 1000], cinematographer: [1000, 200], note: [800, 100], revision: [1500, 800] } as const;
+/** A crew from board.json; crews drafted before the lead slot existed used their one LLM for everything. */
+export function crewFrom(c: unknown): Crew | undefined {
+	if (typeof c !== "object" || c === null) return undefined;
+	const filled = { ...(c as Record<string, string>) };
+	filled.lead ??= filled.llm;
+	return isCrew(filled) ? filled : undefined;
+}
+
+// Token budgets of this pipeline's LLM calls (input, output). A turn is the showrunner's decision: the
+// board, its history and the tool manual in, an action (perhaps with a note) out.
+const CALLS = { director: [2000, 1200], cinematographer: [1200, 200], turn: [5000, 300], revision: [1500, 800] } as const;
+// Which slot makes each call: the cinematographer is the per-take writer; everything else is the lead
+const SLOT_OF = { director: "lead", cinematographer: "llm", turn: "lead", revision: "lead" } as const;
 const llmCall = (crew: Crew, call: keyof typeof CALLS) => {
-	const m: LlmOption = MENU.llm[crew.llm];
-	return (CALLS[call][0] * m.in + CALLS[call][1] * m.out) / 1e6;
+	const m: LlmOption = MENU[SLOT_OF[call]][crew[SLOT_OF[call]]];
+	return (CALLS[call][0] * m.in + (CALLS[call][1] + (m.thinking ?? 0)) * m.out) / 1e6;
 };
 // Clef routing (notes router, showrunner decisions, blast radius) is the arena's fixed model
 const ROUTER = 0.002;
@@ -145,7 +169,7 @@ export function crewCosts(crew: Crew) {
 		board: llmCall(crew, "director") + (CHARACTERS + LOCATIONS) * renderer.perPortrait,
 		take: renderer.perFrame + llmCall(crew, "cinematographer") + critic.perTake,
 		bible: llmCall(crew, "revision") + renderer.perPortrait + ROUTER,
-		turn: ROUTER + llmCall(crew, "note"),
+		turn: llmCall(crew, "turn"),
 	};
 }
 
@@ -165,9 +189,10 @@ export function cheapestFilm(crew: Crew, clipSeconds: number[], turns = 8) {
 
 /**
  * Makes a drafted crew affordable: while its cheapest complete film exceeds `share` of the budget,
- * downgrade the slot whose next-cheaper option saves the most. Returns the crew and what changed.
+ * downgrade the slot whose next-cheaper option saves the most; `fixed` slots (a season's pinned lead) are
+ * never changed. Returns the crew and what changed.
  */
-export function fitToBudget(crew: Crew, clipSeconds: number[], budget: number, share = 0.8) {
+export function fitToBudget(crew: Crew, clipSeconds: number[], budget: number, share = 0.8, fixed: Slot[] = []) {
 	const changes: string[] = [];
 	let current = { ...crew };
 	const cheaperOptions = (slot: Slot) => {
@@ -176,7 +201,7 @@ export function fitToBudget(crew: Crew, clipSeconds: number[], budget: number, s
 	};
 	while (cheapestFilm(current, clipSeconds) > budget * share) {
 		let best: { slot: Slot; option: string; saves: number } | undefined;
-		for (const slot of SLOTS) {
+		for (const slot of SLOTS.filter((s) => !fixed.includes(s))) {
 			const options = cheaperOptions(slot);
 			const next = options[options.length - 1];
 			if (!next) continue;

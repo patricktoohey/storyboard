@@ -15,7 +15,7 @@ import {
 	recordProgress,
 } from "./ledger.ts";
 import { repoRemote } from "./template";
-import { isCrew } from "./crew.ts";
+import { crewFrom } from "./crew.ts";
 
 const newId = () => crypto.randomUUID().slice(0, 8);
 
@@ -63,7 +63,7 @@ export async function limitsOf(env: Env, repo: string): Promise<Limits> {
 	using handle = await env.ARTIFACTS.get(repo);
 	const text = await (await handle.readFile({ ref: "main", path: "board.json" }).catch(() => null))?.text();
 	const board = text ? (JSON.parse(text) as Limits) : {};
-	return { budget_usd: board.budget_usd, deadline: board.deadline, crew: isCrew(board.crew) ? board.crew : undefined };
+	return { budget_usd: board.budget_usd, deadline: board.deadline, crew: crewFrom(board.crew) };
 }
 
 /**
@@ -102,12 +102,12 @@ export async function submit(
  * "running" reports are best-effort (one attempt, and a lost race is just skipped): they're for watching,
  * and with every take reporting each stage they are most of the ledger's write traffic. Outcomes retry.
  */
-export async function report(env: Env, job: Job, status: JobStatus, detail?: string, result?: string) {
+export async function report(env: Env, job: Job, status: JobStatus, detail?: string, result?: string, cost?: number) {
 	const remote = await repoRemote(env, job.repo);
 	let queued: Job[] = [];
 	const message = `${status === "running" ? "▶" : status === "done" ? "✓" : status === "failed" ? "✗" : "·"} ${describe(job)}${detail ? `: ${detail}` : ""}`;
 	const edit = (rows: LedgerRow[]) => {
-		const { followUps } = recordProgress(rows, job.id, { status, detail, result, now: now() });
+		const { followUps } = recordProgress(rows, job.id, { status, detail, result, now: now(), cost });
 		queued = followUps.length ? appendJobs(rows, job.repo, followUps, { now: now(), newId }) : [];
 	};
 	if (status === "running") {

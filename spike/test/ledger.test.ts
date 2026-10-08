@@ -89,3 +89,17 @@ test("a cut group's last video queues the assembly of the clips that rendered, i
 	const { followUps } = recordProgress(rows, c.id, { status: "done", now: ctx.now });
 	assert.deepEqual(followUps, [{ kind: "assemble", cut: "v1", cells: ["02", "03"] }]);
 });
+
+test("a job's reported cost replaces its reservation: a turn that only waited costs nothing", () => {
+	const rows: LedgerRow[] = [];
+	const [turn] = appendJobs(rows, "board-x", [{ kind: "turn", arena: "a", team: "t", origin: "o" }], { ...ctx, limits: { budget_usd: 5 } });
+	const row = rows.find((r) => r.id === turn.id)!;
+	row.cost_est = "0.0400";
+	recordProgress(rows, turn.id, { status: "done", result: "waited", now: ctx.now, cost: 0 });
+	assert.equal(row.cost_est, "0.0000");
+	// No cost reported (most jobs): the reservation stands
+	const [t] = appendJobs(rows, "board-x", [take("01")], ctx);
+	const before = rows.find((r) => r.id === t.id)!.cost_est;
+	recordProgress(rows, t.id, { status: "done", result: "ok", now: ctx.now });
+	assert.equal(rows.find((r) => r.id === t.id)!.cost_est, before);
+});
