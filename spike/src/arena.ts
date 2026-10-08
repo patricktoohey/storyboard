@@ -463,7 +463,8 @@ export async function arenaState(env: Env, arena: string) {
 			const cfg = boardJson ? JSON.parse(boardJson) : {};
 			return {
 				...t,
-				crew: cfg.crew ?? null,
+				// A drafted cinematographer's model is the season's secret: named, not shown
+				crew: cfg.crew && cfg.cast ? { ...cfg.crew, llm: cfg.cast.players.find((p: { seat: string }) => p.seat === "cinematographer")?.name ?? cfg.crew.llm } : (cfg.crew ?? null),
 				// Who's on the team, as viewers see them (models stay secret until the season's reveal)
 				cast: cfg.cast ? { team_name: cfg.cast.team_name, lead: cfg.cast.lead, players: cfg.cast.players.map((p: { name: string; seat: string; bio: string }) => ({ name: p.name, seat: p.seat, bio: p.bio })) } : null,
 				crewRoom: lastTalk(crewRoom, 60),

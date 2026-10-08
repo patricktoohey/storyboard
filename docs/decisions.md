@@ -217,6 +217,32 @@ Turns were charged a fixed estimate whether they decided or waited. With frontie
 about 2¢ and a wait nothing, so a turn reserves a decision and then reports its real cost from the tokens
 the provider returned (`llmUsage`); the reported cost replaces the reservation in the ledger.
 
+## D28: a cast, and talk that is committed
+
+Season 2 (docs/season-2.md) needs a show worth watching, and a show needs people talking. Every lead,
+player and judge creates its own character (name, bio, voice), played by its own model; judges, which are
+Clef, are voiced by Sonnet from their verdicts. Players are repos of their own (profile, memory,
+contract), so a player's career and memory move with it if it changes teams. Talk is plain markdown
+committed beside what it is about: the crew room on the board, the commons and the judges' remarks in the
+arena, confessionals in the team repo. Restoring a board version doesn't touch talk (it isn't a board
+file). Player models are hidden from every lead's view, including the masked `llm` slot of the crew;
+viewers see them only after the reveal.
+
+The cinematographer hears each note before shooting it and may push back. A pushed-back note is held, not
+shot; noting that cell again settles it. Disagreement then costs a turn, which is the price of a crew that
+can say no. Fabrication runs one way only: up to two strong players undersell, and the team that drafts
+one gets a budget bonus to cover the stronger model. A cheap player posing as a star was rejected: fair
+play would need a budget cut, and the result is worse films.
+
+## D29: leads think hard
+
+A lead's answer is a few hundred tokens; thinking costs little next to one frame. Lead calls (decisions,
+the crew draft, the player draft, direction, notes, retrospectives) ask Claude for adaptive thinking at
+high effort and OpenAI for high reasoning effort. Through the AI Gateway binding a fixed Claude thinking
+budget (`budget_tokens`) is refused with 7003 on Opus and Sonnet 5.5; adaptive thinking is accepted
+(checked 2026-10-08). Workers AI's reasoning models (Kimi, Nemotron, Gemma) think by default. Players
+don't think hard: they talk inside someone else's turn.
+
 ## Backlog: staging continuity and non-human characters
 
 Observed on the boards so far, not yet addressed:

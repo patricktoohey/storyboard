@@ -179,6 +179,17 @@ Outside the finale, each turn's view has a `rivals` section: per rival, its last
 reasons, its saved versions and cuts, its live score, and the commons. `compare` accepts
 `rival:<team>/<version>`, putting your board next to a rival's before the judges.
 
+**Public messages, private reasons.** Once rivals read each other's history, a commit message is a
+claim made in public. Each decision gains an optional public `message` (the commit message rivals see)
+beside its private `reason` (the team's own log, which must be true, so a team never misleads itself in
+later turns or retrospectives). A message may say anything: a team can save its real plan as
+`alt/abandoned-noir`, or call its bold print a "safe fallback". Contents never lie (frames, takes and cuts
+are what they are), so a lie can be caught: `compare` against the rival's version, or look at its frames,
+and call it out in the commons. After each round the show sets every team's public messages beside its
+private reasons. Nothing encourages lying; the manual only says messages are public and reasons private,
+and the leads decide. If every team lies, nobody reads anyone's log and the learning-from-rivals story
+goes; the hope is that it stays an occasional move.
+
 ## Judging
 
 Clef judges stills, so craft and story stay on contact sheets (now 8 sampled frames), with the
@@ -236,7 +247,7 @@ it.
    the menu.
 3. **The mixer**: a Container with ffmpeg, a `mix` job after `assemble`, `teaser.mp4` on the cut branch,
    the UI and replays playing it.
-4. **The season format**: the draft, rivals in the turn view, twists as offers, elimination, the blind
+4. **The season format**: the draft, rivals in the turn view (with public messages and private reasons), twists as offers, elimination, the blind
    finale's protect and steal, the wildcard, chained seasons.
 5. **Thinking levels and Nemotron**: live checks through the binding; longer timeouts for Kimi.
 6. **The teaser judge** (after a live test of video input), rubric skill `judge-teaser`.
@@ -249,6 +260,8 @@ Roughly four to five days, mostly 1, 3 and 4. Ghost runs come after the season.
 - Budget: $12 a team a round, about $50-75 a season; the gateway's daily limit is raised to match.
 - The merger round (two teams, one film, a real Git merge) is saved for Season 3.
 - Bios only undersell, one or two players a season, with a budget bonus for the team that drafts one.
+- Commit messages are public and may mislead; reasons are private and true; contents never lie. Left to
+  emerge, not encouraged; revealed after each round.
 
 - Season 2 is the teaser brief with sound and dialogue; every agent is named, with a bio and a voice.
 - Llama is replaced by Nemotron 3; Kimi gets one more season with thinking on and longer timeouts.

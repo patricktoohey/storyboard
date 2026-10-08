@@ -170,9 +170,10 @@ export async function confess(env: Env, who: Persona, model: LlmKey, role: strin
 	const system = `${personaSystem(who, role, memory)}
 
 ## Now
-The round is over. You're alone in the confessional booth, talking to camera: one or two sentences about
-how it went, the people you worked with or against, and what comes next. Honest, specific, in character;
-the show will air it.${keepsMemory ? ' Then one sentence for your own memory: what to remember next round ("memory").' : ""}
+The round is over. You're alone in the confessional booth, talking to camera: one or two sentences. Say
+what you really think, not what's polite: about your lead, your crew, the other team, the judges (you may
+disagree with them; don't just repeat their remarks). Claim only what you actually did (\`what_you_did\`);
+if you were left out, you can say so. Specific and in character; the show will air it.${keepsMemory ? ' Then one sentence for your own memory: what to remember next round ("memory").' : ""}
 
 Reply with ONLY a JSON object: {"confessional": string${keepsMemory ? ', "memory": string' : ""}}`;
 	const out = await speak(env, model, system, JSON.stringify(context, null, 2));

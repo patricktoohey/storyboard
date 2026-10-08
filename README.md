@@ -57,7 +57,11 @@ Working and deployed (Workers, Artifacts, Queues, Workers AI, AI Gateway, Images
   the cut made from it.
 - **Tests**: 99 unit tests (`npm test`), live model evals (`npm run eval`), an end-to-end smoke test.
 
-Next: [Season 2](docs/season-2.md), a 30-second teaser about the show itself, with sound; then the demo video.
+Next: [Season 2](docs/season-2.md), a 30-second teaser about the show itself, with sound and dialogue.
+Built so far: the cast (every agent a named character; players drafted, their models hidden), the crew
+room, the commons, confessionals and judges' remarks, all committed to the repos (D28), and leads that
+think hard (D29). Still to build: sound, the mixer, the season format (twists, elimination, protect and
+steal), the teaser judge. Then the demo video.
 
 ## Try it
 

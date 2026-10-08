@@ -180,15 +180,17 @@ export async function runTurnJob(env: Env, job: TurnJob, progress: Progress) {
 	if (allowed[0] === "draft") {
 		await progress(`drafting the crew (${lead} leads)`);
 		const fit = await draftCrew(env, lead, skill.body, lessons, summary.budget, rules.cells, cap, cinematographer);
+		// What the lead will read back (history, retrospectives): a drafted cinematographer by name, never its model
+		const shown = (sl: Slot) => (sl === "llm" && cinematographer ? cinematographer.name : fit.crew[sl]);
 		await onMain(await repoRemote(env, board), async (tree) => {
 			const current = JSON.parse(await tree.read("board.json"));
 			await tree.commit(
 				{ name: `showrunner-${job.team}` },
-				`Draft crew: ${SLOTS.map((sl) => fit.crew[sl]).join(", ")}${fit.reason ? `\n\n${fit.reason}` : ""}${fit.changes.length ? `\n\nDowngraded to fit the budget: ${fit.changes.join("; ")}` : ""}`,
+				`Draft crew: ${SLOTS.map(shown).join(", ")}${fit.reason ? `\n\n${fit.reason}` : ""}${fit.changes.length ? `\n\nDowngraded to fit the budget: ${fit.changes.join("; ")}` : ""}`,
 				{ "board.json": JSON.stringify({ ...current, crew: fit.crew }, null, 2) + "\n" },
 			);
 		});
-		const detail = `turn ${acted + 1}: draft (required): ${SLOTS.map((sl) => `${sl} ${fit.crew[sl]}`).join(", ")}; minimal film ~$${fit.film.toFixed(2)}${fit.changes.length ? ` (downgraded ${fit.changes.join("; ")})` : ""}${fit.reason ? ` — ${fit.reason}` : ""}`;
+		const detail = `turn ${acted + 1}: draft (required): ${SLOTS.map((sl) => `${sl} ${shown(sl)}`).join(", ")}; minimal film ~$${fit.film.toFixed(2)}${fit.changes.length ? ` (downgraded ${fit.changes.join("; ")})` : ""}${fit.reason ? ` — ${fit.reason}` : ""}`;
 		return next(env, job, { detail, result: "acted" as const, cost: fit.cost });
 	}
 

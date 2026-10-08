@@ -501,8 +501,17 @@ async function roundTalk(env: Env, s: Season, arena: string, state: ArenaState, 
 				{ who: lead, model: leadModel(t.lead), role: `the lead of ${lead.team_name}`, memory: null as string | null | undefined, player: undefined as Player | undefined },
 				...(await Promise.all(players.map(async (p) => ({ who: p, model: p.model, role: `the ${p.seat} on ${lead.team_name}`, memory: await playerMemory(env, p), player: p })))),
 			];
+			// What each speaker really did, so nobody claims work that wasn't theirs (round 1 of the first cast
+			// season: a writer with no tools yet confessed to writing the characters)
+			const turns = me ? (await ledger(env, me.board)).filter((r) => r.kind === "turn" && r.result === "acted").reverse().map((r) => r.detail.slice(0, 200)) : [];
+			const didOf = (sp: (typeof speakers)[number]) => {
+				const said = context.crew_room.filter((l) => l.includes(`**${sp.who.name}**:`) || l.includes(`**${sp.who.name}** →`));
+				if (!sp.player) return { your_turns: turns, you_said: said };
+				if (sp.player.seat === "cinematographer") return { you: "wrote the image prompt for every take, from the director's cells and your lead's notes", you_said: said };
+				return { you: `nothing on this film yet: the ${sp.player.seat}'s tools arrive later in the season, so you only had what you said in the crew room`, you_said: said };
+			};
 			const said = await Promise.all(
-				speakers.map((sp) => confess(env, sp.who, sp.model, sp.role, sp.memory, context, Boolean(sp.player)).catch(() => undefined)),
+				speakers.map((sp) => confess(env, sp.who, sp.model, sp.role, sp.memory, { ...context, what_you_did: didOf(sp) }, Boolean(sp.player)).catch(() => undefined)),
 			);
 			const lines = speakers.flatMap((sp, i) => (said[i]?.confessional ? [talkLine(new Date(), sp.who.name, said[i]!.confessional)] : []));
 			count += lines.length;
