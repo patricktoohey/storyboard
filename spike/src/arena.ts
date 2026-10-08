@@ -416,11 +416,16 @@ export async function closeArena(env: Env, arena: string) {
 		const [head] = await handle.log({ ref: "main", limit: 1 });
 		await recordSubmission(env, arena, t.team, t.board, head.hash, null, "not submitted by the deadline");
 	}
-	await onMain(await repoRemote(env, arena), (tree) =>
-		tree.commit({ name: "arena" }, `Close the arena${allIn ? " (every team submitted)" : ""}: final round`, {
+	// Closing is checked again inside the commit: two callers at once (the last submission and the deadline
+	// sweep) both got past the check above in the format dry run, and the round was judged and stepped twice
+	const closedHere = await onMain(await repoRemote(env, arena), async (tree) => {
+		if (await tree.exists("closed.json")) return false;
+		await tree.commit({ name: "arena" }, `Close the arena${allIn ? " (every team submitted)" : ""}: final round`, {
 			"closed.json": json({ at: new Date().toISOString(), early: allIn && Date.now() < Date.parse(rules.deadline) }),
-		}),
-	);
+		});
+		return true;
+	});
+	if (!closedHere) return { closed: true, already: true };
 	// The final round: absolute scores per team, then the comparison. In a season, the group's follow-up
 	// records the round and starts the retrospectives (ledger.ts).
 	const group = {

@@ -22,6 +22,10 @@ Proposed brief (what every team's lead and players read):
 > those teams, and this teaser is your entry: a film about making this film. What happens to you this
 > season is your material. It should feel like a real season preview: build anticipation, show what's new,
 > end on the title card **SEASON 2**. Sound matters.
+> Shoot it like a reality competition show, not science fiction: real places (a cramped production office,
+> an edit suite late at night, a confessional chair against a plain wall, the corridor outside the judges'
+> room), every agent played by an ordinary person in everyday clothes, handheld eye-level camera, window
+> and practical light, confessionals to camera. No robots, holograms, glowing interfaces or neon.
 
 ## What changes from Season 1
 

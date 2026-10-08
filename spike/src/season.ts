@@ -40,6 +40,7 @@ import {
 	type SeasonEvent,
 	TWISTS,
 	applySteal,
+	moneyForTime,
 	claimsOf,
 	eliminated,
 	parseEntrantDraft,
@@ -161,12 +162,18 @@ async function updateSeason(env: Env, season: string, message: string, change: (
  */
 async function createTeamRepo(env: Env, season: string, id: string, { team, showrunner, lead }: TeamSpec, from?: string): Promise<SeasonTeam> {
 	const repo = `team-${team}-${id}`;
-	const remote = await forkBoard(env, repo, `${team}, ${season}`, from);
+	// A retried step finds the repo its failed attempt already made, and finishes it
+	const remote = await forkBoard(env, repo, `${team}, ${season}`, from).catch(async (err) => {
+		if (!/already exists/i.test(String(err))) throw err;
+		return repoRemote(env, repo);
+	});
 	const tree = await WorkingTree.clone(remote, "main");
 	// Every team's showrunner skill is its own file, showrunner-<team>, which its retrospectives rewrite.
 	// Teams that start from a shared skill (to compare their lead models) get their own copy of it.
 	const own = `showrunner-${team}`;
-	const base = from && (await tree.exists(`skills/${own}/SKILL.md`)) ? own : (showrunner ?? own);
+	// A team with neither its own skill nor a named one (a new team, a wildcard) starts from the generic one
+	const hasOwn = await tree.exists(`skills/${own}/SKILL.md`);
+	const base = from && hasOwn ? own : (showrunner ?? (hasOwn ? own : "showrunner"));
 	const skill = await loadSkill(tree, base);
 	const copy = base === own ? {} : { [`skills/${own}/SKILL.md`]: (await tree.read(`skills/${base}/SKILL.md`)).replace(/^name: .*$/m, `name: ${own}`) };
 	const chained = from && (await tree.exists("lessons.md"));
@@ -599,6 +606,7 @@ async function runTwists(env: Env, s: Season, round: number, progress: (d: strin
 	const standing = standingOf(s);
 	const offers = twistOffers(standing);
 	const points = pointsOf(s);
+	const trade = moneyForTime(s.budget, s.minutes);
 	let cost = 0;
 	await progress(`offering twists to ${standing.length} leads`);
 	const answers = await Promise.all(
@@ -611,7 +619,7 @@ async function runTwists(env: Env, s: Season, round: number, progress: (d: strin
 				your_crew: crewOf(s, team).map(publicPlayer),
 				budget_usd: s.budget,
 				minutes: s.minutes,
-				offers: offers[team].map((id) => `${id}: ${TWISTS[id].text}`),
+				offers: offers[team].map((id) => `${id}: ${id === "money_for_time" ? trade.text : TWISTS[id].text}`),
 				...(below ? { team_below_you: { team: nameOf(s, below), crew: crewOf(s, below).map(publicPlayer) } } : {}),
 			};
 			const now = `the producer's offer
@@ -632,17 +640,16 @@ crew room, and brings theirs to you; that team has no say.`;
 	const twists: Record<string, { usd: number; minutes: number; text: string }> = {};
 	const events: Omit<SeasonEvent, "at" | "round">[] = [];
 	const at = new Date();
-	const talk: string[] = [talkLine(at, PRODUCER, `Before round ${round}, an offer for every team: ${TWISTS.money_for_time.text}; and, for all but the last, a swap with the team below.`)];
+	const talk: string[] = [talkLine(at, PRODUCER, `Before round ${round}, an offer for every team: ${trade.text}; and, for all but the last, a swap with the team below.`)];
 	const moved: { id: string; from: string; why: string }[] = [];
 	standing.forEach((team, i) => {
 		const a = answers[i];
 		const lead = leadOf(s, team);
 		if (a.say) talk.push(talkLine(at, lead.name, a.say));
 		if (a.money_for_time) {
-			const m = TWISTS.money_for_time;
-			twists[team] = { usd: m.usd, minutes: m.minutes, text: `you took the producer's offer: ${m.text}` };
-			events.push({ kind: "twist", team, text: `${lead.team_name} takes $${m.usd} for ${-m.minutes} minutes` });
-			talk.push(talkLine(at, PRODUCER, `${lead.team_name} takes the money: $${m.usd} more, ${-m.minutes} minutes less.`));
+			twists[team] = { usd: trade.usd, minutes: trade.minutes, text: `you took the producer's offer: ${trade.text}` };
+			events.push({ kind: "twist", team, text: `${lead.team_name} takes $${trade.usd.toFixed(2)} for ${-trade.minutes} minutes` });
+			talk.push(talkLine(at, PRODUCER, `${lead.team_name} takes the money: $${trade.usd.toFixed(2)} more, ${-trade.minutes} minutes less.`));
 		}
 		if (a.swap) {
 			const below = standing[i + 1];

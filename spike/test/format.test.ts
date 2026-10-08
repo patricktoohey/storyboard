@@ -8,6 +8,7 @@ import {
 	badFormat,
 	claimsOf,
 	eliminated,
+	moneyForTime,
 	moveLine,
 	parseEntrantDraft,
 	parseProtect,
@@ -140,4 +141,9 @@ test("a format is checked before a season starts", () => {
 	assert.match(badFormat({ entrant: { kind: "returning" } }, true, 3)!, /elimination/);
 	assert.match(badFormat({ twist_round: 5 }, true, 3)!, /twist_round/);
 	assert.equal(badFormat({ eliminate: 2, entrant: { kind: "wildcard", lead: "claude-sonnet-5.5" } }, true, 3), undefined);
+});
+
+test("the money-for-time trade is sized to the round", () => {
+	assert.deepEqual(moneyForTime(12, 60), { usd: 3, minutes: -10, text: "$3.00 more budget for 10 minutes less on the clock" });
+	assert.deepEqual(moneyForTime(3, 20), { usd: 0.75, minutes: -3, text: "$0.75 more budget for 3 minutes less on the clock" });
 });

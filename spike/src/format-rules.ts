@@ -108,10 +108,21 @@ export function rivalVersion(v: string, teams: { team: string; team_name?: strin
 
 // Taken with the clock, never from it: a twist is an offer, and refusing it is a choice too
 export const TWISTS = {
-	money_for_time: { usd: 3, minutes: -10, text: "$3 more budget for 10 minutes less on the clock" },
+	money_for_time: { text: "more budget for less time on the clock" },
 	swap: { text: "swap one of your players for the player in the same seat on the team just below you in the standings" },
 } as const;
 export type TwistId = keyof typeof TWISTS;
+
+/**
+ * The money-for-time trade, sized to the round: a quarter of the budget for a sixth of the clock ($3 for 10
+ * minutes in a 60-minute, $12 round). A fixed $3 for 10 minutes halved a 20-minute round, and every lead
+ * refused it.
+ */
+export function moneyForTime(budget: number, minutes: number) {
+	const usd = Math.round(budget * 25) / 100;
+	const less = Math.max(1, Math.round(minutes / 6));
+	return { usd, minutes: -less, text: `$${usd.toFixed(2)} more budget for ${less} minutes less on the clock` };
+}
 
 /** What each team is offered: every team the money; every team but the last, the swap. */
 export function twistOffers(standing: string[]): Record<string, TwistId[]> {
