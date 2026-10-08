@@ -460,3 +460,25 @@ Artifacts 5xx are retried on clone and push; Hailuo's 7003 is retried with a pla
 show Git moves in teal and fit any number of teams.
 
 Next: [Season 2](season-2.md), a teaser about the show itself, with sound.
+
+## The first cast season (dry run, 2026-10-08)
+
+`season-2026-10-08-8f344a`: two teams, Opus 5.5 and Nemotron 3 120B leading, two 15-minute rounds at $3,
+three cells, one undersold player, the last round blind. About $6 in all.
+
+- **Casting and the draft worked.** Sixteen players named themselves and wrote bios; the leads drafted in
+  a snake, each pick with a line to the room ("Odalys, you learned to write by listening to strangers
+  wait at the dryers. Our diner film is two strangers waiting. Come write what they don't say.").
+- **Hidden models didn't hide quality.** Every one of the six drafted players ran on a frontier model
+  (Opus, Sonnet, GPT-6.1); the free agents were mostly the smaller ones. Leads picked them from their
+  bios alone: a frontier model writes a better bio. The undersold player (GPT-6.1 as a modest sound
+  designer) still went fifth.
+- **The judges' remarks and confessionals are watchable.** Round 1's confessionals all agreed with the
+  judges, and a writer with no tools claimed the characters; grounded in what each speaker did and asked
+  for candor, round 2 had the writer turn on his own crew ("Jasper and Teodora spent every note on navy
+  versus olive and the exact green of the neon, nobody spent one on the beat where they find out"), the
+  Nemotron lead blame the judges, and the idle writer on the winning team say "nobody cries at a door".
+- **Fifteen minutes is too short for the rules.** With a cut and under two cut-windows left, a team must
+  submit, so both teams submitted right after their first cut and the crew room barely ran: two notes,
+  both agreed to, no `talk` or `post`. Season 2's rounds are 60 minutes.
+- Opus won both rounds (64%, 77%).

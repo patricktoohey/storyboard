@@ -61,7 +61,7 @@ export async function createCharacter(env: Env, model: LlmKey, role: string, opt
 
 You are joining as ${role}. Create the character you'll be for the whole season:
 - name: a first name, or first and last; not a real, famous person's name, and not the name of any AI model,
-  company or lab. Not one of these, already taken: ${opts.taken.length ? opts.taken.join(", ") : "(none yet)"}.
+  company or lab. Your first name must differ from all of these, already taken: ${opts.taken.length ? opts.taken.join(", ") : "(none yet)"}.
 - bio: two or three sentences in your own voice: where you come from, what you're good at, what you care
   about in a film. Believable, not a joke.
 - voice: how you sound, in a few words (pitch, pace, texture, accent if any), for casting a voice later.
@@ -76,8 +76,10 @@ Reply with ONLY a JSON object: {"name": string, "bio": string, "voice": string${
 		cost += out.cost;
 		const parsed = parsePersona(out.text, { teamName: opts.teamName });
 		if (!("error" in parsed)) {
-			if (opts.taken.some((t) => t.toLowerCase() === parsed.name.toLowerCase())) {
-				user = `"${parsed.name}" is taken. Create your character again, with another name.`;
+			// First names must differ too: the first cast had a Mara Bell and a Mara Bellamy
+			const first = (n: string) => n.toLowerCase().split(/\s+/)[0];
+			if (opts.taken.some((t) => first(t) === first(parsed.name))) {
+				user = `The first name "${parsed.name.split(/\s+/)[0]}" is taken. Create your character again, with another name.`;
 				continue;
 			}
 			return { persona: parsed, cost };
