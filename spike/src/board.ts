@@ -27,7 +27,7 @@ import {
 } from "./models";
 import { type Role, type SkillChoice, DEFAULT_SKILLS, ROLES, listSkills, loadSkill, skillTrailer } from "./skills";
 import { forkBoard, repoRemote } from "./template";
-import { animate, clipSeconds, frameUrl, motionPrompt } from "./video";
+import { animate, clipSeconds, frameJpeg, frameUrl, motionPrompt } from "./video";
 
 // ── Files on main ────────────────────────────────────────────────────────────────────────────────
 
@@ -482,7 +482,14 @@ export async function runVideoJob(env: Env, repo: string, cut: string, cellId: s
 	// Signed at the commit the frame was printed in, so the clip is of exactly that frame even if main moves
 	const image = await frameUrl(env, origin, repo, frameCommit, `cells/${cellId}/frame.webp`);
 	await progress(`animating ${seconds}s from take ${row.take} (${env.VIDEO_MODEL})`);
-	const clip = await animate(env, image, motionPrompt(cell), seconds, /static|locked|tripod/i.test(cell.camera));
+	const framePath = `cells/${cellId}/frame.webp`;
+	const clip = await animate(
+		env,
+		{ url: image, jpeg: () => frameJpeg(env, repo, frameCommit, framePath) },
+		motionPrompt(cell),
+		seconds,
+		/static|locked|tripod/i.test(cell.camera),
+	);
 
 	await tree.commit(
 		{ name: `animator-${cellId}` },

@@ -6,7 +6,7 @@
 import { ACTIONS, type Action, type BoardSummary, allowedActions, printPicks, weakCells } from "./arena-rules.ts";
 import { readRules, recordSubmission } from "./arena";
 import { addNote, boardState, onMain, startCut } from "./board";
-import { type Crew, DEFAULT_CREW, MENU, SLOTS, clipCost, crewCosts, fitToBudget, isCrew } from "./crew.ts";
+import { type Crew, DEFAULT_CREW, MENU, SLOTS, clipCost, crewCosts, draftOptions, fitToBudget, isCrew } from "./crew.ts";
 import { LimitError } from "./ledger.ts";
 import { ledger, submit } from "./coordinator";
 import { WorkingTree } from "./git";
@@ -124,7 +124,7 @@ export async function runTurnJob(env: Env, job: TurnJob, progress: Progress) {
 				for (const slot of SLOTS) {
 					await progress(`drafting the ${slot}`);
 					const options = Object.fromEntries(
-						Object.entries(MENU[slot]).map(([key, o]) => {
+						Object.entries(MENU[slot]).filter(([key]) => draftOptions(slot).includes(key)).map(([key, o]) => {
 							const film = fitToBudget({ ...DEFAULT_CREW, ...picks, [slot]: key } as Crew, planned, Infinity).film;
 							return [key, `${o.label} (a minimal ${rules.cells}-shot film with this choice: ~$${film.toFixed(2)})`];
 						}),

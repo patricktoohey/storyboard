@@ -23,6 +23,10 @@ export interface CriticOption {
 export interface VideoOption {
 	id: string;
 	label: string;
+	// Why the draft can't offer it right now (checked live with POST /debug/animate); absent = available
+	unavailable?: string;
+	// Some providers take the first frame as base64 bytes rather than a URL
+	imageAs: "url" | "base64";
 	// Seconds the provider will bill for a clip planned at `seconds`
 	billedSeconds: (seconds: number) => number;
 	usd: (billed: number) => number;
@@ -67,30 +71,39 @@ export const MENU = {
 			label: "Hailuo 2.3 Fast: cheapest; every clip is at least 6 s, 768p",
 			billedSeconds: snapUp([6, 10]),
 			usd: (billed) => (billed <= 6 ? 0.19 : 0.32),
+			imageAs: "url",
 		},
 		"veo-3.1-fast": {
 			id: "google/veo-3.1-fast",
 			label: "Veo 3.1 Fast: realistic motion; clips of 4, 6 or 8 s",
 			billedSeconds: snapUp([4, 6, 8]),
 			usd: (billed) => billed * 0.08,
+			// A URL fails (2002) and a data: URL is "Invalid base64"; raw base64 works
+			imageAs: "base64",
+			unavailable: "fails (2002) on frames with a prominent realistic person; works on landscapes (2026-10-07)",
 		},
 		"ltx-2.5-fast": {
 			id: "lightricks/ltx-2-5-fast",
 			label: "LTX-2.5 Fast: quick renders, short clips",
 			billedSeconds: snapUp([2, 3, 4, 5, 6, 8, 10]),
 			usd: (billed) => billed * 0.09,
+			imageAs: "url",
+			unavailable: "the provider rejects requests with \"Insufficient funds\" (Cloudflare's side; 2026-10-07)",
 		},
 		"wan-2.7-i2v": {
 			id: "alibaba/wan-2.7-i2v",
 			label: "Wan 2.7: dependable, exact clip lengths",
 			billedSeconds: (s) => Math.max(2, Math.min(15, Math.round(s))),
 			usd: (billed) => billed * 0.1,
+			imageAs: "url",
 		},
 		"seedance-2.0-fast": {
 			id: "bytedance/seedance-2.0-fast",
 			label: "Seedance 2.0 Fast: the most cinematic, keeps the wide 21:9 frame; clips at least 4 s",
 			billedSeconds: (s) => Math.max(4, Math.min(12, Math.round(s))),
 			usd: (billed) => billed * 0.12,
+			imageAs: "url",
+			unavailable: "refuses first frames that may show a real person (InputImageSensitiveContentDetected); our frames are photoreal",
 		},
 	} satisfies Record<string, VideoOption>,
 };
@@ -101,6 +114,13 @@ export type Crew = { [S in Slot]: keyof (typeof MENU)[S] & string };
 
 /** Today's pipeline: what every board used before the draft, and what non-arena boards still use. */
 export const DEFAULT_CREW: Crew = { llm: "llama-3.3-70b", renderer: "flux-2-klein-9b", critic: "clef", video: "wan-2.7-i2v" };
+
+/** Options the draft may offer for a slot: everything except video models that don't work right now. */
+export function draftOptions(slot: Slot): string[] {
+	return Object.entries(MENU[slot])
+		.filter(([, o]) => !(o as Partial<VideoOption>).unavailable)
+		.map(([key]) => key);
+}
 
 export const isCrew = (c: unknown): c is Crew =>
 	typeof c === "object" && c !== null && SLOTS.every((s) => (c as Record<string, string>)[s] in MENU[s]);
@@ -149,7 +169,7 @@ export function fitToBudget(crew: Crew, clipSeconds: number[], budget: number, s
 	const changes: string[] = [];
 	let current = { ...crew };
 	const cheaperOptions = (slot: Slot) => {
-		const order = Object.keys(MENU[slot]).sort((a, b) => cheapestFilm({ ...current, [slot]: a }, clipSeconds) - cheapestFilm({ ...current, [slot]: b }, clipSeconds));
+		const order = draftOptions(slot).sort((a, b) => cheapestFilm({ ...current, [slot]: a }, clipSeconds) - cheapestFilm({ ...current, [slot]: b }, clipSeconds));
 		return order.slice(0, order.indexOf(current[slot]));
 	};
 	while (cheapestFilm(current, clipSeconds) > budget * share) {
@@ -169,16 +189,24 @@ export function fitToBudget(crew: Crew, clipSeconds: number[], budget: number, s
 }
 
 /** The image-to-video request for a crew's video model: each provider names its inputs differently. */
-export function videoRequest(crew: Crew, imageUrl: string, prompt: string, seconds: number, opts: { seed: number; staticCamera: boolean }) {
+export function videoRequest(
+	crew: Crew,
+	image: { url: string; base64?: string },
+	prompt: string,
+	seconds: number,
+	opts: { seed: number; staticCamera: boolean },
+) {
 	const video: VideoOption = MENU.video[crew.video];
 	const billed = video.billedSeconds(seconds);
 	const base = { prompt };
+	if (video.imageAs === "base64" && !image.base64) throw new Error(`${crew.video} needs the frame as base64`);
+	const imageUrl = image.url;
 	const input: Record<string, unknown> = (() => {
 		switch (crew.video) {
 			case "hailuo-2.3-fast":
 				return { ...base, first_frame_image: imageUrl, duration: billed, resolution: "768P", prompt_optimizer: false, fast_pretreatment: false };
 			case "veo-3.1-fast":
-				return { ...base, image_input: imageUrl, duration: `${billed}s`, aspect_ratio: "16:9", resolution: "720p", generate_audio: false };
+				return { ...base, image_input: image.base64, duration: `${billed}s`, aspect_ratio: "16:9", resolution: "720p", generate_audio: false };
 			case "ltx-2.5-fast":
 				return { ...base, image_uri: imageUrl, duration: billed, resolution: "1280x720", fps: 24, generate_audio: false };
 			case "seedance-2.0-fast":

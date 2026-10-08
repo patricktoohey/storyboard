@@ -39,7 +39,7 @@ import type { Job } from "./jobs";
 import { isRole, listSkills } from "./skills";
 import { TEMPLATE, ensureTemplate, promoteSkill, repoRemote } from "./template";
 import ui from "./ui.html?raw";
-import { animate, frameUrl, verifyFrame } from "./video";
+import { animate, frameJpeg, frameUrl, verifyFrame } from "./video";
 import { type Crew, DEFAULT_CREW, isCrew } from "./crew.ts";
 import { withCrew } from "./crew-env";
 
@@ -107,7 +107,8 @@ export default {
 				using handle = await env.ARTIFACTS.get(board);
 				const [head] = await handle.log({ ref: "main", limit: 1 });
 				const image = await frameUrl(env, url.origin, board, head.hash, `cells/${cell}/frame.webp`);
-				const clip = await animate(withCrew(env, crew), image, "Subtle natural motion; the camera stays still.", seconds, true);
+				const frame = { url: image, jpeg: () => frameJpeg(env, board, head.hash, `cells/${cell}/frame.webp`) };
+				const clip = await animate(withCrew(env, crew), frame, "Subtle natural motion; the camera stays still.", seconds, true);
 				return Response.json({ ...clip.meta, input: undefined });
 			}
 			if (method === "POST" && root === "sweep") {

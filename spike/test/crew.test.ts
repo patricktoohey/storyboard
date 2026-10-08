@@ -2,11 +2,11 @@
 // crew to a budget, and the per-provider video requests.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { DEFAULT_CREW, MENU, SLOTS, type Crew, cheapestFilm, clipCost, crewCosts, fitToBudget, isCrew, videoRequest } from "../src/crew.ts";
+import { DEFAULT_CREW, MENU, SLOTS, type Crew, cheapestFilm, clipCost, crewCosts, draftOptions, fitToBudget, isCrew, videoRequest } from "../src/crew.ts";
 import { estimate } from "../src/costs.ts";
 
 const budget: Crew = { llm: "gemma-4", renderer: "flux-2-klein-4b", critic: "clef-flash", video: "hailuo-2.3-fast" };
-const premium: Crew = { llm: "kimi-k2.6", renderer: "flux-2-dev", critic: "clef", video: "seedance-2.0-fast" };
+const premium: Crew = { llm: "kimi-k2.6", renderer: "flux-2-dev", critic: "clef", video: "veo-3.1-fast" };
 const clips = [5, 5, 5, 5];
 
 test("today's pipeline costs about $0.024 a take, a little under the old flat $0.03", () => {
@@ -28,9 +28,15 @@ test("clips are billed at the provider's lengths, not the plan's", () => {
 	assert.equal(estimate({ kind: "video", cell: "01", cut: "v1", origin: "o", seconds: 3 }, { ...DEFAULT_CREW, video: "hailuo-2.3-fast" }), 0.19);
 });
 
-test("a 4-cell film: ~$0.85 with the budget crew, ~$2.60 with the premium one", () => {
+test("a 4-cell film: ~$0.85 with the budget crew, ~$2.30 with the premium one", () => {
 	assert.ok(Math.abs(cheapestFilm(budget, clips) - 0.85) < 0.1, String(cheapestFilm(budget, clips)));
-	assert.ok(Math.abs(cheapestFilm(premium, clips) - 2.6) < 0.2, String(cheapestFilm(premium, clips)));
+	assert.ok(Math.abs(cheapestFilm(premium, clips) - 2.3) < 0.2, String(cheapestFilm(premium, clips)));
+});
+
+test("the draft only offers video models that work on photoreal people: LTX, Seedance and Veo are out", () => {
+	// Checked live: LTX's provider is out of funds; Seedance and Veo refuse frames that show realistic people
+	assert.deepEqual(draftOptions("video").sort(), ["hailuo-2.3-fast", "wan-2.7-i2v"]);
+	assert.equal(draftOptions("renderer").length, 3);
 });
 
 test("an affordable draft is kept as is", () => {
@@ -42,7 +48,7 @@ test("an affordable draft is kept as is", () => {
 test("an unaffordable draft is downgraded, biggest saving first, until its cheapest film fits", () => {
 	const fit = fitToBudget(premium, clips, 2);
 	assert.ok(fit.film <= 2 * 0.8, `film ${fit.film}`);
-	assert.match(fit.changes[0], /^video: seedance-2.0-fast → /);
+	assert.match(fit.changes[0], /^video: veo-3.1-fast → /);
 	assert.ok(isCrew(fit.crew));
 });
 
@@ -53,10 +59,11 @@ test("every option in the menu has a price and an id", () => {
 
 test("each video model gets its own request shape", () => {
 	const req = (video: Crew["video"], seconds = 5, staticCamera = false) =>
-		videoRequest({ ...DEFAULT_CREW, video }, "https://img", "move", seconds, { seed: 7, staticCamera });
+		videoRequest({ ...DEFAULT_CREW, video }, { url: "https://img", base64: "QUJD" }, "move", seconds, { seed: 7, staticCamera });
 	assert.deepEqual(req("wan-2.7-i2v").input, { prompt: "move", image: "https://img", duration: 5, resolution: "720P", seed: 7, watermark: false });
 	assert.equal(req("veo-3.1-fast", 3).input.duration, "4s");
-	assert.equal(req("veo-3.1-fast").input.image_input, "https://img");
+	// Veo takes raw base64: a URL fails and a data: URL is "Invalid base64"
+	assert.equal(req("veo-3.1-fast").input.image_input, "QUJD");
 	assert.equal(req("ltx-2.5-fast").input.image_uri, "https://img");
 	assert.equal(req("hailuo-2.3-fast").input.first_frame_image, "https://img");
 	assert.equal(req("hailuo-2.3-fast", 3).input.duration, 6);

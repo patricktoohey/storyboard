@@ -1,7 +1,7 @@
 // Image-to-video: each printed frame becomes the first frame of its shot's clip. The video models live in
 // Cloudflare's unified catalog (env.AI.run with a provider/model id) and take the image as an HTTPS URL, so
 // the Worker signs a short-lived URL for one frame (frameUrl/verifyFrame) that needs no access key.
-import { videoRequest } from "./crew.ts";
+import { MENU, videoRequest } from "./crew.ts";
 import { crewOf } from "./crew-env.ts";
 import type { Cell } from "./vocab.ts";
 
@@ -56,11 +56,19 @@ export function clipSeconds(cell: Pick<Cell, "duration_s">, cap: number) {
 }
 
 /** Runs the crew's image-to-video model (each provider has its own request shape) and downloads the clip. */
-export async function animate(env: Env, imageUrl: string, prompt: string, seconds: number, staticCamera: boolean) {
+export async function animate(
+	env: Env,
+	frame: { url: string; jpeg: () => Promise<Uint8Array> },
+	prompt: string,
+	seconds: number,
+	staticCamera: boolean,
+) {
 	const started = Date.now();
 	const seed = Math.floor(Math.random() * 2 ** 31);
 	const crew = crewOf(env);
-	const req = videoRequest(crew, imageUrl, prompt, seconds, { seed, staticCamera });
+	// Veo takes the frame as raw base64; the others fetch the signed URL themselves
+	const base64 = MENU.video[crew.video].imageAs === "base64" ? toBase64(await frame.jpeg()) : undefined;
+	const req = videoRequest(crew, { url: frame.url, base64 }, prompt, seconds, { seed, staticCamera });
 	if (crew.video === "wan-2.7-i2v") req.input.negative_prompt = NEGATIVE_PROMPT;
 	const out = (await env.AI.run(req.model as keyof AiModels, req.input as never)) as unknown as
 		| { video?: string; state?: string; result?: { video?: string } }
@@ -75,4 +83,19 @@ export async function animate(env: Env, imageUrl: string, prompt: string, second
 		mp4,
 		meta: { model: req.model, prompt, planned_seconds: seconds, seconds: req.billed, usd: req.usd, seed, input: { ...req.input, image: undefined, image_uri: undefined, image_input: undefined, first_frame_image: undefined }, bytes: mp4.byteLength, elapsed_ms: Date.now() - started },
 	};
+}
+
+function toBase64(bytes: Uint8Array) {
+	let binary = "";
+	for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+	return btoa(binary);
+}
+
+/** A printed frame as JPEG bytes, for providers that want the image inline. */
+export async function frameJpeg(env: Env, repo: string, ref: string, path: string) {
+	using handle = await env.ARTIFACTS.get(repo);
+	const blob = await handle.readFile({ ref, path });
+	if (!blob) throw new Error(`no frame at ${repo}@${ref.slice(0, 7)}/${path}`);
+	const jpeg = await env.IMAGES.input(blob.stream()).output({ format: "image/jpeg", quality: 92 });
+	return new Uint8Array(await new Response(jpeg.image()).arrayBuffer());
 }

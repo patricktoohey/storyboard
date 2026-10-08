@@ -252,18 +252,23 @@ board's crew applied to the Worker's environment), crew-aware `estimate()` and a
 showrunner's `draft` turn (first, before `plan`), with unit tests in `test/crew.test.ts`. Teams' crews show on
 the arena page.
 
-Adapter check (`POST /debug/animate`, one 3 s request per model on a Night Drive frame):
+Adapter check (`POST /debug/animate` and `cf ai run`, one short request per model on Silent Hive frames):
 
-| Model | Result |
-|---|---|
-| `minimax/hailuo-2.3-fast` | works: billed 6 s ($0.19), rendered in 60 s (Wan takes ~300 s) |
-| `lightricks/ltx-2-5-fast` | "Insufficient funds. Required: 27 cents" |
-| `google/veo-3.1-fast` | 2002 model execution failed (likely the same cause; to re-check) |
-| `bytedance/seedance-2.0-fast` | timed out (to re-check) |
+| Model | Result | In the draft? |
+|---|---|---|
+| `alibaba/wan-2.7-i2v` | works (~300 s per clip) | yes |
+| `minimax/hailuo-2.3-fast` | works on people and landscapes: 6 s billed ($0.19), rendered in 60 s | yes |
+| `google/veo-3.1-fast` | needs the frame as raw base64 (a URL fails with 2002, a `data:` URL is "Invalid base64"); then works on a landscape (4 s, $0.32, 53 s) but fails (2002) on a close-up of a person | no |
+| `bytedance/seedance-2.0-fast` | refuses the frame: "input image may contain real person" (InputImageSensitiveContentDetected) | no |
+| `lightricks/ltx-2-5-fast` | "Insufficient funds. Required: 27 cents" with $42.90 of credits: the provider's account, on Cloudflare's side | no |
 
-The third-party video models are billed from prepaid **AI Gateway credits** (unified billing), a balance
-separate from Workers AI. The first arena and the video tests drew it down; a crew arena needs it topped
-up. An arena's budgets should also never exceed the real balance: worth reading it before starting one.
+So for photoreal people the draft's video choice is Wan (exact lengths, $0.10/s, slow) versus Hailuo (6 s
+minimum, $0.19 a clip, ~5× faster). Unavailable options stay in the menu with their reason, so they can
+come back once they work.
+
+The third-party video models are billed from prepaid **AI Gateway credits** (unified billing), shared by
+every gateway on the account; the Worker's calls go through the auto-created `default` gateway (Workers AI
+on it is postpaid). A $20/day spend limit on `default` caps a runaway arena (it answers 429 when hit).
 
 ### What it lets the arena show
 
