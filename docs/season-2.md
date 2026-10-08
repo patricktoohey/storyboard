@@ -106,7 +106,7 @@ Gemma), with some models appearing more than once under different names. Stars a
 two players run on the strongest models, so no team can be all stars. A player's token cost is charged to
 its team as it's used.
 
-Draft order is a snake, starting from the bottom of Season 1 (Nemotron's team, as Llama's successor, picks
+Draft order is a snake, starting from the bottom of Season 1 (Gemini's team, new in Llama's seat, picks
 first; Opus's team picks last). Undrafted players are free agents.
 
 ## The rounds
