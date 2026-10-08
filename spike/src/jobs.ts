@@ -43,6 +43,8 @@ export type Job = JobBase &
 		| { kind: "cast"; season: string; origin: string }
 		// Cast season: one pick of the snake draft; the last pick starts round 1
 		| { kind: "draft_pick"; season: string; pick: number; origin: string }
+		// Cast season: one of the producer's moves between rounds (twists, elimination, protect, steal, replace)
+		| { kind: "season_event"; season: string; round: number; step: import("./season").SeasonStep; index?: number; origin: string }
 	);
 
 /** A job as submitted, before the coordinator assigns an id (and, for takes, a take number). */
@@ -61,7 +63,8 @@ export type JobRequest =
 	| { kind: "compare"; final: boolean }
 	| { kind: "season_step"; season: string; round: number; origin: string }
 	| { kind: "cast"; season: string; origin: string }
-	| { kind: "draft_pick"; season: string; pick: number; origin: string };
+	| { kind: "draft_pick"; season: string; pick: number; origin: string }
+	| { kind: "season_event"; season: string; round: number; step: import("./season").SeasonStep; index?: number; origin: string };
 
 /** A team board's limits, from its board.json; absent on boards outside an arena. */
 export interface Limits {

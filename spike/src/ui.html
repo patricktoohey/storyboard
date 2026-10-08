@@ -409,13 +409,22 @@ function renderSeason(s) {
       <table class="lb" style="margin-top:12px"><tr><th>#</th><th>team</th><th>points</th>${s.results.map((r) => `<th>round ${r.round}</th>`).join("")}<th>cinematographer</th></tr>
         ${s.standings.map((st, i) => {
           const t = s.teams.find((x) => x.team === st.team);
-          return `<tr><td>${i + 1}</td><td><b>${esc(st.team)}</b><br><span class="small muted">${esc(t.repo)}</span></td><td><b>${st.points}</b></td>
+          return `<tr${t.out ? ' class="muted"' : ""}><td>${i + 1}</td><td><b>${esc(st.team)}</b>${t.out ? ` <span class="pill bad">out after round ${t.out}</span>` : ""}${t.entrant ? ` <span class="pill">back for the finale</span>` : ""}<br><span class="small muted">${esc(t.repo)}</span></td><td><b>${st.points}</b></td>
             ${s.results.map((r) => { const row = r.ranking.find((x) => x.team === st.team); return `<td>${row?.disqualified ? `<span class="pill bad">no video</span>` : pct(row?.winRate)}</td>`; }).join("")}
             <td class="small">${esc(t.team_json.cinematographer || "")}</td></tr>`;
         }).join("") || `<tr><td colspan="4" class="muted">No round finished yet</td></tr>`}
       </table>
       <div class="row" style="margin-top:10px">${s.arenas.map((a) => `<button data-open="${esc(a.arena)}">Round ${a.round}${a.closed ? "" : " (live)"}: ${esc(a.brief.slice(0, 50))}</button>`).join("")}</div>
     </section>
+    ${s.backstory ? `<section class="panel" style="margin-top:16px"><h3 style="margin:0 0 8px">The story so far</h3><p class="small">${esc(s.backstory.show)}</p></section>` : ""}
+    ${s.events?.length || s.season_talk?.length ? `<section class="panel" style="margin-top:16px">
+      <h3 style="margin:0 0 8px">Between rounds</h3>
+      ${[...new Set(s.events.map((e) => e.round))].map((r) => `<p class="small"><b>Before round ${r}</b></p><ul class="small">${s.events.filter((e) => e.round === r).map((e) => `<li><span class="pill">${esc(e.kind)}</span> ${esc(e.text)}</li>`).join("")}</ul>`).join("")}
+      ${s.teams.filter((t) => t.entrant && !s.standings.some((st) => st.team === t.team)).map((t) => `<p class="small"><b>${esc(t.team)}</b> joins for the finale</p>`).join("")}
+      <details><summary class="small muted">what was said</summary>${talkHtml(s.season_talk)}</details>
+    </section>` : ""}
+    ${s.claims ? `<section class="panel" style="margin-top:16px"><h3 style="margin:0 0 8px">What they said, and why</h3>
+      <details><summary class="small muted">each team's public messages beside its private reasons</summary><div class="notes" style="max-height:none;white-space:pre-wrap">${esc(s.claims)}</div></details></section>` : ""}
     ${s.cast ? `<section class="panel" style="margin-top:16px">
       <h3 style="margin:0 0 8px">The cast${s.revealed ? " (revealed)" : ""}</h3>
       <div class="small">${s.cast.leads.map((l) => `<p><b>${esc(l.name)}</b>, lead of <b>${esc(l.team_name)}</b> (${esc(l.team)}): ${esc(l.bio)}</p>`).join("")}</div>

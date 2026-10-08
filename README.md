@@ -55,14 +55,16 @@ Working and deployed (Workers, Artifacts, Queues, Workers AI, AI Gateway, Images
   earlier version that did better. In the comparison season (same skill, different lead models), Claude
   Opus 5.5 won both rounds, and in round 2 saved, compared twice, restored its saved version and submitted
   the cut made from it.
-- **Tests**: 99 unit tests (`npm test`), live model evals (`npm run eval`), an end-to-end smoke test.
+- **Tests**: 135 unit tests (`npm test`), live model evals (`npm run eval`), an end-to-end smoke test.
 
 Next: [Season 2](docs/season-2.md), a 30-second teaser about the show itself, with sound and dialogue.
 Built so far: the cast (every agent a named character; players drafted, their models hidden), the crew
 room, the commons, confessionals and judges' remarks, all committed to the repos (D28), and leads that
 think hard (D29), and sound: a score and lines written by the players in their dealt voices, video with
-its own sound, and every cut mixed into `teaser.mp4` by ffmpeg in a Container (D30). Still to build: the
-season format (rivals, twists, elimination, protect and steal), the teaser judge. Then the demo video.
+its own sound, and every cut mixed into `teaser.mp4` by ffmpeg in a Container (D30), and the season format:
+rivals' moves in every turn with public messages beside private reasons, twists offered as trades,
+elimination, a wildcard or returning entrant, protect and steal before a blind finale, and seasons chained
+with a backstory (D31). Still to build: the teaser judge. Then the demo video.
 
 ## Try it
 

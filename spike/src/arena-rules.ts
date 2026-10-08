@@ -159,7 +159,10 @@ export function allowedActions(s: BoardSummary): Action[] {
 export interface Decision {
 	action: Action;
 	args: Record<string, unknown>;
+	// Private and true: the team's own log
 	reason: string;
+	// Public: what rivals read beside the move (a cast season's open rounds). May say anything
+	message?: string;
 }
 
 const str = (v: unknown, max = 400) => (typeof v === "string" && v.trim() ? v.trim().slice(0, max) : undefined);
@@ -169,6 +172,19 @@ const str = (v: unknown, max = 400) => (typeof v === "string" && v.trim() ? v.tr
  * (the turn waits): a model never gets to run a tool it wasn't offered, or on a cell that doesn't exist.
  */
 export function parseDecision(text: string, allowed: Action[], s: BoardSummary): Decision | { error: string } {
+	const parsed = decisionOf(text, allowed, s);
+	if ("error" in parsed) return parsed;
+	let message: string | undefined;
+	try {
+		const raw = JSON.parse(text.slice(text.indexOf("{"), text.lastIndexOf("}") + 1)) as { message?: unknown };
+		message = str(raw.message, 200);
+	} catch {
+		// decisionOf already parsed it
+	}
+	return message ? { ...parsed, message } : parsed;
+}
+
+function decisionOf(text: string, allowed: Action[], s: BoardSummary): Decision | { error: string } {
 	const start = text.indexOf("{");
 	const end = text.lastIndexOf("}");
 	let raw: { action?: unknown; args?: unknown; reason?: unknown };

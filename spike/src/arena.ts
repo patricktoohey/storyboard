@@ -19,7 +19,8 @@ export interface Rules {
 	video_required: true;
 	visibility: "open";
 	judges: { name: string; weight: number }[];
-	teams: { team: string; board: string; showrunner: string; cinematographer: string; source?: string; lead?: string; team_name?: string }[];
+	// A team's own deadline when a twist changed its clock
+	teams: { team: string; board: string; showrunner: string; cinematographer: string; source?: string; lead?: string; team_name?: string; deadline?: string }[];
 	created: string;
 	// A blind round: teams see neither the commons nor each other (a cast season's finale)
 	blind?: boolean;
@@ -43,6 +44,8 @@ export interface TeamSpec {
 	// A cast season's team: its characters and players (cast.ts), and the producer's bonus on its budget
 	cast?: import("./cast").TeamCast;
 	bonus?: number;
+	// A twist the lead took (format-rules.ts): money on its budget, minutes off its clock
+	twist?: { usd: number; minutes: number; text: string };
 }
 export const teamSpec = (t: string | TeamSpec): TeamSpec => (typeof t === "string" ? { team: t } : t);
 const JUDGES = [
@@ -91,12 +94,13 @@ export async function createArena(
 	// Read each team's showrunner skill from the arena's own copy of the skills
 	const arenaTree = await WorkingTree.clone(remote, "main");
 	const teams = await Promise.all(
-		(opts.teams ?? DEFAULT_TEAMS).map(teamSpec).map(async ({ team, showrunner = `showrunner-${team}`, lead, cast, bonus }) => {
+		(opts.teams ?? DEFAULT_TEAMS).map(teamSpec).map(async ({ team, showrunner = `showrunner-${team}`, lead, cast, bonus, twist }) => {
 			const source = opts.season?.teamRepos[team];
 			// A season team's showrunner skill lives in its own repo (it evolves there); others in the template
 			const skill = await loadSkill(source ? await WorkingTree.clone(await repoRemote(env, source), "main") : arenaTree, showrunner);
 			const cinematographer = opts.season?.cinematographers[team] ?? skill.metadata.cinematographer ?? "cinematographer";
-			return { team, board: `board-${team}-${id}`, showrunner, cinematographer, source, ...(lead ? { lead } : {}), ...(cast ? { team_name: cast.team_name } : {}), cast, bonus };
+			const own = twist?.minutes ? { deadline: new Date(Date.parse(deadline) + twist.minutes * 60_000).toISOString() } : {};
+			return { team, board: `board-${team}-${id}`, showrunner, cinematographer, source, ...(lead ? { lead } : {}), ...(cast ? { team_name: cast.team_name } : {}), ...own, cast, bonus, twist };
 		}),
 	);
 	for (const j of JUDGES) rubricOf((await loadSkill(arenaTree, j.name)).body);
@@ -110,7 +114,7 @@ export async function createArena(
 		visibility: "open",
 		judges: JUDGES,
 		// The rules are public: no casts (player models) and no bonuses in them
-		teams: teams.map(({ cast: _c, bonus: _b, ...t }) => t),
+		teams: teams.map(({ cast: _c, bonus: _b, twist: _t, ...t }) => t),
 		created: new Date().toISOString(),
 		...(opts.blind ? { blind: true } : {}),
 		...(opts.season ? { season: opts.season.season, round: opts.season.round, origin: opts.origin } : {}),
@@ -119,7 +123,7 @@ export async function createArena(
 		tree.commit({ name: "arena" }, `Arena: ${teams.length} teams, $${opts.budget} each, deadline ${deadline}`, {
 			"brief.md": `# Brief\n\n${opts.brief}\n`,
 			"rules.json": json(rules),
-			...Object.fromEntries(teams.map(({ cast: _c, bonus: _b, ...t }) => [`teams/${t.team}.json`, json(t)])),
+			...Object.fromEntries(teams.map(({ cast: _c, bonus: _b, twist: _t, ...t }) => [`teams/${t.team}.json`, json(t)])),
 		}),
 	);
 
@@ -132,9 +136,10 @@ export async function createArena(
 					"board.json": json({
 						arena,
 						team: t.team,
-						budget_usd: opts.budget + (t.bonus ?? 0),
+						budget_usd: opts.budget + (t.bonus ?? 0) + (t.twist?.usd ?? 0),
 						...(t.bonus ? { bonus_usd: t.bonus } : {}),
-						deadline,
+						...(t.twist ? { twist: t.twist.text } : {}),
+						deadline: t.deadline ?? deadline,
 						...(opts.blind ? { blind: true } : {}),
 						...(t.lead ? { lead: t.lead } : {}),
 						...(t.cast ? { cast: t.cast } : {}),
@@ -402,7 +407,7 @@ export async function closeArena(env: Env, arena: string) {
 		if (await readText(env, arena, `submissions/${t.team}.json`)) continue;
 		// A cut assembled before the deadline counts, even if the team never got the turn to submit it (the
 		// first season's round 2: safe's cut finished as the clock ran out). The cut branch's commit time says.
-		const cut = await latestCutBefore(env, t.board, Date.parse(rules.deadline));
+		const cut = await latestCutBefore(env, t.board, Date.parse(t.deadline ?? rules.deadline));
 		if (cut) {
 			await recordSubmission(env, arena, t.team, t.board, cut.commit, cut.name, "not submitted; its latest cut assembled before the deadline");
 			continue;

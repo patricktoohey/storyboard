@@ -37,6 +37,7 @@ import { addNote, boardState, chooseSkill, editSkill, listBoards, printTake, sta
 import { type TeamSpec, arenaState, closeArena, createArena, listArenas, teamSpec } from "./arena";
 import { arenaTimeline, saveReplay } from "./replay";
 import { createSeason, listSeasons, seasonState } from "./season";
+import { type Format, badFormat } from "./format-rules.ts";
 import { consume } from "./consumer";
 import { filmSeconds } from "./sound";
 import { ledger, submit, sweep } from "./coordinator";
@@ -106,8 +107,12 @@ export default {
 						teams?: (string | TeamSpec)[];
 						cast?: boolean | { undersold?: number };
 						blind_final?: boolean;
+						format?: Format;
+						previous?: string;
+						previous_title?: string;
+						backstory?: string;
 					}>(request);
-					const bad = badTeams(body.teams);
+					const bad = badTeams(body.teams) ?? (body.format ? badFormat(body.format, Boolean(body.cast), body.rounds ?? 3) : undefined);
 					if (bad) return Response.json({ error: bad }, { status: 400 });
 					const briefs = body.briefs?.length ? body.briefs : body.brief ? [body.brief] : [];
 					if (!briefs.length) return Response.json({ error: "brief or briefs is required" }, { status: 400 });
@@ -121,6 +126,9 @@ export default {
 						origin: url.origin,
 						...(body.cast ? { cast: { undersold: Math.min(Math.max((typeof body.cast === "object" ? body.cast.undersold : undefined) ?? 1, 0), 2) } } : {}),
 						...(body.blind_final ? { blind_final: true } : {}),
+						...(body.format ? { format: body.format } : {}),
+						...(body.previous ? { previous: body.previous, previous_title: body.previous_title } : {}),
+						...(body.backstory ? { backstory: body.backstory.slice(0, 2000) } : {}),
 					});
 					return Response.json(created, { status: 202 });
 				}

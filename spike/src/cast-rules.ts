@@ -34,6 +34,8 @@ export interface Player extends Persona {
 	repo: string;
 	// The team it signed with; absent for a free agent
 	team?: string;
+	// What it brings from a team it left mid-season (a swap or a steal): the last of that team's crew room
+	knows?: { team_name: string; lines: string[] };
 }
 
 export interface Lead extends Persona {

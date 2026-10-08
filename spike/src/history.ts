@@ -6,6 +6,7 @@ import { askPair, contactSheet, readRules } from "./arena";
 import { type JudgeScore, rubricOf, sampleCells } from "./arena-rules.ts";
 import { onMain } from "./board";
 import { parseCsv } from "./csv.ts";
+import { rivalVersion } from "./format-rules.ts";
 import { versionPaths } from "./versions.ts";
 import { WorkingTree } from "./git";
 import { loadSkill } from "./skills";
@@ -119,17 +120,34 @@ export async function restoreVersion(env: Env, board: string, version: string, a
  * The arena's judges compare two versions of one board side by side, both ways round, on their rubrics.
  * Returns how often version a wins, overall and per criterion, and records it in the board's comparisons.
  */
-export async function compareVersions(env: Env, board: string, arena: string, a: string, b: string, agent: string) {
+export async function compareVersions(
+	env: Env,
+	board: string,
+	arena: string,
+	a: string,
+	b: string,
+	agent: string,
+	// Rivals' boards, in an open round of a cast season: `rival:<team>/<version>` compares against theirs
+	rivals: { team: string; team_name?: string; board: string }[] = [],
+) {
 	const rules = await readRules(env, arena);
-	const [va, vb] = await Promise.all([resolveVersion(env, board, a), resolveVersion(env, board, b)]);
-	const sheetOf = async (commit: string) => {
-		const rows = parseCsv((await (await readAt(env, board, commit, "storyboard.csv"))?.text()) ?? "").filter((r) => r.take);
+	const sideOf = async (v: string) => {
+		const rival = rivalVersion(v, rivals);
+		if (/^rival:/i.test(v) && !rival) throw new Error(`no rival "${v}" to compare with${rivals.length ? ` (rivals: ${rivals.map((r) => r.team_name ?? r.team).join(", ")})` : ": rivals are hidden this round"}`);
+		const on = rival ? rivals.find((r) => r.team === rival.team)! : undefined;
+		const repo = on?.board ?? board;
+		const found = await resolveVersion(env, repo, rival?.version ?? v);
+		return { ...found, repo, label: on ? `${on.team_name ?? on.team}:${found.label}` : found.label };
+	};
+	const [va, vb] = await Promise.all([sideOf(a), sideOf(b)]);
+	const sheetOf = async ({ repo, commit }: { repo: string; commit: string }) => {
+		const rows = parseCsv((await (await readAt(env, repo, commit, "storyboard.csv"))?.text()) ?? "").filter((r) => r.take);
 		if (!rows.length) throw new Error(`version ${commit.slice(0, 7)} has nothing printed to compare`);
-		const sheet = await contactSheet(env, board, commit, sampleCells(rows, 4).map((r) => r.id));
+		const sheet = await contactSheet(env, repo, commit, sampleCells(rows, 4).map((r) => r.id));
 		if (!sheet) throw new Error(`version ${commit.slice(0, 7)} has no frames`);
 		return { sheet, shots: rows.map((r) => r.beat) };
 	};
-	const [sa, sb] = await Promise.all([sheetOf(va.commit), sheetOf(vb.commit)]);
+	const [sa, sb] = await Promise.all([sheetOf(va), sheetOf(vb)]);
 	const arenaTree = await WorkingTree.clone(await repoRemote(env, arena), "main");
 	const perCriterion: Record<string, number[]> = {};
 	for (const { name } of rules.judges) {

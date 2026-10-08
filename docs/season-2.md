@@ -253,8 +253,9 @@ it.
    the menu.
 3. **The mixer** (built, D30): a Container with ffmpeg, a `mix` job after `assemble`, `teaser.mp4` on the cut branch,
    the UI and replays playing it.
-4. **The season format**: the draft, rivals in the turn view (with public messages and private reasons), twists as offers, elimination, the blind
-   finale's protect and steal, the wildcard, chained seasons.
+4. **The season format** (built, D31): rivals in the turn view (with public messages and private reasons), twists as
+   offers, elimination, the blind finale's protect and steal, a wildcard or returning entrant, chained
+   seasons with a backstory. Not built: the twist "use one shot from a rival's board".
 5. **Thinking levels and Nemotron** (built, D29): live checks through the binding; longer timeouts for Kimi.
 6. **The teaser judge** (after a live test of video input), rubric skill `judge-teaser`.
 7. **A dry run** (2 teams, 1 round, small budget), then the real season.
@@ -277,5 +278,6 @@ Roughly four to five days, mostly 1, 3 and 4. Ghost runs come after the season.
 ## Still open
 
 1. **Wildcard or misfits**: two eliminations and a misfits team (three-team finale), led by a newcomer or
-   a returning eliminated lead; or five teams from the start.
+   a returning eliminated lead; or five teams from the start. Both are built as options (`format.entrant`,
+   `format.eliminate`), so this is a setting to choose.
 2. **The wildcard's model**, if there is one: Sonnet 5.5, or whatever is newest when the finale runs.

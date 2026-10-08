@@ -5,14 +5,15 @@
 // branch, restore an earlier one, compare two side by side, print any earlier take, submit any cut. It acts
 // through the same functions the UI uses, then queues its next turn with a delay. Turns never overlap.
 import { ACTIONS, type Action, type BoardSummary, COMPARE_USD, type Decision, allowedActions, parseDecision } from "./arena-rules.ts";
-import { closeArena, readRules, recordSubmission } from "./arena";
+import { type Rules, closeArena, readRules, recordSubmission } from "./arena";
 import { addNote, boardState, onMain, startCut } from "./board";
 import { type Crew, DEFAULT_CREW, MENU, SLOTS, type Slot, type VideoOption, clipCost, crewCosts, crewFrom, draftOptions, fitToBudget } from "./crew.ts";
 import { withCrew } from "./crew-env";
 import { LimitError } from "./ledger.ts";
 import { ledger, submit } from "./coordinator";
 import { WorkingTree } from "./git";
-import { boardHistory, compareVersions, restoreVersion, saveVersion } from "./history";
+import { SAVED, boardHistory, compareVersions, restoreVersion, saveVersion } from "./history";
+import { MOVES, moveLine, publicMove } from "./format-rules.ts";
 import { COMMONS, CREW_ROOM, type TeamCast, appendTalk, noteReply, personaSystem, readTalk, talkReply } from "./cast";
 import { type Player, talkLine } from "./cast-rules.ts";
 import type { Job, JobRequest } from "./jobs";
@@ -63,12 +64,22 @@ given. Use the crew room (talk) when it helps the film: ask for ideas, argue a c
 disagreement. ${blind ? "This round is blind: the commons is closed and you can't see the other teams." : "The commons (post) is where every team talks to every other."} Everything said is recorded, and any team
 may use it in its film.`;
 
-const contract = (allowed: Action[]) => `## Your tools this turn
+const contract = (allowed: Action[], open = false) => `## Your tools this turn
 ${allowed.map((a) => `- ${a}: ${ACTIONS[a]}`).join("\n")}
 
 ## Output contract
-Reply with ONLY a JSON object: {"action": one of ${allowed.map((a) => `"${a}"`).join(", ")}, "args": {...}, "reason": string}
-"reason" is one sentence on why, for your team's log.`;
+Reply with ONLY a JSON object: {"action": one of ${allowed.map((a) => `"${a}"`).join(", ")}, "args": {...}, "reason": string${open ? ', "message"?: string' : ""}}
+"reason" is one sentence on why, for your team's log.${open ? ` Your rivals never see it.
+"message" (optional) is what your rivals read beside this move.` : ""}`;
+
+const RIVALS = `## Your rivals
+This round is open: every turn you see what each rival team has done (its moves, with the message it
+chose to attach), its saved versions and cuts, and how the judges rate it so far. They see the same of
+you: the tool you used and its plain arguments (cells, cuts, versions, the names you save under), and
+your message if you write one. Your notes, directions and reasons stay with your team. A message is said
+in public and may say anything; your reason is your team's own record and must be true. What a board
+holds can't lie, so a claim can be checked: compare accepts a rival's version as "rival:<team>/<version>"
+(their main, a saved name or a commit), putting your board beside theirs before the judges.`;
 
 /** USD for a call with the crew's lead model, from the tokens it really used. */
 const leadCost = (crew: Crew, usage: { input: number; output: number }) => {
@@ -248,7 +259,9 @@ export async function runTurnJob(env: Env, job: TurnJob, progress: Progress) {
 			...(cfg.bonus_usd ? { producer_bonus_usd: cfg.bonus_usd } : {}),
 			...(cast
 				? {
-						your_crew: cast.players.map((p) => ({ name: p.name, seat: p.seat, bio: p.bio })),
+						your_crew: cast.players.map((p) => ({ name: p.name, seat: p.seat, bio: p.bio, ...(p.knows ? { [`overheard_on_${p.knows.team_name}`]: p.knows.lines } : {}) })),
+						...(cfg.twist ? { your_twist: cfg.twist } : {}),
+						...(blind ? {} : { rivals: await rivalsView(env, job.arena, rules, job.team) }),
 						crew_room: await readTalk(env, board, CREW_ROOM, 16),
 						held_notes: Object.fromEntries(Object.entries(held).map(([cell, h]) => [cell, { your_note: h.note, [`${h.by}_said`]: h.reply, ...(h.alternative ? { their_suggestion: h.alternative } : {}) }])),
 						commons: blind ? "closed: this round is blind" : await readTalk(env, job.arena, COMMONS, 12),
@@ -282,7 +295,7 @@ export async function runTurnJob(env: Env, job: TurnJob, progress: Progress) {
 			history,
 		};
 		const system = cast
-			? `${personaSystem(cast.lead, `the lead (showrunner) of ${cast.team_name}`)}\n\n${skill.body}\n\n${HOW_IT_WORKS}\n\n${crewWorks(cast, blind)}\n\n${contract(allowed)}`
+			? `${personaSystem(cast.lead, `the lead (showrunner) of ${cast.team_name}`, undefined, cast.story)}\n\n${skill.body}\n\n${HOW_IT_WORKS}\n\n${crewWorks(cast, blind)}${blind ? "" : `\n\n${RIVALS}`}\n\n${contract(allowed, !blind)}`
 			: `${skill.body}\n\n${HOW_IT_WORKS}\n\n${contract(allowed)}`;
 		const leadEnv = withCrew(env, crew);
 		await progress(`${crew.lead} deciding among ${allowed.join(", ")}`);
@@ -436,7 +449,7 @@ export async function runTurnJob(env: Env, job: TurnJob, progress: Progress) {
 			}
 			case "compare": {
 				await progress(`judges comparing ${args.a} with ${args.b}`);
-				const c = await compareVersions(env, board, job.arena, args.a as string, args.b as string, agent);
+				const c = await compareVersions(env, board, job.arena, args.a as string, args.b as string, agent, cast && !blind ? rivalBoards(rules, job.team) : []);
 				cost += COMPARE_USD;
 				detail += `: ${c.a} wins ${(c.a_wins * 100).toFixed(0)}% against ${c.b}`;
 				break;
@@ -449,6 +462,7 @@ export async function runTurnJob(env: Env, job: TurnJob, progress: Progress) {
 				const [head] = await handle.log({ ref: cutBranch, limit: 1 });
 				await recordSubmission(env, job.arena, job.team, board, head.hash, args.cut as string, `submitted on turn ${acted + 1}`);
 				detail += `: ${cutBranch}@${head.hash.slice(0, 7)}`;
+				if (cast) await recordMove(env, board, cast, acted + 1, decision);
 				if (decision.reason) detail += ` — ${decision.reason}`;
 				// The last team in closes the arena early; otherwise this is a no-op until the deadline
 				await closeArena(env, job.arena).catch((e) => console.error("early close", e));
@@ -464,8 +478,47 @@ export async function runTurnJob(env: Env, job: TurnJob, progress: Progress) {
 		detail += ` refused: ${String(err instanceof Error ? err.message : err).slice(0, 200)}`;
 		result = "waited";
 	}
+	if (cast && result === "acted") await recordMove(env, board, cast, acted + 1, decision).catch((err) => console.error("move", err));
+	if (decision.message && !blind) detail += ` [said publicly: "${decision.message}"]`;
 	if (decision.reason) detail += ` — ${decision.reason}`;
 	return next(env, job, { detail, result, cost });
+}
+
+/** A cast team's move, in public: the board's moves log, one commit whose message is the move itself. */
+async function recordMove(env: Env, board: string, cast: TeamCast, turn: number, decision: Decision) {
+	const line = moveLine(new Date(), turn, publicMove(decision.action, decision.args), decision.message);
+	await onMain(await repoRemote(env, board), async (tree) => {
+		const current = await tree.read(MOVES).catch(() => `# Moves: ${cast.team_name}\n\n`);
+		await tree.commit({ name: cast.lead.name }, line.replace(/^- \S+ /, ""), { [MOVES]: `${current.trimEnd()}\n${line}\n` });
+	});
+}
+
+const rivalBoards = (rules: Rules, team: string) => rules.teams.filter((t) => t.team !== team).map((t) => ({ team: t.team, team_name: t.team_name, board: t.board }));
+
+/** Each rival as a team sees it in an open round: its moves and messages, saved versions, cuts and rating. */
+async function rivalsView(env: Env, arena: string, rules: Rules, team: string) {
+	const comparative = JSON.parse((await readText(env, arena, "scores/comparative.json")) ?? "null") as { winRates?: { overall?: Record<string, number> } } | null;
+	return Promise.all(
+		rivalBoards(rules, team).map(async (r) => {
+			const remote = await repoRemote(env, r.board);
+			const [moves, cfg, saved, cuts] = await Promise.all([
+				readTalk(env, r.board, MOVES, 8),
+				readText(env, r.board, "board.json").then((t) => JSON.parse(t ?? "{}")),
+				WorkingTree.listBranches(remote, SAVED).catch(() => [] as string[]),
+				WorkingTree.listBranches(remote, "cut/").catch(() => [] as string[]),
+			]);
+			const rate = comparative?.winRates?.overall?.[r.team];
+			return {
+				team: r.team_name ?? r.team,
+				compare_as: `rival:${r.team}/main`,
+				lead: cfg.cast?.lead?.name,
+				moves: moves.length ? moves : "nothing yet",
+				saved: saved.map((b) => b.slice(SAVED.length)),
+				cuts: cuts.filter((b) => /^cut\/v\d+$/.test(b)).map((b) => b.slice(4)),
+				judges_win_rate_so_far: rate === undefined ? null : Number(rate.toFixed(2)),
+			};
+		}),
+	);
 }
 
 /** Appends to a team's crew room, and replaces its held notes when given, in one commit on the board. */

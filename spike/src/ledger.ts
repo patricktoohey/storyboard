@@ -37,7 +37,7 @@ export class LimitError extends Error {
 
 // After the deadline only judging continues (the arena's own jobs, which have no limits anyway)
 // and a cut finishing: its mix follows its assembly, whenever that lands
-const AFTER_DEADLINE: JobRequest["kind"][] = ["judge", "compare", "season_step", "cast", "draft_pick", "mix"];
+const AFTER_DEADLINE: JobRequest["kind"][] = ["judge", "compare", "season_step", "cast", "draft_pick", "season_event", "mix"];
 
 /**
  * Appends jobs for `requests`, numbering takes after the highest take of that cell in the ledger or in

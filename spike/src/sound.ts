@@ -104,7 +104,7 @@ export async function filmSeconds(env: Env, repo: string) {
  */
 async function crewAnswer(env: Env, player: Player | undefined, cast: TeamCast | undefined, task: string, input: unknown, maxTokens = 3000) {
 	const system = player && cast
-		? `${personaSystem(player, `the ${player.seat} on ${cast.team_name}: you ${SEAT_JOB[player.seat]}. Your lead is ${cast.lead.name}`, await playerMemory(env, player))}\n\n${task}`
+		? `${personaSystem(player, `the ${player.seat} on ${cast.team_name}: you ${SEAT_JOB[player.seat]}. Your lead is ${cast.lead.name}`, await playerMemory(env, player), cast.story)}\n\n${task}`
 		: `You are the sound department of a short-film crew.\n\n${task}`;
 	const call = async (user: string) => (player ? speak(env, player.model, system, user, maxTokens) : ask(env, env.DIRECTOR_MODEL, system, user, maxTokens).then((r) => ({ text: r.text, cost: 0 })));
 	const user = JSON.stringify(input, null, 2);

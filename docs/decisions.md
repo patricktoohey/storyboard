@@ -269,6 +269,35 @@ with ambience in 94 s and joins the draft at $0.17 a clip. Grok Imagine Video re
 7003, including the catalog's text-to-video example, and stays off the draft. Wan 2.7 and Hailuo have no
 sound option.
 
+## D31: the season format is the producer's, and every move is a commit
+
+A cast season can carry a `format`, and every part of it is committed to the season repo
+(`season.json` events, `talk/season.md`, `talk/claims.md`) and to the players' own repos:
+
+- **Rivals in the open rounds.** Each turn's view lists every rival's moves, saved versions, cuts and
+  live win rate. A move is public as the tool and its plain arguments (cells, cuts, versions, saved
+  names), committed to the board's `talk/moves.md` with the move as the commit message; notes, directions
+  and talk stay with the team. A decision may add a public `message` beside its private `reason`. After
+  each open round the show puts them side by side in `talk/claims.md`. `compare` takes
+  `rival:<team>/<version>`, so a claim can be checked against what the rival's board holds.
+- **Twists are offers** (`twist_round`): every lead may take $3 for 10 minutes off its own clock, and every
+  team but the last may swap the player in one seat with the team just below it. Rounds now carry a
+  per-team deadline.
+- **Elimination and an entrant** (`eliminate`: 0-2; `entrant`: a `wildcard` lead model, or the best
+  eliminated lead `returning` with the castoffs). The eliminated players become free agents, and the
+  entrant signs one per seat. Both options stay configurable, so the open question (wildcard or misfits)
+  can be settled by running both.
+- **The finale's moves**, as one job each on the season ledger: every lead protects a player in secret;
+  steals go worst first (the entrant first of all). A steal on a protected player is blocked and lost; a
+  successful one releases the thief's own player in that seat; teams short a seat sign a free agent. The
+  protections are told when the finale starts.
+- **A player who changes teams brings what it heard**: the last of its old crew room goes into its own
+  memory and shows in its new lead's view.
+- **Chained seasons and a backstory.** `previous` forks each returning team's repo from the earlier
+  season (its evolved strategy and lessons), the draft starts from the bottom of that season (new teams
+  first), and `backstoryOf` turns its results into the story every character is told ("the reigning
+  champions of Season 1"), followed by the producer's own notes.
+
 ## Backlog: staging continuity and non-human characters
 
 Observed on the boards so far, not yet addressed:

@@ -22,6 +22,8 @@ export interface TeamCast {
 	team_name: string;
 	lead: Persona;
 	players: Player[];
+	// The backstory this team plays with (format-rules.ts storyFor): its own line, then the show's
+	story?: string;
 }
 
 async function readText(env: Env, repo: string, path: string, ref = "main") {
@@ -42,8 +44,8 @@ clock and are judged side by side. Everything you say is recorded, and other tea
 const IN_CHARACTER = `Stay in character. Never name the AI model, company or lab behind you; if asked, deflect in character.`;
 
 /** Who a character is, at the top of every call it makes. */
-export const personaSystem = (p: Persona, role: string, memory?: string | null) => `${SHOW}
-
+export const personaSystem = (p: Persona, role: string, memory?: string | null, story?: string) => `${SHOW}
+${story ? `\nThe story so far: ${story}\n` : ""}
 You are ${p.name}, ${role}.
 Your bio, in your own words: ${p.bio}
 ${memory ? `\nWhat you remember from earlier rounds:\n${memory.slice(-1500)}\n` : ""}
@@ -137,7 +139,7 @@ const playerRole = (p: Player, cast: TeamCast) =>
  * (it's held, with a reply and perhaps a better note, until the lead notes that cell again).
  */
 export async function noteReply(env: Env, player: Player, cast: TeamCast, context: { cell: string; beat: string; prompt?: string; note: string; brief: string }) {
-	const system = `${personaSystem(player, playerRole(player, cast), await playerMemory(env, player))}
+	const system = `${personaSystem(player, playerRole(player, cast), await playerMemory(env, player), cast.story)}
 
 ## Now
 Your lead has given you a note on a cell. You'll shoot it unless you push back. Push back only when you
@@ -153,7 +155,7 @@ Reply with ONLY a JSON object: {"stance": "agree" | "push_back", "reply": string
 
 /** A player answers its lead in the crew room. */
 export async function talkReply(env: Env, player: Player, cast: TeamCast, context: { from: string; message: string; brief: string; minutes_left: number; crew_room: string[]; board: unknown }) {
-	const system = `${personaSystem(player, playerRole(player, cast), await playerMemory(env, player))}
+	const system = `${personaSystem(player, playerRole(player, cast), await playerMemory(env, player), cast.story)}
 
 ## Now
 ${context.from} has spoken to you in the crew room. Answer as you'd speak in the room: one to three
