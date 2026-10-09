@@ -9,7 +9,8 @@
 // create its character, then the leads draft their players one pick at a time (draft_pick jobs, a snake),
 // and only then does round 1 start. After each round the judges remark on every film and everyone records
 // a confessional before the retrospectives; when the season ends, the reveal.
-import { arenaState, createArena, DEFAULT_TEAMS, PANEL, readRules, type TeamSpec, teamSpec } from "./arena";
+import { arenaState, createArena, DEFAULT_TEAMS, PANEL, readRules, runCompareJob, type TeamSpec, teamSpec } from "./arena";
+import { outOfCredits } from "./llm";
 import { type Comparison, type RoundResult, replaceStrategy, seasonStandings, strategyOf } from "./arena-rules.ts";
 import { onMain } from "./board";
 import {
@@ -509,7 +510,8 @@ async function startRound(env: Env, s: Season, round: number) {
 
 const SEASON_TALK = "talk/season.md";
 const PRODUCER = "Producer";
-export type SeasonStep = "twists" | "open" | "protect" | "steal" | "replace";
+// "judge" isn't a format step: it re-runs a round's final judging that failed, then records the round (D39)
+export type SeasonStep = "twists" | "open" | "protect" | "steal" | "replace" | "judge";
 
 /** The teams still playing, best first by season points. */
 function standingOf(s: Season) {
@@ -543,6 +545,7 @@ async function beginRound(env: Env, s: Season, round: number) {
 /** Job: one of the producer's moves between rounds; each queues the next, and the last starts the round. */
 export async function runSeasonEvent(env: Env, season: string, round: number, step: SeasonStep, index: number, progress: (d: string) => Promise<unknown>) {
 	const s = await readSeason(env, season);
+	if (step === "judge") return rejudge(env, s, round, progress);
 	if (!s.cast) throw new Error(`${season} has no cast`);
 	if (s.arenas.some((a) => a.round === round)) return { detail: `round ${round} already started` };
 	// A retried job never repeats a move already made
@@ -561,6 +564,16 @@ export async function runSeasonEvent(env: Env, season: string, round: number, st
 		case "replace":
 			return runReplace(env, s, round, progress);
 	}
+}
+
+/** A round's final judging again (it failed: out of credits), then the season step that records the round. */
+async function rejudge(env: Env, s: Season, round: number, progress: (d: string) => Promise<unknown>) {
+	const arena = s.arenas.find((a) => a.round === round)?.arena;
+	if (!arena) throw new Error(`round ${round} hasn't started`);
+	if (s.results.some((r) => r.round === round)) return { detail: `round ${round} already has a result` };
+	const out = await runCompareJob(env, arena, true, progress);
+	await submit(env, arena, [{ kind: "season_step", season: s.season, round, origin: s.origin }]);
+	return { detail: `round ${round} judged again${out.compared ? "" : ` (${out.reason})`}; recording it` };
 }
 
 /** One call to a lead, in character, about a producer's move. */
@@ -979,7 +992,13 @@ const CLAIMS = "talk/claims.md";
  * and start the next round, or finish the season.
  */
 export async function runSeasonStep(env: Env, arena: string, season: string, round: number, progress: (d: string) => Promise<unknown>) {
+	// The final judging ran out of credits: the round waits for a top-up and the "judge" step, rather than
+	// going down as a tie (D39)
 	const state = await arenaState(env, arena);
+	const lastCompare = (await ledger(env, arena)).find((r) => r.kind === "compare");
+	if (!state.comparative?.final && lastCompare?.status === "failed" && outOfCredits(lastCompare.detail)) {
+		throw new Error(`round ${round}'s final judging ran out of AI Gateway credits; top up, then POST /seasons/${season}/events {"round": ${round}, "step": "judge"}`);
+	}
 	const result: RoundResult = {
 		round,
 		ranking: state.leaderboard.map((r) => ({ team: r.team, winRate: r.winRate ?? r.score / 4, ...(r.disqualified ? { disqualified: r.disqualified } : {}) })),

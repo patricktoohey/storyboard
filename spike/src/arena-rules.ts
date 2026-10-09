@@ -2,6 +2,7 @@
 // read, and how scores become a leaderboard. Pure, so it is unit-tested (test/arena-rules.test.ts).
 import { addressee } from "./cast-rules.ts";
 import { RECAP_SHOTS } from "./sound-rules.ts";
+import { outOfCredits } from "./llm.ts";
 
 // ── Showrunner actions ──────────────────────────────────────────────────────────────────────────────
 
@@ -515,4 +516,25 @@ export function strategyOf(skillText: string) {
 	if (start < 0) return "";
 	const next = skillText.indexOf("\n## ", start + 1);
 	return skillText.slice(start, next < 0 ? undefined : next).replace(/^## Strategy\s*/, "").trim();
+}
+
+// A turn that paused for want of AI Gateway credits (D39)
+export const PAUSED = "paused";
+
+type Row = { kind: string; status: string; result?: string; detail?: string; updated: string };
+
+/** Turns that count against the limit: a plan that failed gives its turn back (the finale lost all 60 to them). */
+export function turnsUsed(rows: Row[]) {
+	const acted = rows.filter((r) => r.kind === "turn" && r.result === "acted").length;
+	return acted - rows.filter((r) => r.kind === "board" && r.status === "failed").length;
+}
+
+/**
+ * The job that failed for want of AI Gateway credits since the team last paused for it, if any (the ledger is
+ * newest first). After a pause the team tries again; if that fails the same way, it pauses again.
+ */
+export function creditsFailure(rows: Row[]) {
+	const paused = rows.find((r) => r.kind === "turn" && (r.detail ?? "").startsWith(PAUSED));
+	const failed = rows.find((r) => r.kind !== "turn" && r.status === "failed" && outOfCredits(r.detail ?? "") && (!paused || r.updated > paused.updated));
+	return failed && `${failed.kind}${"cell" in failed && failed.cell ? ` cell ${failed.cell}` : ""} failed`;
 }

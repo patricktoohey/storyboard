@@ -66,6 +66,11 @@ export function llmUsage(out: unknown) {
 
 // Workers AI's per-minute request limit: wait out the minute on the same model, never fail over (D37)
 export const RATE_LIMITED = "3021";
+// The AI Gateway's prepaid credits ran out (402): nothing third-party answers until someone tops up, so
+// waiting a minute doesn't help and failing over doesn't either. Season 2's round 2 panel and its whole
+// finale were lost to it: every judge counted as even, and the leads spent their turns re-planning
+export const OUT_OF_CREDITS = "2021";
+export const outOfCredits = (err: unknown) => /\b2021\b|insufficient (ai gateway credits|balance)/i.test(String(err));
 // Jittered, so renders limited together don't all come back together
 export const retryDelay = (err: unknown, attempt: number, jitter = Math.random()) =>
 	String(err).includes(RATE_LIMITED) ? 20_000 * attempt + Math.round(jitter * 10_000) : 500 * 2 ** attempt;

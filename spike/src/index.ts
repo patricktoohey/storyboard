@@ -29,13 +29,16 @@
 //   POST /arenas/:id/compare {"final"?}         queue comparative judging (every pair of boards, both ways)
 //   POST /seasons, GET /seasons, GET /seasons/:id/state   seasons: rounds of arenas with retrospectives between
 //   POST /seasons/:id/events                   {"round", "step", "index"?}  re-queue a format step that failed
+//                                              ("judge": a round's final judging again, after running out of credits)
 //                                              ("cast": true or {"undersold": n}: characters, a draft, talk; "blind_final")
 //   POST /arenas/:id/close                     after the deadline: record submissions, queue the final round (cron does this too)
+//   GET  /credits                              the AI Gateway's credit balance (with AI_GATEWAY_TOKEN; POST /seasons checks it)
 //   POST /sweep                                mark jobs with no progress for 10 minutes failed (also runs every 5 minutes)
 //   POST /template[?reset=1]                   create the template / add newly bundled skills (reset: overwrite with bundled)
 // Every route except GET / requires `Authorization: Bearer $SPIKE_KEY`.
 import { addNote, boardState, chooseSkill, editSkill, listBoards, printTake, startBoard, startCut } from "./board";
-import { type TeamSpec, arenaState, closeArena, createArena, listArenas, teamSpec } from "./arena";
+import { DEFAULT_TEAMS, type TeamSpec, arenaState, closeArena, createArena, listArenas, teamSpec } from "./arena";
+import { creditBalance, seasonEstimate, tooLittle } from "./credits";
 import { arenaTimeline, saveReplay } from "./replay";
 import { createSeason, listSeasons, type SeasonStep, seasonState } from "./season";
 import { type Format, badFormat } from "./format-rules.ts";
@@ -112,11 +115,20 @@ export default {
 						previous?: string;
 						previous_title?: string;
 						backstory?: string;
+						ignore_credits?: boolean;
 					}>(request);
 					const bad = badTeams(body.teams) ?? (body.format ? badFormat(body.format, Boolean(body.cast), body.rounds ?? 3) : undefined);
 					if (bad) return Response.json({ error: bad }, { status: 400 });
 					const briefs = body.briefs?.length ? body.briefs : body.brief ? [body.brief] : [];
 					if (!briefs.length) return Response.json({ error: "brief or briefs is required" }, { status: 400 });
+					// Enough AI Gateway credits for the whole season, when the Worker can read the balance (D39)
+					const estimate = seasonEstimate(
+						Math.min(Math.max(body.rounds ?? 3, 2), 6),
+						(body.teams ?? DEFAULT_TEAMS).length,
+						Math.min(Math.max(body.budget ?? 5, 1), 50),
+					);
+					const short = body.ignore_credits ? undefined : tooLittle(await creditBalance(env), estimate);
+					if (short) return Response.json({ error: short, estimate }, { status: 402 });
 					const created = await createSeason(env, {
 						briefs,
 						rounds: Math.min(Math.max(body.rounds ?? 3, 2), 6),
@@ -137,7 +149,7 @@ export default {
 				if (method === "POST" && action === "events") {
 					// Format steps check what's already done, so re-queuing one that failed is safe
 					const body = await json<{ round?: number; step?: string; index?: number }>(request);
-					const steps: SeasonStep[] = ["twists", "open", "protect", "steal", "replace"];
+					const steps: SeasonStep[] = ["twists", "open", "protect", "steal", "replace", "judge"];
 					if (!body.round || !steps.includes(body.step as SeasonStep)) return Response.json({ error: `round and step (${steps.join(", ")}) are required` }, { status: 400 });
 					const step = body.step as SeasonStep;
 					const jobs = await submit(env, repoName, [{ kind: "season_event", season: repoName, round: body.round, step, ...(step === "steal" ? { index: body.index ?? 0 } : {}), origin: url.origin }]);
@@ -215,6 +227,10 @@ export default {
 				} catch (e) {
 					return Response.json({ model, ms: Date.now() - started, error: String(e) });
 				}
+			}
+			if (method === "GET" && root === "credits") {
+				const balance = await creditBalance(env).catch((e) => String(e));
+				return Response.json(balance === undefined ? { balance: null, reason: "set CF_ACCOUNT_ID and AI_GATEWAY_TOKEN (AI Gateway Read) in .env" } : { balance });
 			}
 			if (method === "POST" && root === "sweep") {
 				return Response.json({ swept: await sweep(env, (await listBoards(env)).map((b) => b.name)) });

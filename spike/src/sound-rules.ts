@@ -179,19 +179,25 @@ export const RECAP = "recap.json";
 export const RECAP_SHOTS = { min: 2, max: 4 };
 // Taken from the film's own length, not added to it: the brief is 30 seconds
 export const RECAP_SECONDS = 4;
+// The teaser's length (Season 2's brief). A plan can run longer (Gemini's 8 cells of 5 s made a 40 s teaser in
+// round 1); the mix trims every shot by the same share to fit (D39)
+export const FILM_SECONDS = 30;
 export interface Recap {
 	shots: { branch: string; file: string }[];
 }
 /**
- * The cut's clips with the recap ahead of them: its stills share RECAP_SECONDS, and every shot after is
- * trimmed by the same share to make room, so the film keeps its length (the last shot takes the rounding).
+ * The cut's clips fitted to `seconds`, with the recap ahead of them: its stills share RECAP_SECONDS, and every
+ * shot after is trimmed by the same share to make room, so the film keeps its length (the last shot takes the
+ * rounding). A film already short enough with no recap comes back as it is.
  */
-export function withRecap(clips: MixClip[], r: Recap | null): MixClip[] {
+export function withRecap(clips: MixClip[], r: Recap | null, seconds = Infinity): MixClip[] {
 	const shots = (r?.shots ?? []).slice(0, RECAP_SHOTS.max);
 	const film = clips.reduce((s, c) => s + c.seconds, 0);
-	if (!shots.length || film <= RECAP_SECONDS) return clips;
-	const each = Number((RECAP_SECONDS / shots.length).toFixed(2));
-	const room = film - each * shots.length;
+	const length = Math.min(film, seconds);
+	if (!shots.length && film <= seconds) return clips;
+	if (shots.length && length <= RECAP_SECONDS) return clips;
+	const each = shots.length ? Number((RECAP_SECONDS / shots.length).toFixed(2)) : 0;
+	const room = length - each * shots.length;
 	const trimmed = clips.map((c) => ({ ...c, seconds: Number(((c.seconds * room) / film).toFixed(2)) }));
 	trimmed[trimmed.length - 1].seconds = Number((room - trimmed.slice(0, -1).reduce((s, c) => s + c.seconds, 0)).toFixed(2));
 	return [...shots.map((x, i) => ({ cell: `r${i + 1}`, file: x.file, seconds: each, audio: false, still: true })), ...trimmed];

@@ -4,7 +4,7 @@
 // code checks the choice before running it (D22, D25). The tools include Git itself: save a version as a
 // branch, restore an earlier one, compare two side by side, print any earlier take, submit any cut. It acts
 // through the same functions the UI uses, then queues its next turn with a delay. Turns never overlap.
-import { ACTIONS, type Action, type BoardSummary, COMPARE_USD, type Decision, allowedActions, parseDecision } from "./arena-rules.ts";
+import { ACTIONS, type Action, type BoardSummary, COMPARE_USD, type Decision, PAUSED, allowedActions, creditsFailure, parseDecision, turnsUsed } from "./arena-rules.ts";
 import { type Rules, closeArena, readRules, recordSubmission } from "./arena";
 import { PROCESS_RUBRIC, PROCESS_SHARE } from "./process-rules.ts";
 import { addNote, boardState, onMain, startCut } from "./board";
@@ -21,6 +21,7 @@ import type { Job, JobRequest } from "./jobs";
 import { filmSeconds, soundState } from "./sound";
 import { LINES_ESTIMATE, RECAP, type Recap, scoreEstimate } from "./sound-rules.ts";
 import { ask } from "./models";
+import { outOfCredits } from "./llm";
 import { loadSkill } from "./skills";
 import { repoRemote } from "./template";
 import { clipSeconds } from "./video";
@@ -31,6 +32,8 @@ type Progress = (detail: string) => Promise<unknown>;
 const MAX_TURNS = 60;
 const AFTER_ACTING_S = 15;
 const AFTER_WAITING_S = 20;
+// Out of AI Gateway credits (D39): asked again after this, which is when a top-up is likeliest to have landed
+const CREDITS_PAUSE_S = 120;
 
 async function readText(env: Env, repo: string, path: string, ref = "main") {
 	using handle = await env.ARTIFACTS.get(repo);
@@ -163,9 +166,12 @@ export async function runTurnJob(env: Env, job: TurnJob, progress: Progress) {
 	const acted = rows.filter((r) => r.kind === "turn" && r.result === "acted").length;
 	const deadline = Date.parse(cfg.deadline);
 	const submitted = Boolean(await readText(env, job.arena, `submissions/${job.team}.json`));
-	if (submitted || Date.now() > deadline || acted >= MAX_TURNS) {
+	if (submitted || Date.now() > deadline || turnsUsed(rows) >= MAX_TURNS) {
 		return { detail: submitted ? "submitted; done" : Date.now() > deadline ? "deadline passed; done" : "turn limit reached", result: "stopped", cost: 0 };
 	}
+	// Out of credits (D39): the team pauses instead of re-planning into a gateway that can't answer
+	const broke = creditsFailure(rows);
+	if (broke) return next(env, job, { detail: `${PAUSED}: the AI Gateway is out of credits (${broke}); asking again in ${CREDITS_PAUSE_S / 60} minutes`, result: "waited", cost: 0 }, CREDITS_PAUSE_S);
 
 	// What the showrunner sees
 	// A failed plan doesn't count: the showrunner plans again rather than waiting forever
@@ -253,6 +259,7 @@ export async function runTurnJob(env: Env, job: TurnJob, progress: Progress) {
 	// One allowed tool is a mandate; so is a lone submit with one cut. Otherwise the lead model decides.
 	const choosing = allowed.length > 1 || (allowed[0] === "submit" && cuts.length > 1);
 	let decision: Decision = { action: allowed[0] ?? "wait", args: {}, reason: "" };
+	let noCredits = false;
 	if (choosing) {
 		const scores = (
 			await Promise.all(
@@ -335,7 +342,7 @@ export async function runTurnJob(env: Env, job: TurnJob, progress: Progress) {
 		const leadEnv = withCrew(env, crew);
 		await progress(`${crew.lead} deciding among ${allowed.join(", ")}`);
 		// A lead that times out (Kimi: 3046) loses the turn, not the team: it waits and is asked again
-		const timedOut = (err: unknown) => ({ text: `{"action": "wait", "reason": "the lead did not answer: ${String(err).slice(0, 80).replace(/"/g, "'")}"}`, usage: { input: 0, output: 0 } });
+		const timedOut = (err: unknown) => ((noCredits ||= outOfCredits(err)), { text: `{"action": "wait", "reason": "the lead did not answer: ${String(err).slice(0, 80).replace(/"/g, "'")}"}`, usage: { input: 0, output: 0 } });
 		let answer = await ask(leadEnv, leadEnv.DIRECTOR_MODEL, system, JSON.stringify(view, null, 2), 4096, true).catch(timedOut);
 		cost += leadCost(crew, answer.usage);
 		let parsed = parseDecision(answer.text, allowed, summary);
@@ -553,6 +560,7 @@ export async function runTurnJob(env: Env, job: TurnJob, progress: Progress) {
 	if (cast && result === "acted") await recordMove(env, board, cast, acted + 1, decision).catch((err) => console.error("move", err));
 	if (decision.message && !blind) detail += ` [said publicly: "${decision.message}"]`;
 	if (decision.reason) detail += ` — ${decision.reason}`;
+	if (noCredits) return next(env, job, { detail: `${PAUSED}: the AI Gateway is out of credits (the lead); asking again in ${CREDITS_PAUSE_S / 60} minutes`, result: "waited", cost }, CREDITS_PAUSE_S);
 	return next(env, job, { detail, result, cost });
 }
 
@@ -605,10 +613,10 @@ async function crewRoom(env: Env, board: string, cast: TeamCast, lines: string[]
 }
 
 /** Queues the next turn (refused once the deadline passes, which ends the chain) and returns the outcome. */
-async function next<T extends { result: "acted" | "waited" }>(env: Env, job: TurnJob, outcome: T) {
+async function next<T extends { result: "acted" | "waited" }>(env: Env, job: TurnJob, outcome: T, delaySeconds?: number) {
 	try {
 		await submit(env, job.repo, [{ kind: "turn", arena: job.arena, team: job.team, origin: job.origin }], undefined, {
-			delaySeconds: outcome.result === "acted" ? AFTER_ACTING_S : AFTER_WAITING_S,
+			delaySeconds: delaySeconds ?? (outcome.result === "acted" ? AFTER_ACTING_S : AFTER_WAITING_S),
 		});
 	} catch (err) {
 		if (!(err instanceof LimitError)) throw err;

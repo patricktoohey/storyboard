@@ -582,3 +582,32 @@ on film (62%), the round 55/48/47. Opus and GPT both drafted flux-2-dev and lost
 per-minute limit after five minutes of retries each; Gemini, on flux-2-klein-9b, lost none. A rendering
 model with a lighter one to hand now gives a rate limit a minute (20 and 40 s), then hands over (D36's
 fallback, which had been for failing models only); a model with none still waits five minutes.
+
+## D39: out of credits is a pause, not a result
+
+**Season 2, round 2 and the finale** (`season-2026-10-09-fe8616`): the AI Gateway's prepaid credits ran out
+during round 2. Live scoring had GPT 75%, Opus 59%, Gemini 16%; the final panel then got `2021:
+Insufficient AI Gateway credits` on every call, counted each as even, and recorded an exact three-way tie
+at 50% on film and process. Protect and steal fell back to their defaults (no lead could answer). In the
+finale, every lead's required plan failed the same way and was re-queued every 25 seconds: all 60 turns
+per team were gone in 26 minutes, and no team planned a shot. Third-party models (the frontier leads and
+judges, most video models) are all paid from those credits, so nothing degrades gracefully: everything
+stops at once.
+
+- **A team pauses**: a job that failed for want of credits, or a lead that couldn't answer for the same
+  reason, makes the turn wait two minutes and try again, as often as it takes. Pauses aren't turns, and a
+  plan that failed gives its turn back (`creditsFailure`, `turnsUsed`). The clock still runs: a long gap
+  still costs the team its round, but not its turns.
+- **The panel records nothing**: out of credits, the final judging fails instead of writing a tie, and the
+  season step won't record a round whose final judging failed that way. After a top-up,
+  `POST /seasons/:id/events {"round", "step": "judge"}` judges it again and records it. The panel's calls
+  also wait out rate limits now, as the leads' do (D37); they used to retry once, at once.
+- **A season checks the balance first**: `POST /seasons` refuses (402) when the balance is below what the
+  season can cost, about three quarters of every team's budget each round plus $2 for each panel (rounds 1
+  and 2 spent 75% and 53%); `"ignore_credits": true` starts it anyway. Reading the balance takes an API
+  token with AI Gateway Read (`CF_ACCOUNT_ID` and `AI_GATEWAY_TOKEN` in `.env`); without one there's no
+  check. `GET /credits` shows the balance.
+- **Thirty seconds**: Gemini's round 1 teaser ran 40 s (eight 5 s shots). The mix now fits any film to
+  `FILM_SECONDS`, trimming every shot by the same share, as the recap already did.
+
+Tests: `test/credits.test.ts`.

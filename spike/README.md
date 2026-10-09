@@ -69,6 +69,12 @@ among the tools in `src/arena-rules.ts`, Git among them: save, restore, compare,
 - **Judging**: Clef keeps live scores; each round's final ranking is the panel (`src/teaser-rules.ts`:
   Claude, GPT and Gemini, both ways round), 75% film and 25% process (`src/process-rules.ts`), written to
   the arena's `scores/comparative.final.json` (D33, D34, D38).
+- **Credits** (`src/credits.ts`, D39): the frontier leads and judges and most video models are paid from
+  the AI Gateway's prepaid credits. With `CF_ACCOUNT_ID` and `AI_GATEWAY_TOKEN` (an API token with AI
+  Gateway Read) in `.env`, `GET /credits` shows the balance and `POST /seasons` refuses to start a season
+  it can't pay for (`"ignore_credits": true` overrides). If the credits run out anyway, teams pause instead
+  of spending turns, and a round whose final judging failed waits for `POST /seasons/:id/events {"round",
+  "step": "judge"}` after a top-up.
 
 ## Video (tested 2026-10-07)
 

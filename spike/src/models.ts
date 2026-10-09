@@ -29,9 +29,9 @@ export { NOTE_ACTIONS, type NoteAction } from "./router.ts";
 
 // Workers AI errors worth retrying: 3040 out of capacity, 3043 internal error, 3030 output flagged by the
 // safety filter (often a false positive; only worth retrying with a new seed, so image calls pass it)
-const TRANSIENT = ["3040", "3043"];
+export const TRANSIENT = ["3040", "3043"];
 
-async function withRetry<T>(fn: (attempt: number) => Promise<T>, retryOn = TRANSIENT, attempts = 3): Promise<T> {
+export async function withRetry<T>(fn: (attempt: number) => Promise<T>, retryOn = TRANSIENT, attempts = 3): Promise<T> {
 	for (let attempt = 1; ; attempt++) {
 		try {
 			return await fn(attempt);

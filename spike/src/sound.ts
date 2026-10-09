@@ -28,6 +28,7 @@ import {
 	mixerSlot,
 	RECAP,
 	type Recap,
+	FILM_SECONDS,
 	withRecap,
 	frameTimes,
 	heardOf,
@@ -272,9 +273,10 @@ export async function runMixJob(env: Env, repo: string, cut: string, progress: P
 			return { cell: e.cell, file: e.file, seconds: Number(e.seconds), audio: Boolean(meta.audio) };
 		}),
 	);
-	// "Previously on" (D38): main's recap stills open the film, in four seconds taken from it
+	// "Previously on" (D38): main's recap stills open the film, in four seconds taken from it; and a film
+	// planned longer than the brief is fitted to it (D39)
 	const recapJson = await readText(env, repo, RECAP);
-	clips.splice(0, clips.length, ...withRecap(clips, recapJson ? (JSON.parse(recapJson) as Recap) : null));
+	clips.splice(0, clips.length, ...withRecap(clips, recapJson ? (JSON.parse(recapJson) as Recap) : null, FILM_SECONDS));
 	const scoreMp3 = await readBytes(env, repo, SCORE);
 	const lineRows = parseCsv<Record<string, string>>(await readText(env, repo, LINES_CSV) ?? "");
 	const lines: MixLine[] = lineRows.map((r) => ({ cell: r.cell, file: r.file, seconds: Number(r.seconds), speaker: r.speaker, text: r.text }));

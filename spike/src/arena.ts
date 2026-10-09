@@ -14,7 +14,8 @@ import type { LlmKey } from "./cast-rules.ts";
 import { MENU } from "./crew.ts";
 import { ENDING_RUBRIC, type EndingsResult, PROCESS_RUBRIC, PROCESS_SHARE, briefWithNote, endingsNote, gitMoves, networkNote, processPrompt, processRecord, processWeight } from "./process-rules.ts";
 import { COMPARISONS, SAVED } from "./history.ts";
-import { ask } from "./models";
+import { TRANSIENT, ask, withRetry } from "./models";
+import { OUT_OF_CREDITS, RATE_LIMITED, outOfCredits } from "./llm";
 import type { Heard } from "./sound-rules.ts";
 import { forkBoard, repoRemote } from "./template";
 
@@ -492,8 +493,10 @@ async function mixing(env: Env, board: string) {
 /**
  * The final round's panel (D33): every panel judge compares every pair of submitted teasers, both ways
  * round, on the panel's rubric. Every judge gets the frames and the transcript; the Gemini judge also gets
- * the film. A team with no mixed teaser loses its matchups. A failed call is retried once, then counts as
- * even. Results go in scores/comparative.final.json like any final comparison.
+ * the film. A team with no mixed teaser loses its matchups. A failed call waits out rate limits and is
+ * retried once, then counts as even; but out of AI Gateway credits, nothing is recorded (D39): a round where
+ * every judge counted as even is a three-way tie nobody earned. Results go in scores/comparative.final.json
+ * like any final comparison.
  */
 async function runPanel(env: Env, arena: string, rules: Rules, panel: PanelJudge[], progress: (d: string) => Promise<unknown>) {
 	const subs = Object.fromEntries(
@@ -516,6 +519,12 @@ async function runPanel(env: Env, arena: string, rules: Rules, panel: PanelJudge
 	// The note counts only if it went out before every team was in
 	const judgedBrief = briefWithNote(rules.brief, rules.network_note && Date.parse(rules.network_note.at) <= Date.now() ? rules.network_note : undefined);
 	await progress(`the panel (${panel.map((j) => j.name).join(", ")}) watching ${Object.values(evidence).filter(Boolean).length} teasers`);
+	// A judge's call: rate limits waited out as the leads' are (D37); out of credits, the panel stops (D39)
+	let broke = false;
+	const judged = <T>(label: string, call: () => Promise<T>) =>
+		withRetry(call, [...TRANSIENT, RATE_LIMITED], 4)
+			.catch((err) => (outOfCredits(err) ? Promise.reject(err) : call()))
+			.catch((err) => ((broke ||= outOfCredits(err)), console.error(label, err), undefined));
 	// One call at a time per judge: firing all 18 at once (Gemini's each carrying two films) took the
 	// format dry run's round 1 judging down with the Worker, and the round fell back to Clef (D35)
 	const comparisons = (
@@ -531,8 +540,7 @@ async function runPanel(env: Env, arena: string, rules: Rules, panel: PanelJudge
 						out.push({ judge: judge.name, first, second, pFirst: forfeit(rubric, Boolean(a)) });
 						continue;
 					}
-					const call = () => env.AI.run(model as keyof AiModels, panelRequest(model, judgedBrief, rubric, send(a), send(b)) as never);
-					const answer = await call().catch(call).catch((err) => (console.error("panel", judge.name, first, second, err), undefined));
+					const answer = await judged(`panel ${judge.name} ${first} ${second}`, () => env.AI.run(model as keyof AiModels, panelRequest(model, judgedBrief, rubric, send(a), send(b)) as never));
 					const verdict = parseTeaserVerdict(panelText(model, answer), rubric);
 					out.push({ judge: judge.name, first, second, pFirst: verdict.pFirst, notes: verdict.notes });
 					await progress(`${judge.name}: ${out.length} of ${matchups(teams).length} matchups`);
@@ -556,8 +564,7 @@ async function runPanel(env: Env, arena: string, rules: Rules, panel: PanelJudge
 					panel.map(async (judge) => {
 						const model = MENU.lead[judge.model].id;
 						const verdict = async (first: Ending, second: Ending) => {
-							const call = () => env.AI.run(model as keyof AiModels, endingsRequest(model, judgedBrief, e.before, first, second) as never);
-							const answer = await call().catch(call).catch((err) => (console.error("endings", judge.name, t, err), undefined));
+							const answer = await judged(`endings ${judge.name} ${t}`, () => env.AI.run(model as keyof AiModels, endingsRequest(model, judgedBrief, e.before, first, second) as never));
 							return parseTeaserVerdict(panelText(model, answer), ENDING_RUBRIC).pFirst.ending;
 						};
 						const [a, b] = [await verdict(e.submitted, e.other), await verdict(e.other, e.submitted)];
@@ -584,7 +591,7 @@ async function runPanel(env: Env, arena: string, rules: Rules, panel: PanelJudge
 					matchups(teams).map(async ([first, second]): Promise<Comparison> => {
 						const { system, user } = processPrompt(judgedBrief, records[first].record, records[second].record);
 						const model = MENU.lead[judge.model].id;
-						const out = await ask(env, model, system, user, 6000).catch((err) => (console.error("process", judge.name, first, second, err), { text: "" }));
+						const out = (await judged(`process ${judge.name} ${first} ${second}`, () => ask(env, model, system, user, 6000))) ?? { text: "" };
 						const verdict = parseTeaserVerdict(out.text, PROCESS_RUBRIC);
 						return { judge: `${judge.name}/process`, first, second, pFirst: verdict.pFirst, notes: verdict.notes };
 					}),
@@ -592,6 +599,7 @@ async function runPanel(env: Env, arena: string, rules: Rules, panel: PanelJudge
 			),
 		)
 	).flat();
+	if (broke) throw new Error(`${OUT_OF_CREDITS}: the AI Gateway ran out of credits during the panel; nothing recorded. Top up, then POST /seasons/:id/events {"round", "step": "judge"}`);
 	const filmWeights = Object.fromEntries(panel.map((j) => [j.name, j.weight]));
 	const processWeights = Object.fromEntries(panel.map((j) => [`${j.name}/process`, processWeight(j.weight)]));
 	const parts = { film: winRates(comparisons, filmWeights).overall, process: winRates(processComparisons, processWeights).overall };

@@ -60,7 +60,7 @@ Working and deployed (Workers, Artifacts, Queues, Workers AI, AI Gateway, Images
   earlier version that did better. In the comparison season (same skill, different lead models), Claude
   Opus 5.5 won both rounds, and in round 2 saved, compared twice, restored its saved version and submitted
   the cut made from it.
-- **Tests**: 161 unit tests (`npm test`), live model evals (`npm run eval`), an end-to-end smoke test.
+- **Tests**: 166 unit tests (`npm test`), live model evals (`npm run eval`), an end-to-end smoke test.
 
 ### Season 2
 
@@ -83,7 +83,10 @@ three teams led by Claude Opus 5.5, GPT-6.1 Sol and Gemini 3.1 Pro. Built for it
 
 Three dry runs and a finale re-run found and fixed a renderer outage (D36), a mixer that ran out of
 containers, rate limits (D37), and ideas that lost their idea files (D38). In the last, teams made 6 to 20
-Git moves a round, against 0 to 3 before. Next: the real Season 2, then the demo video.
+Git moves a round, against 0 to 3 before. The first full run of Season 2 made 9 to 24 Git moves a round,
+then ran out of AI Gateway credits in round 2, which cost that round's judging and the whole finale: a
+season now checks the balance before it starts, teams pause instead of spending turns when credits run
+out, and an unjudged round waits to be judged again (D39). Next: Season 2 again, then the demo video.
 
 ## Try it
 
@@ -97,8 +100,10 @@ scripts/smoke.sh      # a real 2-cell board, end to end (a few cents)
 ```
 
 Open the Worker's URL and paste `SPIKE_KEY` from `spike/.env`. From there: new board, new arena or new
-season; each arena has a **Replay** button. Third-party video is paid from AI Gateway credits, so keep a
-balance and a spend limit on the `default` gateway.
+season; each arena has a **Replay** button. Third-party models (the frontier leads, the judges, most video)
+are paid from AI Gateway credits, so keep a balance and a spend limit on the `default` gateway. To have a
+season check the balance before it starts, add `CF_ACCOUNT_ID` and `AI_GATEWAY_TOKEN` (an API token with
+AI Gateway Read) to `spike/.env` before deploying.
 
 ## Docs
 
