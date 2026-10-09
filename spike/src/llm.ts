@@ -66,4 +66,6 @@ export function llmUsage(out: unknown) {
 
 // Workers AI's per-minute request limit: wait out the minute on the same model, never fail over (D37)
 export const RATE_LIMITED = "3021";
-export const retryDelay = (err: unknown, attempt: number) => (String(err).includes(RATE_LIMITED) ? 20_000 * attempt : 500 * 2 ** attempt);
+// Jittered, so renders limited together don't all come back together
+export const retryDelay = (err: unknown, attempt: number, jitter = Math.random()) =>
+	String(err).includes(RATE_LIMITED) ? 20_000 * attempt + Math.round(jitter * 10_000) : 500 * 2 ** attempt;

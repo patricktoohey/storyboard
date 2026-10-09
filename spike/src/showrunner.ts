@@ -19,7 +19,7 @@ import { COMMONS, CREW_ROOM, type TeamCast, appendTalk, noteReply, personaSystem
 import { type Player, talkLine } from "./cast-rules.ts";
 import type { Job, JobRequest } from "./jobs";
 import { filmSeconds, soundState } from "./sound";
-import { LINES_ESTIMATE, scoreEstimate } from "./sound-rules.ts";
+import { LINES_ESTIMATE, RECAP, type Recap, scoreEstimate } from "./sound-rules.ts";
 import { ask } from "./models";
 import { loadSkill } from "./skills";
 import { repoRemote } from "./template";
@@ -61,8 +61,14 @@ const judging = (rules: Rules) =>
 The final round is ranked by a panel of three judges (Claude, GPT and Gemini) who watch and listen to the
 cut you submit, comparing it with each rival's: ${Math.round((1 - PROCESS_SHARE) * 100)}% of the ranking. The other ${Math.round(PROCESS_SHARE * 100)}% is how you
 used your board's history, judged from your repository and your log (never from your messages):
-${PROCESS_RUBRIC.map((c) => `- ${c.id}: ${c.question}`).join("\n")}${rules.network_note ? `\nPartway through the round, the network may send every team a note. Once it arrives it is part of the brief.` : ""}`
-		: "";
+${PROCESS_RUBRIC.map((c) => `- ${c.id}: ${c.question}`).join("\n")}${rules.network_note ? `\nPartway through the round, the network may send every team a note. Once it arrives it is part of the brief.` : ""}${rules.recap ? RECAP_TEXT : ""}`
+		: rules.recap
+			? `\n${RECAP_TEXT}`
+			: "";
+
+// D38: the history on screen, not only in the log
+const RECAP_TEXT = `\nYour teaser may open on "previously on" (recap): stills from takes that didn't make it, from your own
+history. What you tried and dropped can be part of the story, and only a team that kept its history has one.`;
 
 // Where a held note waits: the cinematographer pushed back, and the lead hasn't noted that cell again
 const HELD = "talk/held.json";
@@ -71,9 +77,9 @@ type Held = Record<string, { note: string; reply: string; alternative?: string; 
 const crewWorks = (cast: TeamCast, blind: boolean) => `## Your crew and the room
 You lead people, not tools: ${cast.players.map((p) => `${p.name} (${p.seat})`).join(", ")}. Your writer
 writes the lines and your sound designer the score and the voices, each from your direction. Your
-cinematographer reads every note before shooting it and may push back; a note that's pushed back is held,
-not shot, until you note that cell again (your note, their suggestion, or a new one), which is then shot as
-given. Use the crew room (talk) when it helps the film: ask for ideas, argue a choice, settle a
+cinematographer reads every note before shooting it and may push back. A pushback with a suggestion is
+shot as they suggest; one without is held, not shot, until you note that cell again. To have your note shot
+as given whatever they say, add "insist": true to the note. Use the crew room (talk) when it helps the film: ask for ideas, argue a choice, settle a
 disagreement. ${blind ? "This round is blind: the commons is closed and you can't see the other teams." : "The commons (post) is where every team talks to every other."} Everything said is recorded, and any team
 may use it in its film.`;
 
@@ -180,6 +186,10 @@ export async function runTurnJob(env: Env, job: TurnJob, progress: Progress) {
 	// A take that failed never finishes: it must read as failed, not "shooting" (Opus waited on one)
 	const failedTakes = new Map(rows.filter((r) => r.kind === "take" && r.status === "failed").map((r) => [`${r.cell}#${r.take}`, r.detail]));
 	const sound = planned ? await soundState(env, board, cuts) : undefined;
+	// The lead's last choice (a mandated turn isn't one): news since then, or acting then, asks it again (D38)
+	const lastAsk = rows.find((r) => r.kind === "turn" && r.status === "done" && /^turn \d+: \w+ \((?!required\))/.test(r.detail));
+	const fresh = !lastAsk || lastAsk.result === "acted" || rows.some((r) => r.kind !== "turn" && (r.status === "done" || r.status === "failed") && r.updated > lastAsk.updated);
+	const running = rows.filter((r) => r.kind !== "turn" && r.kind !== "group" && (r.status === "queued" || r.status === "running"));
 	const summary: BoardSummary = {
 		drafted: Boolean(drafted),
 		planned,
@@ -196,6 +206,7 @@ export async function runTurnJob(env: Env, job: TurnJob, progress: Progress) {
 		cutRunning: open(["video", "assemble", "mix"]) > 0,
 		submitted,
 		openJobs: open(),
+		fresh,
 		spent: rows.reduce((sum, r) => sum + (Number(r.cost_est) || 0), 0),
 		budget: Number(cfg.budget_usd),
 		now: Date.now(),
@@ -211,6 +222,7 @@ export async function runTurnJob(env: Env, job: TurnJob, progress: Progress) {
 		},
 		...(sound ? { sound: { score: Boolean(sound.score), lines: sound.lines.length, current: sound.current } } : {}),
 		...(cast ? { talk: { names: cast.players.map((p) => p.name), commons: !blind } } : {}),
+		...(rules.recap ? { recap: true } : {}),
 	};
 
 	const allowed = allowedActions(summary);
@@ -256,7 +268,13 @@ export async function runTurnJob(env: Env, job: TurnJob, progress: Progress) {
 			...(rules.network_note && Date.now() >= Date.parse(rules.network_note.at) ? { network_note: `From the network, to every team: "${rules.network_note.text}"` } : {}),
 			minutes_left: Math.round((deadline - Date.now()) / 60000),
 			// Said outright: Opus waited four turns for a "still rendering" take that had long finished
-			running_now: summary.openJobs ? `${summary.openJobs} job(s) still running` : "nothing: every take listed below is finished, and waiting brings nothing new",
+			running_now: running.length
+				? {
+						jobs: running.map((r) => `${r.kind}${r.cell ? ` cell ${r.cell}` : ""}${r.take ? ` take ${r.take}` : ""}`),
+						// D38: in the finale re-run, leads spent most of the clock forced to wait on renders
+						note: "You don't have to wait for these: start other work beside them (ideas or a retake on another shot, sound, a save). If you wait, you're asked again when one finishes.",
+					}
+				: "nothing: every take listed below is finished, and waiting brings nothing new",
 			budget: {
 				spent: Number(summary.spent.toFixed(2)),
 				total: summary.budget,
@@ -282,6 +300,7 @@ export async function runTurnJob(env: Env, job: TurnJob, progress: Progress) {
 					}
 				: {}),
 			lessons,
+			...(rules.recap ? { recap: JSON.parse((await readText(env, board, RECAP)) ?? "null")?.shots?.map((x: { branch: string }) => x.branch) ?? "none yet" } : {}),
 			sound: sound && {
 				score: sound.score ?? "none yet",
 				lines: sound.lines.length ? sound.lines : "none yet",
@@ -363,7 +382,16 @@ export async function runTurnJob(env: Env, job: TurnJob, progress: Progress) {
 						const r = await noteReply(env, cinematographer, cast, { cell, beat: c?.beat ?? "", prompt: shown?.prompt?.slice(0, 600), note, brief: rules.brief });
 						cost += r.cost;
 						const lines = [talkLine(now, cast.lead.name, `cell ${cell}: ${note}`, cinematographer.name), talkLine(new Date(), cinematographer.name, r.reply, cast.lead.name)];
-						if (r.stance === "push_back") {
+						// A pushback with a suggestion is shot as suggested, unless the lead insisted: Gemini spent eight
+						// finale turns noting cells again only to accept the suggestion each time (D38)
+						if (r.stance === "push_back" && r.alternative && !args.insist) {
+							await crewRoom(env, board, cast, [...lines, talkLine(new Date(), cast.lead.name, `cell ${cell}: go with yours`, cinematographer.name)], `Note on cell ${cell}: ${cinematographer.name}'s suggestion`);
+							const routed = await addNote(env, board, cell, r.alternative);
+							await submit(env, board, routed.requests);
+							detail += ` on cell ${cell}: "${note}" → ${cinematographer.name} pushed back and suggested "${r.alternative}", shot that → ${routed.route.action}`;
+							break;
+						}
+						if (r.stance === "push_back" && !args.insist) {
 							await crewRoom(env, board, cast, lines, `${cinematographer.name} pushes back on the note for cell ${cell}`, {
 								...held,
 								[cell]: { note, reply: r.reply, ...(r.alternative ? { alternative: r.alternative } : {}), by: cinematographer.name },
@@ -371,8 +399,8 @@ export async function runTurnJob(env: Env, job: TurnJob, progress: Progress) {
 							detail += ` on cell ${cell}: "${note}" → held: ${cinematographer.name} pushed back: "${r.reply}"${r.alternative ? ` (suggests: "${r.alternative}")` : ""}`;
 							break;
 						}
-						await crewRoom(env, board, cast, lines, `Note on cell ${cell}`);
-						detail += ` (${cinematographer.name}: "${r.reply}")`;
+						await crewRoom(env, board, cast, lines, `Note on cell ${cell}${r.stance === "push_back" ? " (insisted)" : ""}`);
+						detail += r.stance === "push_back" ? ` (insisted over ${cinematographer.name}: "${r.reply}")` : ` (${cinematographer.name}: "${r.reply}")`;
 					} else {
 						// Noting a held cell again settles it: shot as given
 						const { [cell]: _settled, ...rest } = held;
@@ -401,7 +429,7 @@ export async function runTurnJob(env: Env, job: TurnJob, progress: Progress) {
 			case "ideas": {
 				// One take branch per idea, shot in parallel; the lead prints one
 				const ideas = args.ideas as { name: string; text: string }[];
-				await submit(env, board, ideas.map((idea) => ({ kind: "take" as const, cell: args.cell as string, opts: { idea } })));
+				await submit(env, board, ideas.map((idea) => ({ kind: "take" as const, cell: args.cell as string, opts: { idea } })), undefined, { stagger: 8 });
 				detail += ` on cell ${args.cell}: ${ideas.map((i) => `"${i.name}"`).join(", ")}`;
 				break;
 			}
@@ -458,6 +486,27 @@ export async function runTurnJob(env: Env, job: TurnJob, progress: Progress) {
 				detail += `: "${args.message}"`;
 				break;
 			}
+			case "recap": {
+				// The stills come off their take branches into recap/ on main, so the mix (and the cut it lands
+				// on) carries exactly what was chosen
+				const shots = args.shots as string[];
+				await progress(`"previously on" from ${shots.join(", ")}`);
+				using handle = await env.ARTIFACTS.get(board);
+				const files: Record<string, Uint8Array | string> = {};
+				const recap: Recap = { shots: [] };
+				for (const [i, branch] of shots.entries()) {
+					const cell = branch.split("/")[1];
+					const blob = await handle.readFile({ ref: branch, path: `cells/${cell}/frame.webp` });
+					if (!blob) throw new Error(`${branch} has no frame`);
+					const file = `recap/${String(i + 1).padStart(2, "0")}.webp`;
+					files[file] = new Uint8Array(await blob.arrayBuffer());
+					recap.shots.push({ branch, file });
+				}
+				files[RECAP] = JSON.stringify(recap, null, 2) + "\n";
+				await onMain(await repoRemote(env, board), (tree) => tree.commit({ name: agent }, `Previously on: ${shots.join(", ")}`, files));
+				detail += `: ${shots.join(", ")}`;
+				break;
+			}
 			case "save": {
 				const saved = await saveVersion(env, board, args.name as string);
 				detail += `: ${saved.branch} at ${saved.commit}`;
@@ -496,7 +545,7 @@ export async function runTurnJob(env: Env, job: TurnJob, progress: Progress) {
 	} catch (err) {
 		// Over budget, or a Git tool that couldn't run (no such version, nothing printed to compare): the
 		// turn records why and the team carries on
-		if (!(err instanceof LimitError) && !["restore", "compare", "save"].includes(action)) throw err;
+		if (!(err instanceof LimitError) && !["restore", "compare", "save", "recap"].includes(action)) throw err;
 		detail += ` refused: ${String(err instanceof Error ? err.message : err).slice(0, 200)}`;
 		result = "waited";
 	}

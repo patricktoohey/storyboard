@@ -504,3 +504,46 @@ GPT 5, Opus 5, Gemini 2.
 - **Rate limits lost ten takes** (`3021`, the per-minute request limit), with no retry. Image renders now
   retry it on the same model after 20, 40, then 60 seconds; it never triggers the fallback (D36), which is
   for a model that's failing, not busy. The fallback itself still hasn't been needed live.
+
+## D38: the history on screen, and time to use it
+
+The finale re-run's Git moves fell to 3, 1 and 0. Read turn by turn, the cause wasn't the scoring:
+
+- **Running work held the lead.** Any open job forced "wait": Opus spent 34 of 45 minutes waiting and
+  decided 9 times. Two ideas for one shot was the only parallel work a team could start.
+- **Rate limits ate the opening.** Eighteen first takes at once hit Workers AI's per-minute limit; Opus
+  spent four of its nine decisions re-shooting failures, and its one Git move was ideas "to fill the hole".
+- **The clock stopped early.** With a cut in hand, submitting was forced at twice a cut's time, 15 minutes
+  before the deadline; every team was in by 03:05 for a 03:14 deadline.
+- **Crew pushback cost two turns a note.** Gemini noted, was pushed back, and noted again to accept the
+  suggestion, eight times.
+
+GPT, the one team with time to spare, saved its safe cut, replanned, shot two endings and compared them.
+
+**Time to use it:**
+
+- **The lead works beside running work.** With jobs open it's asked again when one finishes (or right
+  after it acted), and waits for free otherwise (`fresh` in the summary). While a cut renders, only moves
+  that leave `main` alone are offered (takes, ideas, notes, sound, saves, compares), since the cut's clips
+  read `main` as they render.
+- **Submission is forced only when another cut can't finish** (a cut's time, not twice it). A cut still
+  rendering at the deadline doesn't count; the latest assembled before it does.
+- **First takes are staggered** (8 s apart from a random start), and rate-limited renders wait 20, 40, 60,
+  80, 100 seconds, jittered, on the same model.
+- **A pushback with a suggestion is shot as suggested**, unless the note said `"insist": true`, which shoots
+  the lead's note whatever the crew says. A pushback with no suggestion still holds the note.
+
+**The history on screen** (both `format` options, so a season chooses them):
+
+- **Two endings** (`format.two_endings`): the finale's network note asks for two endings of the last
+  shot, as ideas on their own branches, and the cut with the one the team believes in. At judging, every
+  panel judge sees the shot before and both endings as stills, both ways round; the team's pick is a bet,
+  and the process record says whether the panel agreed (`endings` in `comparative.final.json`). Stills on
+  both sides, since only the submitted ending was animated.
+- **"Previously on"** (`format.recap`): a `recap` move copies two to four frames from take branches that
+  didn't make it into `recap/` on `main`; the mix opens the teaser with them, washed out, 1.2 seconds each,
+  and commits them to the cut. A new recap changes the mix's signature, so a free remix carries it. Only a
+  team that kept its history has one, and the panel sees it in the film. It counts as a Git move.
+
+Checked in the mixer image: two webp stills and a clip mix to 5.4 s with the stills desaturated. Tests:
+`test/history-on-screen.test.ts`, and the round rules in `test/arena-rules.test.ts`.

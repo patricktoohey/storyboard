@@ -52,6 +52,24 @@ missing submissions and runs the final round on the submitted commits. The arena
 leaderboard, spend, each team's printed frames and the arena's commit log; **Replay** rebuilds the run
 from Git history and can record it as a video committed to the arena (`replay/rN`).
 
+## Seasons (docs/season-2.md)
+
+`POST /seasons {"brief", "rounds" (2 to 6), "minutes", "budget", "cells", "teams": [{"team", "lead"}], "cast",
+"blind_final", "format"}` creates a season repo and one repo per team, casts the players and runs the
+draft, then the rounds; between rounds each team writes a retrospective that edits its own skill. Each
+round is an arena whose teams are led by their own lead model (`src/showrunner.ts`), choosing each turn
+among the tools in `src/arena-rules.ts`, Git among them: save, restore, compare, ideas, recap.
+
+- **Format** (`format`): `network_note` (a mid-round note, D34), `two_endings` (the finale's note asks for
+  two endings of the last shot, D38), `recap` ("previously on" from old takes, D38), `twist_round`,
+  `eliminate`, `entrant`. A step that failed can be queued again with `POST /seasons/:id/events`.
+- **Sound** (`src/sound.ts`): a score and lines per board; every cut is mixed in the `Mixer` Container
+  (`mixer/`, ffmpeg) from a pool of eight named instances, which also extracts the judges' frames and
+  the audio Whisper transcribes (D30, D33, D37).
+- **Judging**: Clef keeps live scores; each round's final ranking is the panel (`src/teaser-rules.ts`:
+  Claude, GPT and Gemini, both ways round), 75% film and 25% process (`src/process-rules.ts`), written to
+  the arena's `scores/comparative.final.json` (D33, D34, D38).
+
 ## Video (tested 2026-10-07)
 
 **Make video** on a board (`POST /boards/:repo/cut`) animates each printed frame with

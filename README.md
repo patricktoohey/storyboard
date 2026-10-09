@@ -21,15 +21,19 @@ and not "GitHub with agents added on top".
 | Git | Here |
 |---|---|
 | a repo | a board (and an arena, a season, a team) |
-| a branch | a **take** of one shot (`cell/03/take-2`), or a clip (`cut/v1/03`) |
+| a branch | a **take** of one shot (`cell/03/take-2`), a clip (`cut/v1/03`), a cut (`cut/v2`), a saved version (`alt/safe`) |
+| parallel branches | **ideas**: two or three different takes of one shot, shot side by side, one printed |
 | a merge | **printing** a take onto `main`; a board's first cut is one octopus merge |
+| a revert-forward | **restoring** an earlier version as a new commit, so nothing is lost |
+| a diff, judged | **compare**: the judges put two versions side by side before the team chooses |
+| reading old branches | **"previously on"**: a teaser opens on stills from takes that didn't make it |
 | a fork | a new board from the skills template; a season's boards from each team's repo |
 | a commit trailer | which skill version made a frame (`Skill: cinematographer-noir@b38fe1e`), who a team learned from (`Learned-From:`) |
 | a CSV on its own branch | the **jobs ledger** (`jobs.csv` on `jobs`): coordination state for every agent job |
 | a rejected push | the coordinator's only lock: take numbers, budgets and "print exactly once" are all compare-and-swap commits |
 | `git log` | the production itself, replayable as video |
 
-## Where things stand (2026-10-08)
+## Where things stand (2026-10-09)
 
 Working and deployed (Workers, Artifacts, Queues, Workers AI, AI Gateway, Images, all driven by the `cf` CLI):
 
@@ -41,8 +45,9 @@ Working and deployed (Workers, Artifacts, Queues, Workers AI, AI Gateway, Images
   comparing hair and outerwear against the portrait), and so do sets and staging: scouted location
   references, blocking and screen positions in the plan, and Clef checking place, sides, blocking and head
   count before a take can print.
-- **Video**: printed frames animated with Wan 2.7 or Hailuo 2.3 and assembled into `cut/vN` with an edit
-  decision list. Veo, LTX and Seedance were tested and are excluded for now (docs/arena.md says why).
+- **Video**: printed frames animated (Wan 2.7, Hailuo 2.3, FLUX.3 Video with its own sound, and others on
+  the crew menu) and assembled into `cut/vN` with an edit decision list, then mixed with the score and
+  lines by ffmpeg in a pool of Containers into `teaser.mp4`.
 - **Jobs**: every unit of work is a queued job coordinated through the jobs ledger; a 6-cell board with
   retakes and a print takes about 80 s, with cells shot in parallel.
 - **Arenas**: three showrunner teams, $5 and 20 minutes each, crews drafted from a priced menu, live
@@ -55,21 +60,29 @@ Working and deployed (Workers, Artifacts, Queues, Workers AI, AI Gateway, Images
   earlier version that did better. In the comparison season (same skill, different lead models), Claude
   Opus 5.5 won both rounds, and in round 2 saved, compared twice, restored its saved version and submitted
   the cut made from it.
-- **Tests**: 152 unit tests (`npm test`), live model evals (`npm run eval`), an end-to-end smoke test.
+- **Tests**: 160 unit tests (`npm test`), live model evals (`npm run eval`), an end-to-end smoke test.
 
-Next: [Season 2](docs/season-2.md), a 30-second teaser about the show itself, with sound and dialogue.
-Built so far: the cast (every agent a named character; players drafted, their models hidden), the crew
-room, the commons, confessionals and judges' remarks, all committed to the repos (D28), and leads that
-think hard (D29), and sound: a score and lines written by the players in their dealt voices, video with
-its own sound, and every cut mixed into `teaser.mp4` by ffmpeg in a Container (D30), and the season format:
-rivals' moves in every turn with public messages beside private reasons, twists offered as trades,
-elimination, a wildcard or returning entrant, protect and steal before a blind finale, and seasons chained
-with a backstory (D31), and the judging panel: Claude, GPT and Gemini rank the final round on the
-finished teasers, every judge with frames and a transcript of the mix, Gemini with the film itself (D32,
-D33), and a quarter of that ranking for how each team used its repository's history, with a mid-round
-note from the network to give a saved version a reason to exist (D34), and several ideas for one shot
-shot side by side on their own branches, compared in place, one printed (D35). Next: a short dry run, the
-real Season 2, then the demo video.
+### Season 2
+
+[Season 2](docs/season-2.md) is a 30-second teaser about the show itself, with sound and dialogue, made by
+three teams led by Claude Opus 5.5, GPT-6.1 Sol and Gemini 3.1 Pro. Built for it:
+
+- **A cast**: every agent a named character with a bio and a voice; players drafted, their models hidden;
+  a crew room, a commons, confessionals and judges' remarks, all committed to the repos (D28).
+- **Sound**: a score and lines written by the players in their dealt voices, mixed into every cut (D30).
+- **The format**: rivals' moves visible with public messages beside private reasons, twists offered as
+  trades, and protect and steal before a blind finale (D31, D35).
+- **The panel**: Claude, GPT and Gemini rank each round's finished teasers, every judge with frames and a
+  transcript of the mix, Gemini with the film itself (D32, D33).
+- **Judged on its history**: a quarter of the ranking is how each team used its repository, with a
+  mid-round note from the network to give a saved version a reason to exist (D34).
+- **Ideas**: two or three takes of one shot on their own branches, compared in place, one printed (D35).
+- **The history on screen**: the finale asks for two endings of the last shot, and the panel's verdict on
+  the team's pick counts; a teaser may open on "previously on" from takes that didn't make it. Leads work
+  beside running renders instead of waiting on them (D38).
+
+Two dry runs and a finale re-run found and fixed a renderer outage (D36), a mixer that ran out of
+containers, and rate limits (D37). Next: a dry run of D38, the real Season 2, then the demo video.
 
 ## Try it
 

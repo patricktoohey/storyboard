@@ -75,7 +75,8 @@ export async function submit(
 	repo: string,
 	requests: JobRequest[],
 	group?: { id: string; kind: GroupKind },
-	opts: { delaySeconds?: number } = {},
+	// stagger: seconds between consecutive jobs, so a burst of renders doesn't hit the per-minute limit at once
+	opts: { delaySeconds?: number; stagger?: number } = {},
 ) {
 	if (!requests.length) return [];
 	const remote = await repoRemote(env, repo);
@@ -93,7 +94,7 @@ export async function submit(
 		jobs = appendJobs(rows, repo, requests, { group, existing, now: now(), newId, limits });
 		return jobs;
 	});
-	await env.JOBS.sendBatch(jobs.map((body) => ({ body, delaySeconds: opts.delaySeconds })));
+	await env.JOBS.sendBatch(jobs.map((body, i) => ({ body, delaySeconds: (opts.delaySeconds ?? 0) + i * (opts.stagger ?? 0) || undefined })));
 	return jobs;
 }
 

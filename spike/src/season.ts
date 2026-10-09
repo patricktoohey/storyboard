@@ -75,6 +75,7 @@ import { DEFAULT_CREW, MENU, crewFrom } from "./crew.ts";
 import { withCrew } from "./crew-env";
 import { WorkingTree } from "./git";
 import { retrospect } from "./models";
+import type { EndingsResult } from "./process-rules.ts";
 import { loadSkill, parseSkill } from "./skills";
 import { forkBoard, repoRemote } from "./template";
 
@@ -488,6 +489,8 @@ async function startRound(env: Env, s: Season, round: number) {
 		origin: s.origin,
 		blind: Boolean(s.blind_final && round === s.rounds),
 		network_note: Boolean(s.format?.network_note),
+		two_endings: Boolean(s.format?.two_endings && round === s.rounds),
+		recap: Boolean(s.format?.recap),
 		id: `${s.season.replace("season-", "")}-r${round}`,
 		season: {
 			season: s.season,
@@ -985,6 +988,9 @@ export async function runSeasonStep(env: Env, arena: string, season: string, rou
 					film: state.comparative.parts.film,
 					process: state.comparative.parts.process,
 					git_moves: Object.fromEntries(Object.entries(state.comparative.git_moves ?? {}).map(([t, m]) => [t, (m as { total: number }).total])),
+					...(state.comparative.endings
+						? { endings: Object.fromEntries(Object.entries(state.comparative.endings).flatMap(([t, e]) => ((e as EndingsResult).p_submitted === undefined ? [] : [[t, (e as EndingsResult).p_submitted!]]))) }
+						: {}),
 				}
 			: {}),
 	};

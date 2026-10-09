@@ -6,7 +6,7 @@
 import type { Criterion } from "./arena-rules.ts";
 
 /** The moves that use the history (ideas: parallel branches for one shot); anything else makes or changes the film. */
-export const GIT_MOVES = ["save", "restore", "compare", "ideas"] as const;
+export const GIT_MOVES = ["save", "restore", "compare", "ideas", "recap"] as const;
 
 // The process's share of the final ranking: the film still decides most of it
 export const PROCESS_SHARE = 0.25;
@@ -18,7 +18,7 @@ export const PROCESS_RUBRIC: Criterion[] = [
 	{
 		id: "effective",
 		question:
-			"Did the team's use of its history make its film better? A comparison that decided something, a restore that recovered the better version, a version tried against the network note and then kept or dropped. A move that changed nothing counts for nothing.",
+			"Did the team's use of its history make its film better? A comparison that decided something, a restore that recovered the better version, a version tried against the network note and then kept or dropped, two endings shot and the stronger one chosen. A move that changed nothing counts for nothing.",
 		levels: ["No use", "Moves without effect", "Some effect", "Clearly better for it", "Decisive"],
 	},
 	{
@@ -41,6 +41,41 @@ export const NETWORK_NOTES = [
 export function networkNote(round: number, created: Date, minutes: number, at = 0.5) {
 	const text = NETWORK_NOTES[(round - 1) % NETWORK_NOTES.length];
 	return { text, at: new Date(created.getTime() + minutes * at * 60_000).toISOString() };
+}
+
+/**
+ * The finale's note when the format asks for two endings (D38): the last shot two ways, as ideas on their own
+ * branches. The team cuts with the one it believes in; the panel sees both, so the choice is a bet.
+ */
+export function endingsNote(lastCell: string) {
+	return `Note from the network: we can't agree on how this should end. Shoot two endings for your last shot, side by side (ideas on cell ${lastCell}), and cut the teaser with the one you believe in. The panel will see both endings: if they agree with your choice, it counts for you.`;
+}
+
+export const ENDING_RUBRIC: Criterion[] = [
+	{
+		id: "ending",
+		question: "Which ending lands this teaser harder: it pays off the shot before it and leaves you wanting the season.",
+		levels: ["Falls flat", "Weak", "Fair", "Strong", "Unforgettable"],
+	},
+];
+
+/** Two endings, as the panel saw them: the team's pick against its other ending. */
+export interface EndingsResult {
+	submitted: { branch: string; idea?: string };
+	other?: { branch: string; idea?: string };
+	// The panel's mean probability that the submitted ending is the stronger, and how many judges agreed
+	p_submitted?: number;
+	judges_agreeing?: number;
+	judges?: number;
+}
+
+/** The bet's line in the process record. */
+export function endingsLine(e: EndingsResult | undefined) {
+	if (!e) return "Two endings (the network asked for them): none submitted.";
+	const name = (x: { branch: string; idea?: string }) => (x.idea ? `"${x.idea}" (${x.branch})` : x.branch);
+	if (!e.other || e.p_submitted === undefined) return `Two endings (the network asked for them): only one shot, ${name(e.submitted)}.`;
+	const verdict = e.p_submitted > 0.5 ? "the bet was right" : e.p_submitted < 0.5 ? "the bet was wrong" : "a draw";
+	return `Two endings (the network asked for them): ${name(e.submitted)} submitted, against ${name(e.other)}. The panel preferred the submitted one ${Math.round(e.p_submitted * 100)}% (${e.judges_agreeing} of ${e.judges} judges): ${verdict}.`;
 }
 
 /** The brief as judged: the network's note, once it's out, is part of what was asked. */
@@ -71,9 +106,10 @@ export function processRecord(r: {
 	comparisons: unknown[];
 	cuts: string[];
 	submitted: string | null;
-	note?: { text: string; at: string };
+	note?: { text: string; at: string; endings?: boolean };
 	// A round that closed early (every team in before the note) never saw it
 	now?: Date;
+	endings?: EndingsResult;
 }): string {
 	const minute = (iso?: string) => (iso ? `${Math.max(0, Math.round((Date.parse(iso) - r.start.getTime()) / 60000))} min` : "?");
 	const acted = r.turns
@@ -98,6 +134,7 @@ export function processRecord(r: {
 		`Saved versions: ${r.saved.length ? r.saved.map((s) => `${s.name}${s.commit ? ` (${s.commit})` : ""}`).join(", ") : "none"}`,
 		`Comparisons and their verdicts: ${r.comparisons.length ? JSON.stringify(r.comparisons).slice(0, 1200) : "none"}`,
 		`Cuts made: ${r.cuts.length ? r.cuts.join(", ") : "none"}; submitted: ${r.submitted ?? "nothing"}${r.submitted && latest && r.submitted !== latest ? ` (an earlier cut, not the latest, ${latest})` : ""}`,
+		...(r.note?.endings && Date.parse(r.note.at) <= (r.now ?? new Date()).getTime() ? [endingsLine(r.endings)] : []),
 	].join("\n");
 }
 

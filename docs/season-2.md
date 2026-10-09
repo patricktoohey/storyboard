@@ -226,6 +226,11 @@ carry it, does it land the SEASON 2 card, does it do what the brief asks (includ
 - **The network's note**: at each round's midpoint every team gets a note ("less telling, more showing";
   "the ending is too quiet"; "fewer lines from a narrator"). Trying it on a saved version and comparing is
   what the history is for; the judges count the note as part of the brief.
+- **Two endings** (D38): in the finale, the note asks for two endings of the last shot, side by side on
+  their own branches. The team cuts with one; the panel sees both, and whether it agreed with the team's
+  pick goes into the process record.
+- **"Previously on"** (D38): a teaser may open on stills from takes that didn't make it, cut from the
+  team's own history. The panel sees it in the film, and only a team that kept its history has one.
 
 ## Ghost runs: a benchmark from the recordings
 
@@ -294,16 +299,15 @@ Roughly four to five days, mostly 1, 3 and 4. Ghost runs come after the season.
   emerge, not encouraged; revealed after each round.
 
 - Season 2 is the teaser brief with sound and dialogue; every agent is named, with a bio and a voice.
-- Llama is replaced by Gemini 3.1 Pro (Nemotron 3 was tried in the dry run and came last); Kimi gets one
-  more season with thinking on and longer timeouts.
+- Llama is replaced by Gemini 3.1 Pro (Nemotron 3 was tried in the dry run and came last).
 - Players are drafted; a blind finale with protect and steal ends the season; with three teams, nobody
   is eliminated and there is no wildcard, so all three labs reach the finale (D35).
 - A lead can shoot several ideas for one shot side by side, each on its own branch (D35).
+- Leads work beside running renders, and the finale isn't forced to submit 15 minutes early (D38).
+- The finale asks for two endings, and teasers may open on "previously on" from the team's history (D38).
 - Twists are offered as trades rather than taking time away.
 
 ## Still open
 
-1. **Wildcard or misfits**: two eliminations and a misfits team (three-team finale), led by a newcomer or
-   a returning eliminated lead; or five teams from the start. Both are built as options (`format.entrant`,
-   `format.eliminate`), so this is a setting to choose.
-2. **The wildcard's model**, if there is one: Sonnet 5.5, or whatever is newest when the finale runs.
+1. **Wildcard or misfits**, for a later season: with three teams there's neither (D35). Both are built as
+   options (`format.entrant`, `format.eliminate`).

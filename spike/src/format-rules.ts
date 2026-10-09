@@ -17,6 +17,10 @@ export interface Format {
 	entrant?: { kind: "wildcard"; lead: LlmKey } | { kind: "returning" };
 	// Mid-round, the network sends every team a note (process-rules.ts, D34)
 	network_note?: boolean;
+	// The finale's note asks for two endings of the last shot; the panel sees both (D38)
+	two_endings?: boolean;
+	// Teasers may open on "previously on": stills from the team's own history, rejected takes and old cuts (D38)
+	recap?: boolean;
 }
 
 /** Something that happened between rounds, for the season page and its talk. */
@@ -68,6 +72,9 @@ export function publicMove(action: string, args: Record<string, unknown>): strin
 			return `restored ${args.version}`;
 		case "compare":
 			return `compared ${args.a} with ${args.b}`;
+		case "recap":
+			// Which takes it reached back for is the team's; that it did isn't
+			return `cut a "previously on" from ${((args.shots as unknown[]) ?? []).length} old takes`;
 		case "talk":
 			return "talked with the crew";
 		case "post":

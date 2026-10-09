@@ -210,7 +210,7 @@ async function runImageModel(env: Env, prompt: string, opts: RenderOptions) {
 			return await withRetry(async (attempt) => {
 				const seed = randomSeed();
 				return { bytes: await runImageModelOnce(env, model, prompt, { ...opts, seed }), seed, attempts: attempt, model };
-			}, [...TRANSIENT, "3030", RATE_LIMITED], 4);
+			}, [...TRANSIENT, "3030", RATE_LIMITED], 6);
 		} catch (err) {
 			const next = RENDER_FALLBACK[model];
 			if (!next || !TRANSIENT.some((code) => String(err).includes(code))) throw err;

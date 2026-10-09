@@ -9,10 +9,10 @@ import { lastTalk } from "./cast-rules.ts";
 import { parseCsv } from "./csv.ts";
 import { WorkingTree } from "./git";
 import { loadSkill } from "./skills";
-import { type Evidence, forfeit, panelRequest, panelText, parseTeaserVerdict, watchesFilm } from "./teaser-rules.ts";
+import { type Ending, type Evidence, endingsRequest, forfeit, panelRequest, panelText, parseTeaserVerdict, watchesFilm } from "./teaser-rules.ts";
 import type { LlmKey } from "./cast-rules.ts";
 import { MENU } from "./crew.ts";
-import { PROCESS_RUBRIC, PROCESS_SHARE, briefWithNote, gitMoves, networkNote, processPrompt, processRecord, processWeight } from "./process-rules.ts";
+import { ENDING_RUBRIC, type EndingsResult, PROCESS_RUBRIC, PROCESS_SHARE, briefWithNote, endingsNote, gitMoves, networkNote, processPrompt, processRecord, processWeight } from "./process-rules.ts";
 import { COMPARISONS, SAVED } from "./history.ts";
 import { ask } from "./models";
 import type { Heard } from "./sound-rules.ts";
@@ -30,7 +30,9 @@ export interface Rules {
 	// before it), the judges above rank the final round too
 	panel?: PanelJudge[];
 	// A note from "the network" that every team sees from `at` on, and the judges count as part of the brief (D34)
-	network_note?: { text: string; at: string };
+	network_note?: { text: string; at: string; endings?: boolean };
+	// Teasers may open on a recap from the board's own history (D38)
+	recap?: boolean;
 	// A team's own deadline when a twist changed its clock
 	teams: { team: string; board: string; showrunner: string; cinematographer: string; source?: string; lead?: string; team_name?: string; deadline?: string }[];
 	created: string;
@@ -111,8 +113,10 @@ export async function createArena(
 		season?: { season: string; round: number; teamRepos: Record<string, string>; cinematographers: Record<string, string> };
 		id?: string;
 		blind?: boolean;
-		// The network's mid-round note (D34)
+		// The network's mid-round note (D34); asking for two endings of the last shot instead (D38)
 		network_note?: boolean;
+		two_endings?: boolean;
+		recap?: boolean;
 	},
 ) {
 	const id = opts.id ?? stamp();
@@ -147,8 +151,13 @@ export async function createArena(
 		teams: teams.map(({ cast: _c, bonus: _b, twist: _t, ...t }) => t),
 		created: new Date().toISOString(),
 		...(opts.blind ? { blind: true } : {}),
+		...(opts.recap ? { recap: true } : {}),
 		...(opts.season ? { season: opts.season.season, round: opts.season.round, origin: opts.origin } : {}),
-		...(opts.network_note ? { network_note: networkNote(opts.season?.round ?? 1, new Date(), opts.minutes) } : {}),
+		...(opts.two_endings
+			? { network_note: { ...networkNote(opts.season?.round ?? 1, new Date(), opts.minutes), text: endingsNote(String(opts.cells).padStart(2, "0")), endings: true } }
+			: opts.network_note
+				? { network_note: networkNote(opts.season?.round ?? 1, new Date(), opts.minutes) }
+				: {}),
 	};
 	await onMain(remote, (tree) =>
 		tree.commit({ name: "arena" }, `Arena: ${teams.length} teams, $${opts.budget} each, deadline ${deadline}`, {
@@ -413,8 +422,44 @@ async function submittedEvidence(env: Env, rules: Rules, team: string, sub: { cu
 	};
 }
 
+/**
+ * A team's two endings (D38): the last shot in its submitted cut, against its latest other finished idea for
+ * that shot, with the shot before for context. Undefined when the round didn't ask for them.
+ */
+async function endingsOf(env: Env, rules: Rules, team: string, sub: { cut: string | null; commit: string } | undefined) {
+	if (!rules.network_note?.endings || !sub?.cut) return undefined;
+	const board = rules.teams.find((t) => t.team === team)!.board;
+	const [last, prev] = [rules.cells, rules.cells - 1].map((n) => String(n).padStart(2, "0"));
+	using handle = await env.ARTIFACTS.get(board);
+	const text = async (ref: string, path: string) => (await handle.readFile({ ref, path }))?.text();
+	const image = async (ref: string, path: string) => {
+		const blob = await handle.readFile({ ref, path });
+		return blob ? { mime: "image/webp", data: toBase64(new Uint8Array(await blob.arrayBuffer())) } : undefined;
+	};
+	const row = parseCsv(await text(sub.commit, "storyboard.csv") ?? "").find((r) => r.id === last);
+	if (!row?.take) return undefined;
+	const submittedBranch = `cell/${last}/take-${row.take}`;
+	const ideaOf = async (ref: string) => (await text(ref, `cells/${last}/idea.md`))?.trim();
+	const submittedIdea = await ideaOf(submittedBranch);
+	const name = (idea?: string) => idea?.split("\n")[0].replace(/^#\s*/, "").trim();
+	const submitted: Ending = { image: (await image(sub.commit, `cells/${last}/frame.webp`))!, idea: submittedIdea };
+	const result: EndingsResult = { submitted: { branch: submittedBranch, ...(submittedIdea ? { idea: name(submittedIdea) } : {}) } };
+	// Newest first: the latest finished idea that isn't the one submitted
+	const takeNo = (b: string) => Number(b.split("take-")[1]);
+	const branches = (await WorkingTree.listBranches(await repoRemote(env, board), `cell/${last}/`)).filter((b) => /take-\d+$/.test(b) && b !== submittedBranch).sort((a, b) => takeNo(b) - takeNo(a));
+	for (const b of branches) {
+		const [idea, done] = await Promise.all([ideaOf(b), text(b, `cells/${last}/continuity.json`)]);
+		if (!idea || !done) continue;
+		const frame = await image(b, `cells/${last}/frame.webp`);
+		if (!frame || !submitted.image) continue;
+		result.other = { branch: b, idea: name(idea) };
+		return { result, before: await image(sub.commit, `cells/${prev}/frame.webp`), submitted, other: { image: frame, idea } as Ending };
+	}
+	return { result };
+}
+
 /** A team's process record and Git moves for the round, from its board's ledger and history (D34). */
-async function processOf(env: Env, rules: Rules, team: string, submitted: string | null) {
+async function processOf(env: Env, rules: Rules, team: string, submitted: string | null, endings?: EndingsResult) {
 	const board = rules.teams.find((t) => t.team === team)!.board;
 	const remote = await repoRemote(env, board);
 	const [rows, saved, cuts, comparisons] = await Promise.all([
@@ -434,6 +479,7 @@ async function processOf(env: Env, rules: Rules, team: string, submitted: string
 			cuts: cuts.filter((b) => /^cut\/v\d+$/.test(b)).map((b) => b.slice(4)),
 			submitted,
 			...(rules.network_note ? { note: rules.network_note } : {}),
+			...(endings ? { endings } : {}),
 		}),
 	};
 }
@@ -496,8 +542,40 @@ async function runPanel(env: Env, arena: string, rules: Rules, panel: PanelJudge
 		)
 	).flat();
 
+	// Two endings (D38): each judge sees each team's pair both ways round; the team's pick is its bet
+	const endings: Record<string, EndingsResult> = {};
+	if (rules.network_note?.endings && Date.parse(rules.network_note.at) <= Date.now()) {
+		await progress("the panel looking at each team's two endings");
+		await Promise.all(
+			teams.map(async (t) => {
+				const e = await endingsOf(env, rules, t, subs[t] ?? undefined).catch((err) => (console.error("endings", t, err), undefined));
+				if (!e) return;
+				endings[t] = e.result;
+				if (!("other" in e) || !e.other) return;
+				const pairs = await Promise.all(
+					panel.map(async (judge) => {
+						const model = MENU.lead[judge.model].id;
+						const verdict = async (first: Ending, second: Ending) => {
+							const call = () => env.AI.run(model as keyof AiModels, endingsRequest(model, judgedBrief, e.before, first, second) as never);
+							const answer = await call().catch(call).catch((err) => (console.error("endings", judge.name, t, err), undefined));
+							return parseTeaserVerdict(panelText(model, answer), ENDING_RUBRIC).pFirst.ending;
+						};
+						const [a, b] = [await verdict(e.submitted, e.other), await verdict(e.other, e.submitted)];
+						return (a + (1 - b)) / 2;
+					}),
+				);
+				endings[t] = {
+					...e.result,
+					p_submitted: Number((pairs.reduce((x, y) => x + y, 0) / pairs.length).toFixed(3)),
+					judges_agreeing: pairs.filter((p) => p > 0.5).length,
+					judges: pairs.length,
+				};
+			}),
+		);
+	}
+
 	// How each team used its history (D34): the same judges compare the teams' process records, text only
-	const records = Object.fromEntries(await Promise.all(teams.map(async (t) => [t, await processOf(env, rules, t, subs[t]?.cut ?? null)] as const)));
+	const records = Object.fromEntries(await Promise.all(teams.map(async (t) => [t, await processOf(env, rules, t, subs[t]?.cut ?? null, endings[t])] as const)));
 	await progress(`the panel judging how ${teams.length} teams used their history`);
 	const processComparisons = (
 		await Promise.all(
@@ -531,6 +609,7 @@ async function runPanel(env: Env, arena: string, rules: Rules, panel: PanelJudge
 					commits: Object.fromEntries(teams.map((t) => [t, subs[t]!.commit])),
 					evidence: Object.fromEntries(teams.map((t) => [t, evidence[t] ? { frames: evidence[t]!.frames.length, heard: evidence[t]!.heard?.length ?? null } : null])),
 					...(rules.network_note ? { network_note: rules.network_note } : {}),
+					...(Object.keys(endings).length ? { endings } : {}),
 					git_moves: Object.fromEntries(teams.map((t) => [t, records[t].moves])),
 					process_records: Object.fromEntries(teams.map((t) => [t, records[t].record])),
 					parts,
@@ -700,7 +779,7 @@ export async function arenaState(env: Env, arena: string) {
 		judges_talk: lastTalk(judgesTalk, 40),
 		now: new Date().toISOString(),
 		leaderboard: board,
-		comparative: comparative && { final: comparative.final, at: comparative.at, winRates: comparative.winRates, ...(comparative.parts ? { parts: comparative.parts, git_moves: comparative.git_moves } : {}) },
+		comparative: comparative && { final: comparative.final, at: comparative.at, winRates: comparative.winRates, ...(comparative.parts ? { parts: comparative.parts, git_moves: comparative.git_moves, ...(comparative.endings ? { endings: comparative.endings } : {}) } : {}) },
 		teams,
 		log: log.map((l) => ({ hash: l.hash.slice(0, 7), author: l.author.name, message: l.message.split("\n")[0] })),
 	};

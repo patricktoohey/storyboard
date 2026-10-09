@@ -41,15 +41,27 @@ function board(over: Partial<BoardSummary> = {}): BoardSummary {
 	};
 }
 
-test("the first turn drafts the crew, the next plans; a planned board waits while work is running", () => {
+test("the first turn drafts the crew, the next plans; with nothing new while work runs, the lead waits for free", () => {
 	assert.deepEqual(allowedActions(board({ drafted: false, planRequested: false, planned: false })), ["draft"]);
 	assert.deepEqual(allowedActions(board({ planRequested: false, planned: false })), ["plan"]);
 	assert.deepEqual(allowedActions(board({ openJobs: 3 })), ["wait"]);
-	assert.deepEqual(allowedActions(board({ cutRunning: true })), ["wait"]);
+	assert.deepEqual(allowedActions(board({ openJobs: 3, cutRunning: true })), ["wait"]);
+});
+
+test("D38: with news, the lead works beside running work; during a cut, only off main", () => {
+	const busy = allowedActions(board({ openJobs: 3, fresh: true }));
+	for (const a of ["note", "retake", "ideas", "cut", "save", "restore", "compare", "wait"]) assert.ok(busy.includes(a as never), a);
+	const cutting = allowedActions(board({ openJobs: 3, fresh: true, cutRunning: true, cut: "v1", cuts: ["v1"], deadline: minutes(30) }));
+	for (const a of ["note", "retake", "ideas", "save", "compare", "submit", "wait"]) assert.ok(cutting.includes(a as never), a);
+	for (const a of ["print", "cut", "restore", "replan", "remix"]) assert.ok(!cutting.includes(a as never), a);
+	// A cut still rendering with no time for another: nothing to decide
+	assert.deepEqual(allowedActions(board({ openJobs: 3, fresh: true, cutRunning: true, cut: "v1", cuts: ["v1"], deadline: minutes(5) })), ["wait"]);
 });
 
 test("video is required: with a cut and no time for a better one, submit; a submitted team stops", () => {
-	const late = minutes((2 * (CUT_WALL_S + 90) - 60) / 60);
+	// D38: forced only once another cut can't finish (was twice that, which lost the finale 15 minutes)
+	const late = minutes((CUT_WALL_S + 90 - 60) / 60);
+	assert.ok(allowedActions(board({ cut: "v1", cuts: ["v1"], deadline: minutes((2 * (CUT_WALL_S + 90) - 60) / 60) })).length > 1);
 	assert.deepEqual(allowedActions(board({ cut: "v1", cuts: ["v1"], deadline: late })), ["submit"]);
 	assert.deepEqual(allowedActions(board({ cut: "v1", submitted: true })), []);
 });
@@ -58,7 +70,7 @@ test("with a cut in hand and time left, the team may keep working toward a bette
 	const s = board({ cut: "v1", cuts: ["v1"], deadline: minutes(30) });
 	const allowed = allowedActions(s);
 	for (const a of ["note", "retake", "submit", "save", "restore", "compare", "wait"]) assert.ok(allowed.includes(a as never), a);
-	// Running work after a cut: wait for it, without asking the lead (the clock still forces the submit)
+	// Running work after a cut and nothing new: wait for it, without asking the lead
 	assert.deepEqual(allowedActions({ ...s, openJobs: 2 }), ["wait"]);
 });
 

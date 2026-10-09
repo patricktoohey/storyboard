@@ -26,6 +26,9 @@ import {
 	MIXER_POOL,
 	mixerFull,
 	mixerSlot,
+	RECAP,
+	type Recap,
+	recapClips,
 	frameTimes,
 	heardOf,
 	soundSignature,
@@ -82,8 +85,8 @@ async function filmOf(env: Env, repo: string) {
 
 /** The board's sound as a lead sees it, and which cuts are mixed with it as it is now. */
 export async function soundState(env: Env, repo: string, cuts: string[]) {
-	const [scoreJson, linesCsv] = await Promise.all([readText(env, repo, "sound/score.json"), readText(env, repo, LINES_CSV)]);
-	const sig = soundSignature(scoreJson, linesCsv);
+	const [scoreJson, linesCsv, recapJson] = await Promise.all([readText(env, repo, "sound/score.json"), readText(env, repo, LINES_CSV), readText(env, repo, RECAP)]);
+	const sig = soundSignature(scoreJson, linesCsv, recapJson);
 	const mixed = await Promise.all(cuts.map(async (c) => JSON.parse((await readText(env, repo, "video/mix.json", `cut/${c}`)) ?? "null") as { sound_signature?: string } | null));
 	const lines = parseCsv<Record<string, string>>(linesCsv ?? "");
 	return {
@@ -100,7 +103,9 @@ export async function filmSeconds(env: Env, repo: string) {
 	const cuts = (await WorkingTree.listBranches(remote, "cut/")).filter((b) => /^cut\/v\d+$/.test(b)).sort((a, b) => Number(b.slice(5)) - Number(a.slice(5)));
 	const edl = cuts[0] ? parseCsv<Record<string, string>>((await readText(env, repo, "video/edl.csv", cuts[0])) ?? "") : [];
 	const seconds = edl.length ? edl.reduce((s, e) => s + Number(e.seconds), 0) : (await filmOf(env, repo)).cells.reduce((s, c) => s + c.seconds, 0);
-	return Math.max(3, Math.round(seconds));
+	// The recap plays under the score too
+	const recap = await readText(env, repo, RECAP);
+	return Math.max(3, Math.round(seconds + recapClips(recap ? (JSON.parse(recap) as Recap) : null).reduce((s, c) => s + c.seconds, 0)));
 }
 
 /**
@@ -269,6 +274,9 @@ export async function runMixJob(env: Env, repo: string, cut: string, progress: P
 			return { cell: e.cell, file: e.file, seconds: Number(e.seconds), audio: Boolean(meta.audio) };
 		}),
 	);
+	// "Previously on" (D38): main's recap stills open the film
+	const recapJson = await readText(env, repo, RECAP);
+	clips.unshift(...recapClips(recapJson ? (JSON.parse(recapJson) as Recap) : null));
 	const scoreMp3 = await readBytes(env, repo, SCORE);
 	const lineRows = parseCsv<Record<string, string>>(await readText(env, repo, LINES_CSV) ?? "");
 	const lines: MixLine[] = lineRows.map((r) => ({ cell: r.cell, file: r.file, seconds: Number(r.seconds), speaker: r.speaker, text: r.text }));
@@ -329,7 +337,8 @@ export async function runMixJob(env: Env, repo: string, cut: string, progress: P
 	const [scoreJson, linesCsv] = await Promise.all([readText(env, repo, "sound/score.json"), readText(env, repo, LINES_CSV)]);
 	const mix = {
 		seconds: plan.total,
-		sound_signature: soundSignature(scoreJson, linesCsv),
+		sound_signature: soundSignature(scoreJson, linesCsv, recapJson),
+		...(recapJson ? { recap: JSON.parse(recapJson) } : {}),
 		clips: clips.map((c) => ({ cell: c.cell, file: c.file, seconds: c.seconds, own_sound: c.audio })),
 		score: scoreMp3 ? { file: SCORE, ...JSON.parse((await readText(env, repo, "sound/score.json")) ?? "{}") } : null,
 		lines: plan.cues,
@@ -338,8 +347,8 @@ export async function runMixJob(env: Env, repo: string, cut: string, progress: P
 		bytes: mp4.byteLength,
 		...(evidenceError ? { evidence_error: evidenceError } : {}),
 	};
-	const extra = Object.fromEntries(Object.entries(sources).filter(([f]) => f.startsWith("sound/")));
-	for (const p of [LINES_CSV, VOICES_JSON, "sound/score.json"]) {
+	const extra = Object.fromEntries(Object.entries(sources).filter(([f]) => f.startsWith("sound/") || f.startsWith("recap/")));
+	for (const p of [LINES_CSV, VOICES_JSON, "sound/score.json", RECAP]) {
 		const t = await readText(env, repo, p);
 		if (t) extra[p] = new TextEncoder().encode(t);
 	}

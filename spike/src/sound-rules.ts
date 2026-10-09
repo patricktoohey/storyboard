@@ -152,10 +152,13 @@ export function parseVoiceCast(text: string, speakers: { name: string; look: str
 	return out;
 }
 
-/** Which sound a mix used (main's score.json and lines.csv): a cut whose mix has another signature is out of date. */
-export function soundSignature(scoreJson?: string | null, linesCsv?: string | null) {
+/**
+ * What a mix laid over the clips (main's score.json and lines.csv, and its recap): a cut whose mix has another
+ * signature is out of date. Without a recap, the same signature as before there were recaps.
+ */
+export function soundSignature(scoreJson?: string | null, linesCsv?: string | null, recapJson?: string | null) {
 	let h = 0x811c9dc5;
-	for (const ch of `${scoreJson ?? ""}\u0000${linesCsv ?? ""}`) h = Math.imul(h ^ ch.charCodeAt(0), 0x01000193) >>> 0;
+	for (const ch of `${scoreJson ?? ""}\u0000${linesCsv ?? ""}${recapJson ? `\u0000${recapJson}` : ""}`) h = Math.imul(h ^ ch.charCodeAt(0), 0x01000193) >>> 0;
 	return h.toString(16).padStart(8, "0");
 }
 
@@ -167,7 +170,20 @@ export interface MixClip {
 	seconds: number;
 	// The clip has its own soundtrack (a native-audio video model)
 	audio: boolean;
+	// A still from the board's history, held for its seconds and washed out: the recap (D38)
+	still?: boolean;
 }
+
+// "Previously on" (D38): stills from the team's own history, rejected takes and the like, before the film
+export const RECAP = "recap.json";
+export const RECAP_SHOTS = { min: 2, max: 4 };
+export const RECAP_SECONDS_EACH = 1.2;
+export interface Recap {
+	shots: { branch: string; file: string }[];
+}
+/** The recap's clips, in order, ahead of the cut's. */
+export const recapClips = (r: Recap | null): MixClip[] =>
+	(r?.shots ?? []).slice(0, RECAP_SHOTS.max).map((x, i) => ({ cell: `r${i + 1}`, file: x.file, seconds: RECAP_SECONDS_EACH, audio: false, still: true }));
 export interface MixLine {
 	cell: string;
 	file: string;
@@ -217,7 +233,7 @@ export function mixPlan(clips: MixClip[], score: { file: string } | undefined, l
 	clips.forEach((c, i) => {
 		const d = c.seconds;
 		f.push(
-			`[${i}:v]scale=${MIX_WIDTH}:${MIX_HEIGHT}:force_original_aspect_ratio=decrease,pad=${MIX_WIDTH}:${MIX_HEIGHT}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,fps=24,tpad=stop_mode=clone:stop_duration=${d},trim=duration=${d},setpts=PTS-STARTPTS[v${i}]`,
+			`[${i}:v]scale=${MIX_WIDTH}:${MIX_HEIGHT}:force_original_aspect_ratio=decrease,pad=${MIX_WIDTH}:${MIX_HEIGHT}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,${c.still ? "hue=s=0.3," : ""}fps=24,tpad=stop_mode=clone:stop_duration=${d},trim=duration=${d},setpts=PTS-STARTPTS[v${i}]`,
 		);
 		f.push(
 			c.audio

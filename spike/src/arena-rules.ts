@@ -1,6 +1,7 @@
 // The arena's decisions without I/O: what a showrunner may do next, which takes to print, how rubrics
 // read, and how scores become a leaderboard. Pure, so it is unit-tested (test/arena-rules.test.ts).
 import { addressee } from "./cast-rules.ts";
+import { RECAP_SHOTS } from "./sound-rules.ts";
 
 // ── Showrunner actions ──────────────────────────────────────────────────────────────────────────────
 
@@ -15,7 +16,7 @@ export const ACTIONS = {
 	plan: "Plan the board from the brief: director, casting and scouting, then every cell's first take",
 	replan:
 		'{"direction": string} Plan the whole board again, in a new direction you describe (a different idea, structure or tone). The current board is saved first as a branch, so you can compare the two and restore either',
-	note: '{"cell": "02", "note": string} Give a director\'s note on one cell, so it is re-shot with the note. Any cell, not only broken ones',
+	note: '{"cell": "02", "note": string, "insist"?: true} Give a director\'s note on one cell, so it is re-shot with the note. Any cell, not only broken ones',
 	retake: '{"cell": "02"} Re-shoot one cell as it is, for a different render',
 	ideas:
 		'{"cell": "03", "ideas": [{"name": "mirror", "idea": "..."}, {"name": "profile", "idea": "..."}]} Two or three different ideas for one shot, shot at the same time, each on its own take branch. Use it where a shot isn\'t coming together or you want options. Rivals see that you tried ideas, not what they are. Print the one you want; compare two takes first ("a": "cell/03/take-3", "b": "cell/03/take-4") to see which plays better beside its neighbours. A take each',
@@ -33,8 +34,10 @@ export const ACTIONS = {
 		'{"version": string} Bring the board back to an earlier version: a commit from your history or a saved name. Recorded as a new commit, so nothing is lost and you can restore forward again. Free',
 	compare: `{"a": string, "b": string} Have the judges compare two versions of your board side by side (commits, saved names, or "main" for now); the verdict appears in your history. About $${COMPARE_USD.toFixed(2)}`,
 	talk: '{"to": "crew" | a player\'s name, "message": string} Speak to your crew in the crew room: ask for ideas, argue a choice, settle a disagreement. Whoever you address answers. Costs only their words',
+	recap:
+		'{"shots": ["cell/03/take-2", "cell/05/take-1", ...]} "Previously on": two to four stills from your board\'s own history (takes you didn\'t print, from any plan) open the teaser, washed out, 1.2 seconds each. Nothing is ever lost, so what didn\'t make it can be part of the story. A new recap replaces the old; the next cut or remix carries it. Free',
 	post: '{"message": string} Say something in the commons, which every team reads: a challenge, an offer, a doubt about a rival. Free',
-	wait: "Do nothing now; let running work finish or think again shortly",
+	wait: "Do nothing now: you're asked again when running work finishes",
 } as const;
 export type Action = keyof typeof ACTIONS;
 
@@ -57,6 +60,9 @@ export interface BoardSummary {
 	submitted: boolean;
 	// Jobs still queued or running on the board, other than showrunner turns
 	openJobs: number;
+	// Something new since the lead last chose (a job finished, or it acted last time): with work running, the
+	// lead is asked only then, and otherwise waits for free (D38)
+	fresh?: boolean;
 	spent: number;
 	budget: number;
 	now: number;
@@ -69,6 +75,8 @@ export interface BoardSummary {
 	sound?: { score: boolean; lines: number; current: string[] };
 	// A cast team: its players' names (for talk), and whether the commons is open (not in a blind round)
 	talk?: { names: string[]; commons: boolean };
+	// The format lets teasers open on a recap from the board's history (D38)
+	recap?: boolean;
 }
 
 // A cut takes ~5 minutes to render (clips run in parallel) plus assembly; leave a margin on top
@@ -107,9 +115,14 @@ export function allowedActions(s: BoardSummary): Action[] {
 	if (s.submitted) return [];
 	if (!s.drafted) return ["draft"];
 	if (!s.planRequested) return ["plan"];
-	if (!s.planned || s.cutRunning) return ["wait"];
+	if (!s.planned) return ["wait"];
 
 	const timeLeft = (s.deadline - s.now) / 1000;
+	// Running work no longer holds the lead (D38): it may start more beside it, and is asked again when
+	// something finishes. Until then it waits for free
+	const idle = s.openJobs > 0 && !s.fresh;
+	// A cut reads main as its clips render: nothing may move main under it, and a late one runs out the clock
+	if (s.cutRunning && (idle || timeLeft < CUT_WALL_S + CUT_MARGIN_S)) return ["wait"];
 	const videoCost = s.prices.cut;
 	const allPrinted = s.cells.every((c) => c.printed !== undefined);
 	const picks = printPicks(s);
@@ -117,21 +130,19 @@ export function allowedActions(s: BoardSummary): Action[] {
 	const cutTime = CUT_WALL_S + CUT_MARGIN_S;
 
 	if (s.cut) {
-		// Video is required: with a cut in hand and no time to make a better one, submit. Otherwise the team
-		// may keep working toward another cut, and choose which cut to submit
-		if (timeLeft < 2 * cutTime) return ["submit"];
-		// Work toward a better cut is running: wait for it (asking the lead every 20 s whether to submit
-		// instead cost Opus 2¢ a turn to say "wait"); the clock above still forces the submission
-		if (s.openJobs > 0) return ["wait"];
+		// Video is required: with a cut in hand and no time to make another, submit (an earlier cut assembled
+		// before the deadline counts anyway). Was twice the cut's time: the finale re-run lost 15 minutes (D38)
+		if (timeLeft < cutTime) return ["submit"];
+		if (idle) return ["wait"];
 	} else {
 		// Out of time: finish the board and cut now, or the team has nothing to submit. This comes before
 		// waiting on running work: slow retakes must not hold up the cut (the crew arena's auteur printed with
 		// 3.5 minutes left because it waited on two retakes)
 		if (timeLeft < cutTime) {
 			if (picks.length) return ["print"];
-			return canCut ? ["cut"] : ["wait"];
+			return canCut && !s.cutRunning ? ["cut"] : ["wait"];
 		}
-		if (s.openJobs > 0) return ["wait"];
+		if (idle) return ["wait"];
 	}
 
 	const actions: Action[] = [];
@@ -155,9 +166,13 @@ export function allowedActions(s: BoardSummary): Action[] {
 	if (s.cut && s.sound && (s.sound.score || s.sound.lines) && !s.sound.current.includes(s.cut)) actions.push("remix");
 	if (s.talk?.names.length && s.spent + s.prices.turn + videoCost <= s.budget) actions.push("talk");
 	if (s.talk?.commons) actions.push("post");
+	if (s.recap && s.cells.some((c) => c.takes.some((t) => t.done && t.take !== c.printed))) actions.push("recap");
 	actions.push("wait");
-	return actions;
+	// While a cut renders, only work beside main: takes and ideas on their own branches, notes, sound, saves
+	return s.cutRunning ? actions.filter((a) => !MOVES_MAIN.includes(a)) : actions;
 }
+const TAKE_REF = /^cell\/(\d+)\/take-(\d+)$/;
+const MOVES_MAIN: Action[] = ["print", "cut", "restore", "replan", "remix"];
 
 /** The lead model's answer, checked: an allowed action with valid arguments. */
 export interface Decision {
@@ -223,12 +238,23 @@ function decisionOf(text: string, allowed: Action[], s: BoardSummary): Decision 
 			const cell = cellOf(a.cell);
 			const note = str(a.note);
 			if (!cell || !note) return { error: `note needs a cell (${cellIds.join(", ")}) and a note` };
-			return { action, args: { cell, note }, reason };
+			return { action, args: { cell, note, ...(a.insist === true ? { insist: true } : {}) }, reason };
 		}
 		case "retake": {
 			const cell = cellOf(a.cell);
 			if (!cell) return { error: `retake needs a cell (${cellIds.join(", ")})` };
 			return { action, args: { cell }, reason };
+		}
+		case "recap": {
+			const shots = Array.isArray(a.shots) ? [...new Set(a.shots.filter((x): x is string => typeof x === "string" && TAKE_REF.test(x)))] : [];
+			if (shots.length < RECAP_SHOTS.min || shots.length > RECAP_SHOTS.max) return { error: `recap needs ${RECAP_SHOTS.min} to ${RECAP_SHOTS.max} take branches, like "cell/03/take-2"` };
+			// What's on the board now is the film: a recap is what didn't make it
+			const printed = shots.filter((b) => {
+				const [, cell, take] = TAKE_REF.exec(b)!;
+				return s.cells.find((c) => c.id === cell)?.printed === Number(take);
+			});
+			if (printed.length) return { error: `${printed.join(", ")} ${printed.length > 1 ? "are" : "is"} printed: a recap is takes that didn't make it` };
+			return { action, args: { shots }, reason };
 		}
 		case "ideas": {
 			const cell = cellOf(a.cell);
@@ -449,6 +475,8 @@ export interface RoundResult {
 	film?: Record<string, number>;
 	process?: Record<string, number>;
 	git_moves?: Record<string, number>;
+	// Two endings (D38): the panel's probability that each team's submitted ending was the stronger
+	endings?: Record<string, number>;
 }
 
 export function seasonStandings(rounds: RoundResult[]) {

@@ -10,17 +10,21 @@ import { runTurnJob } from "./showrunner";
 import { runLinesJob, runMixJob, runScoreJob } from "./sound";
 import type { Job } from "./jobs";
 
+const FIRST_TAKES_STAGGER_S = 8;
+
 async function run(env: Env, job: Job) {
 	const progress = (detail: string) => report(env, job, "running", detail);
 	switch (job.kind) {
 		case "board": {
 			const board = await runBoardJob(env, job.repo, job.concept, job.cells, job.skills, progress);
-			// Every cell's first take in one group; when the group closes, the ledger queues the first-cut print
+			// Every cell's first take in one group; when the group closes, the ledger queues the first-cut print.
+			// Staggered, from a random start: three teams' first takes at once hit the per-minute limit (D38)
 			await submit(
 				env,
 				job.repo,
 				board.cells.map((cell) => ({ kind: "take" as const, cell })),
 				{ id: `cut-${job.id}`, kind: "first_cut" },
+				{ delaySeconds: Math.floor(Math.random() * 15), stagger: FIRST_TAKES_STAGGER_S },
 			);
 			return { detail: `${board.title}: ${board.cells.length} cells queued` };
 		}
