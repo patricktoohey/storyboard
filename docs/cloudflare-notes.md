@@ -34,6 +34,20 @@ CLI: `cf artifacts namespaces ...`. Use `cf cli search "<task>"` to discover com
 ## Clef
 
 `@cf/cloudflare/clef` (27B, ~210 ms text) and `@cf/cloudflare/clef-flash` (9B, ~40 ms). 64k context.
+
+**2026-10-09 update** ([changelog](https://developers.cloudflare.com/changelog/post/2026-10-09-clef-omni-workers-ai/)):
+Clef is 1.7 to 2x faster (moved to SGLang), same price ($0.24/M input). Clef-flash is $0.038/M (was
+$0.090) with a 24K context (was 64K); ours are a few images and a short state, well under. New:
+**`@cf/cloudflare/clef-omni`**, 30B MoE (3B active), $0.15/M input, 64K context, which takes audio (≤4
+clips, WAV/MP3, ≤300 s) and video (≤2, MP4/WebM, ≤60 s, ≤16 MiB, sampled at 2 fps) beside text and images.
+Video is `videos: [{"content_type": "video/mp4", "base64": "..."}]`, like images.
+
+Probed on three of the D38 dry run's mixed teasers (30 to 35 s with sound, 2 to 4.5 MB): one request with
+both films and the panel's five criteria as `choice` questions, ~19k input tokens (~$0.003), 8 to 14 s
+through the CLI. Both ways round it picked the same film every time (Gemini over GPT ~68%, over Opus ~80%;
+Opus over GPT narrowly), the panel's order give or take. Its `noul` checks on one film were noisy (whether
+a teaser ends on SEASON 2 came back 11% for one it rated best on the card), so use it to compare, not to
+check. No notes or reasons: it can't speak for a judge on camera.
 Output tokens aren't billed. Images: ≤4, base64 PNG/JPEG/WebP, no URLs. A 750 KB JPEG estimated ~200k tokens and was rejected;
 a 384px WebP (~18 KB) works, and Clef with one image answered in 0.4–0.6 s. Call it with `model: "clef"|"clef-flash"` in the body; answers come under `answers`.
 
