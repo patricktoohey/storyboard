@@ -526,6 +526,10 @@ const EDL_HEADER = ["order", "cell", "shot", "camera", "seconds", "file", "frame
  * Route: start a cut. One video job per printed cell, in a "cut:<name>" group; when the group finishes,
  * the ledger queues the assemble job. Cuts are numbered v1, v2, ... from the existing cut branches.
  */
+// A cut's clips queued a few seconds apart, so they don't share one invocation: six at once beside a team's
+// takes were all killed together in the D38 dry run's finale
+const CLIP_STAGGER_S = 3;
+
 export async function startCut(env: Env, repo: string, origin: string) {
 	const remote = await repoRemote(env, repo);
 	const existing = (await WorkingTree.listBranches(remote, "cut/")).filter((b) => /^cut\/v\d+$/.test(b));
@@ -537,7 +541,7 @@ export async function startCut(env: Env, repo: string, origin: string) {
 	// Priced per second, so the clip length is part of the request (and of the budget check)
 	const cap = Number(env.VIDEO_MAX_SECONDS);
 	const requests: JobRequest[] = printed.map((r) => ({ kind: "video", cell: r.id, cut, origin, seconds: clipSeconds(cellFromRow(r), cap) }));
-	return { cut, requests, group: { id: `cut-${cut}-${crypto.randomUUID().slice(0, 6)}`, kind: `cut:${cut}` as const } };
+	return { cut, requests, group: { id: `cut-${cut}-${crypto.randomUUID().slice(0, 6)}`, kind: `cut:${cut}` as const }, stagger: CLIP_STAGGER_S };
 }
 
 /** Job: animate one cell's printed frame and commit the clip to cut/<cut>/<cell>. */

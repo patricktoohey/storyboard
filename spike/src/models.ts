@@ -51,7 +51,7 @@ async function chat(env: Env, model: string, system: string, user: string, maxTo
 export async function ask(env: Env, model: string, system: string, user: string, maxTokens = 8192, think = false): Promise<{ text: string; usage: { input: number; output: number } }> {
 	// Reasoning models (Gemma 4, Kimi, GPT, Claude with thinking) think in the same token budget: at 2048 the
 	// director's plan came back empty, all of it spent on reasoning
-	const out = await withRetry(() => env.AI.run(model as keyof AiModels, llmRequest(model, system, user, maxTokens, think) as never));
+	const out = await withRetry(() => env.AI.run(model as keyof AiModels, llmRequest(model, system, user, maxTokens, think) as never), [...TRANSIENT, RATE_LIMITED]);
 	const text = llmText(out);
 	const usage = llmUsage(out);
 	if (text.trim()) return { text, usage };
@@ -324,8 +324,9 @@ async function clef(env: Env, state: unknown, images: string[], questions: Recor
 		images: images.map((base64) => ({ content_type: "image/webp", base64 })),
 		questions,
 	};
-	// 5012 "Clef inference failed" came and went within a minute in the first frontier arena
-	const out = (await withRetry(() => env.AI.run(`@cf/cloudflare/${model}` as keyof AiModels, input as never), [...TRANSIENT, "5012"])) as unknown as {
+	// 5012 "Clef inference failed" came and went within a minute in the first frontier arena. A burst of ideas
+	// and a replan (twenty takes, two or three Clef calls each) hit the per-minute limit in the D38 dry run
+	const out = (await withRetry(() => env.AI.run(`@cf/cloudflare/${model}` as keyof AiModels, input as never), [...TRANSIENT, "5012", RATE_LIMITED], 6)) as unknown as {
 		answers: Record<string, ClefAnswer>;
 	};
 	return { answers: out.answers, elapsed_ms: Date.now() - started };

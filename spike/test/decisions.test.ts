@@ -39,6 +39,15 @@ test("D9: a take branch drops main's copy of the cell's outputs in its first com
 	assert.equal(await tree.exists("cells/03/beat.md"), true);
 });
 
+test("D38: a take's first commit keeps the idea it writes while dropping main's copy", async () => {
+	// Writes went first, then removals: idea.md, written and inherited, was deleted from every idea take
+	const tree = await WorkingTree.init(offline);
+	await tree.commit(agent, "printed an idea take", { "cells/06/frame.webp": new Uint8Array([1]), "cells/06/idea.md": "# old\n" });
+	await tree.commit(agent, 'take 3: idea "door"', { "cells/06/prompt.md": "p\n", "cells/06/idea.md": "# door\n" }, ["cells/06/frame.webp", "cells/06/idea.md"]);
+	assert.equal(await tree.read("cells/06/idea.md"), "# door\n");
+	assert.equal(await tree.exists("cells/06/frame.webp"), false);
+});
+
 test("D8: printing is a merge whose extra parents are the printed takes", async () => {
 	const tree = await WorkingTree.init(offline);
 	const base = await tree.commit(agent, "board", { "storyboard.csv": "id\n" });

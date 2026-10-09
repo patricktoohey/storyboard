@@ -241,8 +241,8 @@ export default {
 				if (method === "GET" && action === "jobs") return Response.json(await ledger(env, repoName));
 				if (method === "POST" && action === "cut") {
 					// One image-to-video job per printed cell; the ledger assembles the cut when they finish
-					const { cut, requests, group } = await startCut(env, repoName, url.origin);
-					return Response.json({ cut, jobs: await submit(env, repoName, requests, group) }, { status: 202 });
+					const { cut, requests, group, stagger } = await startCut(env, repoName, url.origin);
+					return Response.json({ cut, jobs: await submit(env, repoName, requests, group, { stagger }) }, { status: 202 });
 				}
 				// Sound: a score at the film's length, the film's lines, or a (re)mix of a cut with the board's sound now
 				if (method === "POST" && (action === "score" || action === "lines")) {

@@ -441,7 +441,7 @@ export async function runTurnJob(env: Env, job: TurnJob, progress: Progress) {
 			}
 			case "cut": {
 				const cut = await startCut(env, board, job.origin);
-				await submit(env, board, cut.requests, cut.group);
+				await submit(env, board, cut.requests, cut.group, { stagger: cut.stagger });
 				detail += `: ${cut.cut}, ${summary.cutSeconds}s`;
 				break;
 			}

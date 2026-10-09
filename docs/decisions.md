@@ -547,3 +547,29 @@ GPT, the one team with time to spare, saved its safe cut, replanned, shot two en
 
 Checked in the mixer image: two webp stills and a clip mix to 5.4 s with the stills desaturated. Tests:
 `test/history-on-screen.test.ts`, and the round rules in `test/arena-rules.test.ts`.
+
+**The dry run** (`season-2026-10-09-1c5fd1`: Opus, GPT, Gemini; two rounds of 45 minutes, $10; the note,
+two endings, recap). Git moves went from 3, 1 and 0 in the finale re-run to:
+
+| | Round 1 | Finale | Round 1 result (film, process) | Finale result (film, process) |
+|---|---|---|---|---|
+| Gemini | 17 | 20 | 58% (52, 76) | 63% (59, 77) |
+| GPT | 11 | 12 | 47% (46, 52) | 51% (58, 30) |
+| Opus | 6 | 8 | 45% (52, 22) | 36% (34, 44) |
+
+- **Leads worked beside their renders**: twelve moves each in the first twelve minutes, with one or two
+  waits a lead chose; the rest waited for free.
+- **Every team made a recap**, and the judges noticed: Opus turned the black-and-white takes its
+  cinematographer had got wrong into "previously on", which all three judges called the round's most
+  creative move. Recaps push teasers past 30 seconds (31.6 to 34.8).
+- **The judges judge effect, not count**: their notes trace whether each comparison's winner reached the
+  submitted cut. Opus lost round 1's process on that: out of money for a second cut, its later work never
+  reached the film.
+- **Every team shot two endings when the note came**, and Opus and Gemini compared them, but no bet was
+  judged: `idea.md` was missing from every idea take. `WorkingTree.commit` wrote files, then removed the
+  ones the branch inherited from `main`, and `idea.md` was both, so it went. A commit now never removes a
+  path it writes. A bug since D35: ideas still ran as branches, but nothing could tell them from retakes.
+- **Interrupted cuts**: Gemini's first finale cut lost all six clips at once, its video jobs sharing one
+  invocation beside its takes. A cut's clips are now queued three seconds apart.
+- **Rate limits** still failed a few takes, in bursts after ideas and replans: Clef and the lead's calls
+  now wait out the per-minute limit too.

@@ -152,7 +152,9 @@ export class WorkingTree {
 			await git.add({ fs: this.fs, dir: this.dir, filepath: path });
 		}
 		for (const path of remove) {
-			if (!(await this.exists(path))) continue;
+			// A path written in this commit stays: a take's first commit writes idea.md while dropping what the
+			// branch inherited from main, idea.md among it, and the idea was lost from every take (D38)
+			if (path in files || !(await this.exists(path))) continue;
 			await this.fs.promises.unlink(`${this.dir}/${path}`);
 			await git.remove({ fs: this.fs, dir: this.dir, filepath: path });
 		}

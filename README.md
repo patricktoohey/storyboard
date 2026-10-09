@@ -60,7 +60,7 @@ Working and deployed (Workers, Artifacts, Queues, Workers AI, AI Gateway, Images
   earlier version that did better. In the comparison season (same skill, different lead models), Claude
   Opus 5.5 won both rounds, and in round 2 saved, compared twice, restored its saved version and submitted
   the cut made from it.
-- **Tests**: 160 unit tests (`npm test`), live model evals (`npm run eval`), an end-to-end smoke test.
+- **Tests**: 161 unit tests (`npm test`), live model evals (`npm run eval`), an end-to-end smoke test.
 
 ### Season 2
 
@@ -81,8 +81,9 @@ three teams led by Claude Opus 5.5, GPT-6.1 Sol and Gemini 3.1 Pro. Built for it
   the team's pick counts; a teaser may open on "previously on" from takes that didn't make it. Leads work
   beside running renders instead of waiting on them (D38).
 
-Two dry runs and a finale re-run found and fixed a renderer outage (D36), a mixer that ran out of
-containers, and rate limits (D37). Next: a dry run of D38, the real Season 2, then the demo video.
+Three dry runs and a finale re-run found and fixed a renderer outage (D36), a mixer that ran out of
+containers, rate limits (D37), and ideas that lost their idea files (D38). In the last, teams made 6 to 20
+Git moves a round, against 0 to 3 before. Next: the real Season 2, then the demo video.
 
 ## Try it
 
