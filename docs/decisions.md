@@ -576,3 +576,9 @@ two endings, recap). Git moves went from 3, 1 and 0 in the finale re-run to:
   invocation beside its takes. A cut's clips are now queued three seconds apart.
 - **Rate limits** still failed a few takes, in bursts after ideas and replans: Clef and the lead's calls
   now wait out the per-minute limit too.
+
+**Season 2, round 1** (`season-2026-10-09-fe8616`): Git moves 13 (Opus), 12 (GPT), 24 (Gemini); GPT won
+on film (62%), the round 55/48/47. Opus and GPT both drafted flux-2-dev and lost 5 and 7 takes to its
+per-minute limit after five minutes of retries each; Gemini, on flux-2-klein-9b, lost none. A rendering
+model with a lighter one to hand now gives a rate limit a minute (20 and 40 s), then hands over (D36's
+fallback, which had been for failing models only); a model with none still waits five minutes.

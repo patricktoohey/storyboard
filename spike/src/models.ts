@@ -210,10 +210,12 @@ async function runImageModel(env: Env, prompt: string, opts: RenderOptions) {
 			return await withRetry(async (attempt) => {
 				const seed = randomSeed();
 				return { bytes: await runImageModelOnce(env, model, prompt, { ...opts, seed }), seed, attempts: attempt, model };
-			}, [...TRANSIENT, "3030", RATE_LIMITED], 6);
+			// With a lighter model to hand, a minute of rate limiting is enough: two teams on flux-2-dev lost twelve
+			// takes to its per-minute limit in Season 2's round 1, after five minutes of retries each
+			}, [...TRANSIENT, "3030", RATE_LIMITED], RENDER_FALLBACK[model] ? 3 : 6);
 		} catch (err) {
 			const next = RENDER_FALLBACK[model];
-			if (!next || !TRANSIENT.some((code) => String(err).includes(code))) throw err;
+			if (!next || ![...TRANSIENT, RATE_LIMITED].some((code) => String(err).includes(code))) throw err;
 			console.warn(`${model} failing (${String(err).slice(0, 80)}); rendering with ${next}`);
 			model = next;
 		}
