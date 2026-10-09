@@ -28,7 +28,7 @@ import {
 	mixerSlot,
 	RECAP,
 	type Recap,
-	recapClips,
+	withRecap,
 	frameTimes,
 	heardOf,
 	soundSignature,
@@ -103,9 +103,7 @@ export async function filmSeconds(env: Env, repo: string) {
 	const cuts = (await WorkingTree.listBranches(remote, "cut/")).filter((b) => /^cut\/v\d+$/.test(b)).sort((a, b) => Number(b.slice(5)) - Number(a.slice(5)));
 	const edl = cuts[0] ? parseCsv<Record<string, string>>((await readText(env, repo, "video/edl.csv", cuts[0])) ?? "") : [];
 	const seconds = edl.length ? edl.reduce((s, e) => s + Number(e.seconds), 0) : (await filmOf(env, repo)).cells.reduce((s, c) => s + c.seconds, 0);
-	// The recap plays under the score too
-	const recap = await readText(env, repo, RECAP);
-	return Math.max(3, Math.round(seconds + recapClips(recap ? (JSON.parse(recap) as Recap) : null).reduce((s, c) => s + c.seconds, 0)));
+	return Math.max(3, Math.round(seconds));
 }
 
 /**
@@ -274,9 +272,9 @@ export async function runMixJob(env: Env, repo: string, cut: string, progress: P
 			return { cell: e.cell, file: e.file, seconds: Number(e.seconds), audio: Boolean(meta.audio) };
 		}),
 	);
-	// "Previously on" (D38): main's recap stills open the film
+	// "Previously on" (D38): main's recap stills open the film, in four seconds taken from it
 	const recapJson = await readText(env, repo, RECAP);
-	clips.unshift(...recapClips(recapJson ? (JSON.parse(recapJson) as Recap) : null));
+	clips.splice(0, clips.length, ...withRecap(clips, recapJson ? (JSON.parse(recapJson) as Recap) : null));
 	const scoreMp3 = await readBytes(env, repo, SCORE);
 	const lineRows = parseCsv<Record<string, string>>(await readText(env, repo, LINES_CSV) ?? "");
 	const lines: MixLine[] = lineRows.map((r) => ({ cell: r.cell, file: r.file, seconds: Number(r.seconds), speaker: r.speaker, text: r.text }));

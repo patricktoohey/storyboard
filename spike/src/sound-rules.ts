@@ -177,13 +177,25 @@ export interface MixClip {
 // "Previously on" (D38): stills from the team's own history, rejected takes and the like, before the film
 export const RECAP = "recap.json";
 export const RECAP_SHOTS = { min: 2, max: 4 };
-export const RECAP_SECONDS_EACH = 1.2;
+// Taken from the film's own length, not added to it: the brief is 30 seconds
+export const RECAP_SECONDS = 4;
 export interface Recap {
 	shots: { branch: string; file: string }[];
 }
-/** The recap's clips, in order, ahead of the cut's. */
-export const recapClips = (r: Recap | null): MixClip[] =>
-	(r?.shots ?? []).slice(0, RECAP_SHOTS.max).map((x, i) => ({ cell: `r${i + 1}`, file: x.file, seconds: RECAP_SECONDS_EACH, audio: false, still: true }));
+/**
+ * The cut's clips with the recap ahead of them: its stills share RECAP_SECONDS, and every shot after is
+ * trimmed by the same share to make room, so the film keeps its length (the last shot takes the rounding).
+ */
+export function withRecap(clips: MixClip[], r: Recap | null): MixClip[] {
+	const shots = (r?.shots ?? []).slice(0, RECAP_SHOTS.max);
+	const film = clips.reduce((s, c) => s + c.seconds, 0);
+	if (!shots.length || film <= RECAP_SECONDS) return clips;
+	const each = Number((RECAP_SECONDS / shots.length).toFixed(2));
+	const room = film - each * shots.length;
+	const trimmed = clips.map((c) => ({ ...c, seconds: Number(((c.seconds * room) / film).toFixed(2)) }));
+	trimmed[trimmed.length - 1].seconds = Number((room - trimmed.slice(0, -1).reduce((s, c) => s + c.seconds, 0)).toFixed(2));
+	return [...shots.map((x, i) => ({ cell: `r${i + 1}`, file: x.file, seconds: each, audio: false, still: true })), ...trimmed];
+}
 export interface MixLine {
 	cell: string;
 	file: string;

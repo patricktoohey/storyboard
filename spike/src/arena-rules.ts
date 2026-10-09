@@ -35,7 +35,7 @@ export const ACTIONS = {
 	compare: `{"a": string, "b": string} Have the judges compare two versions of your board side by side (commits, saved names, or "main" for now); the verdict appears in your history. About $${COMPARE_USD.toFixed(2)}`,
 	talk: '{"to": "crew" | a player\'s name, "message": string} Speak to your crew in the crew room: ask for ideas, argue a choice, settle a disagreement. Whoever you address answers. Costs only their words',
 	recap:
-		'{"shots": ["cell/03/take-2", "cell/05/take-1", ...]} "Previously on": two to four stills from your board\'s own history (takes you didn\'t print, from any plan) open the teaser, washed out, 1.2 seconds each. Nothing is ever lost, so what didn\'t make it can be part of the story. A new recap replaces the old; the next cut or remix carries it. Free',
+		'{"shots": ["cell/03/take-2", "cell/05/take-1", ...]} "Previously on": two to four stills from your board\'s own history (takes you didn\'t print, from any plan) open the teaser, washed out, in four seconds taken from your film\'s length (every shot is trimmed a little to make room). Nothing is ever lost, so what didn\'t make it can be part of the story. A new recap replaces the old; the next cut or remix carries it. Free',
 	post: '{"message": string} Say something in the commons, which every team reads: a challenge, an offer, a doubt about a rival. Free',
 	wait: "Do nothing now: you're asked again when running work finishes",
 } as const;

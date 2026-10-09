@@ -541,8 +541,10 @@ GPT, the one team with time to spare, saved its safe cut, replanned, shot two en
   and the process record says whether the panel agreed (`endings` in `comparative.final.json`). Stills on
   both sides, since only the submitted ending was animated.
 - **"Previously on"** (`format.recap`): a `recap` move copies two to four frames from take branches that
-  didn't make it into `recap/` on `main`; the mix opens the teaser with them, washed out, 1.2 seconds each,
-  and commits them to the cut. A new recap changes the mix's signature, so a free remix carries it. Only a
+  didn't make it into `recap/` on `main`; the mix opens the teaser with them, washed out, in four seconds
+  taken from the film (every shot after is trimmed by the same share, so a 30-second film stays 30), and
+  commits them to the cut. (At first the recap was added on top, 1.2 seconds a still, and teasers ran to
+  34.8 seconds in the dry run.) A new recap changes the mix's signature, so a free remix carries it. Only a
   team that kept its history has one, and the panel sees it in the film. It counts as a Git move.
 
 Checked in the mixer image: two webp stills and a clip mix to 5.4 s with the stills desaturated. Tests:
@@ -561,7 +563,8 @@ two endings, recap). Git moves went from 3, 1 and 0 in the finale re-run to:
   waits a lead chose; the rest waited for free.
 - **Every team made a recap**, and the judges noticed: Opus turned the black-and-white takes its
   cinematographer had got wrong into "previously on", which all three judges called the round's most
-  creative move. Recaps push teasers past 30 seconds (31.6 to 34.8).
+  creative move. Recaps pushed teasers past 30 seconds (31.6 to 34.8); they now take their four seconds
+  from the film.
 - **The judges judge effect, not count**: their notes trace whether each comparison's winner reached the
   submitted cut. Opus lost round 1's process on that: out of money for a second cut, its later work never
   reached the film.

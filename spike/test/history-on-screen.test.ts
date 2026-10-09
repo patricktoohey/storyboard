@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { type BoardSummary, allowedActions, parseDecision } from "../src/arena-rules.ts";
 import { ENDING_RUBRIC, endingsLine, endingsNote, gitMoves, processRecord } from "../src/process-rules.ts";
-import { RECAP_SECONDS_EACH, mixPlan, recapClips, soundSignature } from "../src/sound-rules.ts";
+import { RECAP_SECONDS, mixPlan, soundSignature, withRecap } from "../src/sound-rules.ts";
 import { endingsRequest, parseTeaserVerdict } from "../src/teaser-rules.ts";
 import { publicMove } from "../src/format-rules.ts";
 
@@ -50,16 +50,23 @@ test("D38: a recap is two to four take branches, none of them printed", () => {
 	assert.deepEqual(gitMoves([{ detail: "turn 5: recap (opus): cell/01/take-1, cell/02/take-2", result: "acted" }]), { total: 1, recap: 1 });
 });
 
-test("D38: the recap opens the mix as washed-out stills, and changing it dates the mix", () => {
-	const recap = recapClips({ shots: [{ branch: "cell/01/take-1", file: "recap/01.webp" }, { branch: "cell/02/take-2", file: "recap/02.webp" }] });
-	assert.deepEqual(recap.map((c) => [c.cell, c.seconds, c.still, c.audio]), [["r1", RECAP_SECONDS_EACH, true, false], ["r2", RECAP_SECONDS_EACH, true, false]]);
-	const plan = mixPlan([...recap, { cell: "01", file: "video/01.mp4", seconds: 5, audio: false }], undefined, [{ cell: "01", file: "sound/lines/01.mp3", seconds: 2, speaker: "Ana", text: "Again." }]);
-	assert.equal(plan.total, 5 + 2 * RECAP_SECONDS_EACH);
+test("D38: the recap opens the mix as washed-out stills in four seconds taken from the film", () => {
+	const shots = [{ branch: "cell/01/take-1", file: "recap/01.webp" }, { branch: "cell/02/take-2", file: "recap/02.webp" }, { branch: "cell/02/take-3", file: "recap/03.webp" }];
+	const film = [5, 5, 5, 5, 5, 5].map((seconds, i) => ({ cell: `0${i + 1}`, file: `video/0${i + 1}.mp4`, seconds, audio: false }));
+	const clips = withRecap(film, { shots });
+	assert.deepEqual(clips.slice(0, 3).map((c) => [c.cell, c.seconds, c.still, c.audio]), [["r1", 1.33, true, false], ["r2", 1.33, true, false], ["r3", 1.33, true, false]]);
+	// Still 30 seconds: every shot gave up the same share
+	assert.equal(Number(clips.reduce((s, c) => s + c.seconds, 0).toFixed(2)), 30);
+	assert.equal(clips[3].seconds, 4.33);
+	assert.equal(withRecap(film, null), film);
+	assert.ok(RECAP_SECONDS <= 4);
+	const plan = mixPlan(clips, undefined, [{ cell: "01", file: "sound/lines/01.mp3", seconds: 2, speaker: "Ana", text: "Again." }]);
+	assert.equal(plan.total, 30);
 	const filter = plan.args[plan.args.indexOf("-filter_complex") + 1];
 	assert.match(filter, /\[0:v\][^;]*hue=s=0\.3[^;]*\[v0\]/);
-	assert.doesNotMatch(filter, /\[2:v\][^;]*hue/);
+	assert.doesNotMatch(filter, /\[3:v\][^;]*hue/);
 	// Lines stay on their own shot, after the recap
-	assert.ok(plan.cues[0].at >= 2 * RECAP_SECONDS_EACH);
+	assert.ok(plan.cues[0].at >= 3.99);
 	// No recap: the signature mixes made before recaps carry; a recap changes it
 	assert.equal(soundSignature("s", "l", null), soundSignature("s", "l"));
 	assert.notEqual(soundSignature("s", "l", '{"shots":[]}'), soundSignature("s", "l"));

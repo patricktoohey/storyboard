@@ -68,7 +68,8 @@ ${PROCESS_RUBRIC.map((c) => `- ${c.id}: ${c.question}`).join("\n")}${rules.netwo
 
 // D38: the history on screen, not only in the log
 const RECAP_TEXT = `\nYour teaser may open on "previously on" (recap): stills from takes that didn't make it, from your own
-history. What you tried and dropped can be part of the story, and only a team that kept its history has one.`;
+history, in four seconds taken from your 30 (every shot is trimmed a little to make room). What you tried and
+dropped can be part of the story, and only a team that kept its history has one.`;
 
 // Where a held note waits: the cinematographer pushed back, and the lead hasn't noted that cell again
 const HELD = "talk/held.json";
