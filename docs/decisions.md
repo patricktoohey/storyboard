@@ -494,3 +494,13 @@ on Clef's live comparison.
 
 The season ran two rounds, not one: `POST /seasons` asks for at least two. So the re-run tested the whole
 finale too: Gemini's steal hit GPT's protected player and was blocked.
+
+**The finale (round 2), blind, judged by the panel:** GPT 65%, Opus 57%, Gemini 28% (film 66/57/28,
+process 63/59/29). Every mix went through the pool on its first try. The judges agreed on the film order
+except Gemini's judge, which put Opus first by a hair (64.5% to GPT's 64%). Git moves fell in the finale:
+GPT 3 (save, ideas, compare), Opus 1 (ideas), Gemini 0 (eight notes on one board instead). The season ended
+GPT 5, Opus 5, Gemini 2.
+
+- **Rate limits lost ten takes** (`3021`, the per-minute request limit), with no retry. Image renders now
+  retry it on the same model after 20, 40, then 60 seconds; it never triggers the fallback (D36), which is
+  for a model that's failing, not busy. The fallback itself still hasn't been needed live.

@@ -63,3 +63,7 @@ export function llmUsage(out: unknown) {
 	const u = ((out ?? {}) as Output).usage ?? {};
 	return { input: u.input_tokens ?? u.prompt_tokens ?? 0, output: u.output_tokens ?? u.completion_tokens ?? 0 };
 }
+
+// Workers AI's per-minute request limit: wait out the minute on the same model, never fail over (D37)
+export const RATE_LIMITED = "3021";
+export const retryDelay = (err: unknown, attempt: number) => (String(err).includes(RATE_LIMITED) ? 20_000 * attempt : 500 * 2 ** attempt);

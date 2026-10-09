@@ -3,7 +3,7 @@
 // what stays here is each role's output contract, which code depends on.
 import { SETTING_SHOTS, continuityQuestions, continuityVerdict } from "./continuity-rules.ts";
 import { llmFor } from "./crew-env";
-import { llmRequest, llmText, llmUsage } from "./llm.ts";
+import { RATE_LIMITED, llmRequest, llmText, llmUsage, retryDelay } from "./llm.ts";
 import { normalizePositions, withBlocking, withStaged } from "./blocking.ts";
 import { insertLooks } from "./looks";
 import { type NoteAction, routerRequest } from "./router.ts";
@@ -37,7 +37,7 @@ async function withRetry<T>(fn: (attempt: number) => Promise<T>, retryOn = TRANS
 			return await fn(attempt);
 		} catch (err) {
 			if (attempt >= attempts || !retryOn.some((code) => String(err).includes(code))) throw err;
-			await new Promise((r) => setTimeout(r, 500 * 2 ** attempt));
+			await new Promise((r) => setTimeout(r, retryDelay(err, attempt)));
 		}
 	}
 }
@@ -210,7 +210,7 @@ async function runImageModel(env: Env, prompt: string, opts: RenderOptions) {
 			return await withRetry(async (attempt) => {
 				const seed = randomSeed();
 				return { bytes: await runImageModelOnce(env, model, prompt, { ...opts, seed }), seed, attempts: attempt, model };
-			}, [...TRANSIENT, "3030"]);
+			}, [...TRANSIENT, "3030", RATE_LIMITED], 4);
 		} catch (err) {
 			const next = RENDER_FALLBACK[model];
 			if (!next || !TRANSIENT.some((code) => String(err).includes(code))) throw err;
