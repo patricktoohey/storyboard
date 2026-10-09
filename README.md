@@ -55,7 +55,7 @@ Working and deployed (Workers, Artifacts, Queues, Workers AI, AI Gateway, Images
   earlier version that did better. In the comparison season (same skill, different lead models), Claude
   Opus 5.5 won both rounds, and in round 2 saved, compared twice, restored its saved version and submitted
   the cut made from it.
-- **Tests**: 151 unit tests (`npm test`), live model evals (`npm run eval`), an end-to-end smoke test.
+- **Tests**: 152 unit tests (`npm test`), live model evals (`npm run eval`), an end-to-end smoke test.
 
 Next: [Season 2](docs/season-2.md), a 30-second teaser about the show itself, with sound and dialogue.
 Built so far: the cast (every agent a named character; players drafted, their models hidden), the crew

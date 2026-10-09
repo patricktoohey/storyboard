@@ -23,7 +23,9 @@ import {
 	type VoiceKey,
 	mixName,
 	mixPlan,
+	MIXER_POOL,
 	mixerFull,
+	mixerSlot,
 	frameTimes,
 	heardOf,
 	soundSignature,
@@ -279,20 +281,27 @@ export async function runMixJob(env: Env, repo: string, cut: string, progress: P
 		if (!bytes) throw new Error(`missing ${f}`);
 		sources[f] = bytes;
 	}
-	const mixer = getContainer(env.MIXER as unknown as DurableObjectNamespace<Mixer>, `${repo}-${cut}-${crypto.randomUUID().slice(0, 6)}`);
-	for (const [f, bytes] of Object.entries(sources)) {
-		// With every container busy (teams finish together), wait for one to sleep rather than lose the mix
-		for (let attempt = 1; ; attempt++) {
-			const res = await mixer.fetch(new Request(`http://mixer/files/${mixName(f)}`, { method: "PUT", body: bytes }));
-			if (res.ok) break;
+	// One of the pooled mixers (D37), this mix in its own directory there
+	const mix_id = crypto.randomUUID().slice(0, 8);
+	const at = (path: string) => `http://mixer${path}?mix=${mix_id}`;
+	const start = Math.floor(Math.random() * MIXER_POOL);
+	let mixer!: ReturnType<typeof getContainer<Mixer>>;
+	upload: for (let attempt = 1; ; attempt++) {
+		mixer = getContainer(env.MIXER as unknown as DurableObjectNamespace<Mixer>, mixerSlot(start, attempt));
+		for (const [f, bytes] of Object.entries(sources)) {
+			const res = await mixer.fetch(new Request(at(`/files/${mixName(f)}`), { method: "PUT", body: bytes }));
+			if (res.ok) continue;
 			const text = await res.text();
-			if (!mixerFull(text) || attempt >= 10) throw new Error(`uploading ${f} to the mixer: ${res.status} ${text}`);
-			await progress(`every mixer is busy; waiting (attempt ${attempt})`);
-			await new Promise((r) => setTimeout(r, 20_000));
+			if (!mixerFull(text) || attempt >= 12) throw new Error(`uploading ${f} to the mixer: ${res.status} ${text}`);
+			// Every slot taken (instances from before the pool still count): try the next one shortly
+			await progress(`every mixer is busy; trying another (attempt ${attempt})`);
+			await new Promise((r) => setTimeout(r, 15_000));
+			continue upload;
 		}
+		break;
 	}
 	const started = Date.now();
-	const res = await mixer.fetch(new Request("http://mixer/run", { method: "POST", body: JSON.stringify({ args: plan.args }) }));
+	const res = await mixer.fetch(new Request(at("/run"), { method: "POST", body: JSON.stringify({ args: plan.args }) }));
 	if (!res.ok) throw new Error(`mix failed: ${(await res.text()).slice(0, 300)}`);
 	const mp4 = new Uint8Array(await res.arrayBuffer());
 
@@ -302,7 +311,7 @@ export async function runMixJob(env: Env, repo: string, cut: string, progress: P
 	const evidence: Record<string, Uint8Array | string> = {};
 	let evidenceError: string | undefined;
 	try {
-		const ex = await mixer.fetch(new Request("http://mixer/extract", { method: "POST", body: JSON.stringify({ times: frameTimes(plan.total) }) }));
+		const ex = await mixer.fetch(new Request(at("/extract"), { method: "POST", body: JSON.stringify({ times: frameTimes(plan.total) }) }));
 		if (!ex.ok) throw new Error(`extract: ${ex.status} ${(await ex.text()).slice(0, 200)}`);
 		const got = (await ex.json()) as { frames: { t: number; jpg: string }[]; audio: string | null };
 		const frames = got.frames.map((f, i) => ({ t: f.t, file: `video/frames/${String(i + 1).padStart(2, "0")}.jpg`, jpg: f.jpg }));

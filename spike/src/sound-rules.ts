@@ -83,6 +83,11 @@ export function heardOf(out: unknown): Heard {
 
 /** The Containers error for "every instance is running": worth waiting for, unlike any other failure. */
 export const mixerFull = (error: string) => /maximum number of running container instances/i.test(error);
+// A fixed pool of named mixers, under the instance cap (cloudflare.config.ts), reused while warm: a fresh
+// instance per mix ran past the cap with three teams mixing, slots not freed as instances slept (D37). Mixes
+// sharing an instance each work in their own directory.
+export const MIXER_POOL = 8;
+export const mixerSlot = (start: number, attempt: number) => `mixer-${(start + attempt - 1) % MIXER_POOL}`;
 export const mp3Seconds = (bytes: number) => Number(((bytes * 8) / 128_000).toFixed(2));
 
 // What a sound job is charged when queued (D19): the model's price plus the player's call that writes it

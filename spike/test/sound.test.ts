@@ -15,7 +15,9 @@ import {
 	parseVoiceCast,
 	scoreEstimate,
 	soundSignature,
+	MIXER_POOL,
 	mixerFull,
+	mixerSlot,
 } from "../src/sound-rules.ts";
 import { type BoardSummary, allowedActions, parseDecision } from "../src/arena-rules.ts";
 import { DEFAULT_CREW, clipCost, videoRequest } from "../src/crew.ts";
@@ -175,4 +177,13 @@ test("sound is charged when queued: the score by its length, lines at a fixed es
 test("D32: a mix waits when every mixer container is running, and fails on anything else", () => {
 	assert.ok(mixerFull("Failed to start container: Maximum number of running container instances exceeded. Try again later"));
 	assert.ok(!mixerFull("ffmpeg exited with code 1"));
+});
+
+test("D37: mixes go to a fixed pool of named mixers under the cap, the next one on each busy retry", () => {
+	assert.ok(MIXER_POOL < 10);
+	assert.equal(mixerSlot(3, 1), "mixer-3");
+	assert.equal(mixerSlot(3, 2), "mixer-4");
+	assert.equal(mixerSlot(MIXER_POOL - 1, 2), "mixer-0");
+	const slots = new Set(Array.from({ length: 12 }, (_, i) => mixerSlot(5, i + 1)));
+	assert.equal(slots.size, MIXER_POOL);
 });

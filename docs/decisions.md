@@ -476,3 +476,21 @@ Observed on the boards so far, not yet addressed:
 - **Non-human characters**: a seal pup got the human age prefix ("young child small grey fur…"), was cast
   as a child, and continuity asked about its hair. Characters need a `kind` (person, animal, creature) that
   gates age prefixes and the hair and outerwear checks.
+
+## D37: a pool of named mixers
+
+The finale re-run (`season-2026-10-09-9a632a`) lost every round 1 mix to "Maximum number of running
+container instances exceeded", with only three teams mixing and three minutes of waiting. Each mix had
+asked for a fresh, uniquely named instance; instances didn't give their slots back as they slept, so the
+cap of 10 filled across a session's mixes. With no teaser, the panel didn't judge (D36), and round 1 stood
+on Clef's live comparison.
+
+- **Mixes now go to a fixed pool of eight named mixers** (`mixer-0` … `mixer-7`), under the cap and reused
+  while warm. A mix starts at a random slot and moves to the next on each busy retry.
+- **Each mix works in its own directory** (`?mix=<id>`) on a shared instance, cleared after `/extract` or
+  a failed run.
+- Checked live after deploying: the first re-mix waited two minutes for slots held by instances from
+  before the pool; the next two, run together, started at once. Round 1's three teasers are mixed now.
+
+The season ran two rounds, not one: `POST /seasons` asks for at least two. So the re-run tested the whole
+finale too: Gemini's steal hit GPT's protected player and was blocked.
