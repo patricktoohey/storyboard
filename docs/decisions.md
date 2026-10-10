@@ -610,4 +610,11 @@ stops at once.
 - **Thirty seconds**: Gemini's round 1 teaser ran 40 s (eight 5 s shots). The mix now fits any film to
   `FILM_SECONDS`, trimming every shot by the same share, as the recap already did.
 
-Tests: `test/credits.test.ts`.
+- **Voices over voices**: the mixes' Whisper transcripts show where the overlap comes from. GPT's round 2
+  teaser (Wan, no sound of its own) transcribes as exactly its eight lines. Opus's (FLUX.3 Video) says "This
+  season, we don't have to pick", then the clip itself says "You don't need to choose only one option": the
+  model is asked for ambience only and voices its shot's beat anyway. A clip's own sound now drops out
+  wherever a line is spoken over it (`quietUnderLines`), the score carrying those seconds, and a voiced
+  model's prompt loses the beat's quoted lines (`unspoken`).
+
+Tests: `test/credits.test.ts`, `test/sound.test.ts`.

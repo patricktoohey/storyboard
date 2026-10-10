@@ -235,16 +235,34 @@ export function cueLines(clips: MixClip[], lines: MixLine[]) {
 	return { cues, total };
 }
 
+/**
+ * A clip keeps its own sound only where no line is spoken over it (D39). FLUX.3 Video is asked for ambience
+ * only, but voices its shot's beat anyway: Opus's round 2 teaser said "This season, we don't have to pick",
+ * then the clip said "You don't need to choose only one option" over the next shot. Ducking can't take a
+ * voice out from under another voice, so under a line the clip is silent and the score carries it.
+ */
+export function quietUnderLines(clips: MixClip[], cues: { at: number; seconds: number }[]): MixClip[] {
+	let start = 0;
+	return clips.map((c) => {
+		const end = start + c.seconds;
+		const spoken = cues.some((q) => q.at < end && q.at + q.seconds > start);
+		start = end;
+		return c.audio && spoken ? { ...c, audio: false } : c;
+	});
+}
+
 /** Container file name for a repo path: flat, and only characters the mixer accepts. */
 export const mixName = (path: string) => path.replace(/[^a-zA-Z0-9.]+/g, "_");
 
 /**
  * ffmpeg's arguments for a cut: clips concatenated in EDL order and fitted to one frame size; each clip's
- * own sound (or silence) under the score; lines laid on their cues, with the bed ducked beneath them.
+ * own sound (or silence, and always silence under a line) under the score; lines laid on their cues, with
+ * the bed ducked beneath them.
  */
-export function mixPlan(clips: MixClip[], score: { file: string } | undefined, lines: MixLine[]) {
-	if (!clips.length) throw new Error("nothing to mix: no clips");
-	const { cues, total } = cueLines(clips, lines);
+export function mixPlan(cut: MixClip[], score: { file: string } | undefined, lines: MixLine[]) {
+	if (!cut.length) throw new Error("nothing to mix: no clips");
+	const { cues, total } = cueLines(cut, lines);
+	const clips = quietUnderLines(cut, cues);
 	const files = [...clips.map((c) => c.file), ...(score ? [score.file] : []), ...cues.map((c) => c.file)];
 	const stereo = "aresample=44100,aformat=sample_fmts=fltp:channel_layouts=stereo";
 	const f: string[] = [];
@@ -308,5 +326,5 @@ export function mixPlan(clips: MixClip[], score: { file: string } | undefined, l
 		String(total),
 		"out.mp4",
 	];
-	return { files, args, total, cues: cues.map(({ file, at, speaker, text, cell }) => ({ cell, speaker, text, file, at })) };
+	return { files, args, total, clips, cues: cues.map(({ file, at, speaker, text, cell }) => ({ cell, speaker, text, file, at })) };
 }

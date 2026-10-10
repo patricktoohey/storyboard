@@ -49,6 +49,9 @@ export function motionPrompt(cell: Pick<Cell, "beat" | "camera" | "shot">) {
 }
 
 export const SOUND_HINT = "Sound: the natural ambience and effects of the scene only; no music, no speech.";
+// A beat that quotes its line gets voiced by a model with its own sound, "no speech" or not (D39): the
+// quotes come out of the prompt, and the mix silences the clip under the line anyway
+export const unspoken = (prompt: string) => prompt.replace(/["“][^"“”]*["”]/g, "").replace(/\s+([,.;:!?])/g, "$1").replace(/\s{2,}/g, " ").trim();
 
 export const NEGATIVE_PROMPT = "morphing faces, extra people, text, watermark, flicker, distorted hands";
 
@@ -74,7 +77,7 @@ export async function animate(
 	const base64 = MENU.video[crew.video].imageAs === "base64" ? toBase64(await frame.jpeg()) : undefined;
 	// A clip with its own sound gets the scene's ambience only: music and voices are the score's and the lines'
 	const audio = Boolean((MENU.video[crew.video] as VideoOption).audio);
-	const req = videoRequest(crew, { url: frame.url, base64 }, audio ? `${prompt} ${SOUND_HINT}` : prompt, seconds, { seed, staticCamera });
+	const req = videoRequest(crew, { url: frame.url, base64 }, audio ? `${unspoken(prompt)} ${SOUND_HINT}` : prompt, seconds, { seed, staticCamera });
 	if (crew.video === "wan-2.7-i2v") req.input.negative_prompt = NEGATIVE_PROMPT;
 	type Out = { video?: string; state?: string; result?: { video?: string } } | undefined;
 	const out = (await env.AI.run(req.model as keyof AiModels, req.input as never).catch(async (err) => {

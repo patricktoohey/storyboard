@@ -339,7 +339,7 @@ export async function runMixJob(env: Env, repo: string, cut: string, progress: P
 		seconds: plan.total,
 		sound_signature: soundSignature(scoreJson, linesCsv, recapJson),
 		...(recapJson ? { recap: JSON.parse(recapJson) } : {}),
-		clips: clips.map((c) => ({ cell: c.cell, file: c.file, seconds: c.seconds, own_sound: c.audio })),
+		clips: plan.clips.map((c, i) => ({ cell: c.cell, file: c.file, seconds: c.seconds, own_sound: c.audio, ...(clips[i].audio && !c.audio ? { own_sound_dropped: "under a line" } : {}) })),
 		score: scoreMp3 ? { file: SCORE, ...JSON.parse((await readText(env, repo, "sound/score.json")) ?? "{}") } : null,
 		lines: plan.cues,
 		levels: { clips_under_score: 0.6, score: 0.8, lines: 1.3, ducking: "sidechain, ratio 6" },
@@ -352,7 +352,7 @@ export async function runMixJob(env: Env, repo: string, cut: string, progress: P
 		const t = await readText(env, repo, p);
 		if (t) extra[p] = new TextEncoder().encode(t);
 	}
-	await tree.commit({ name: "mixer" }, `Mix ${cut}: ${plan.total}s, ${clips.filter((c) => c.audio).length} clips with their own sound${scoreMp3 ? ", score" : ""}, ${plan.cues.length} lines`, {
+	await tree.commit({ name: "mixer" }, `Mix ${cut}: ${plan.total}s, ${plan.clips.filter((c) => c.audio).length} clips with their own sound${scoreMp3 ? ", score" : ""}, ${plan.cues.length} lines`, {
 		"video/teaser.mp4": mp4,
 		"video/mix.json": JSON.stringify(mix, null, 2) + "\n",
 		...evidence,

@@ -18,7 +18,9 @@ import {
 	MIXER_POOL,
 	mixerFull,
 	mixerSlot,
+	quietUnderLines,
 } from "../src/sound-rules.ts";
+import { unspoken } from "../src/video.ts";
 import { type BoardSummary, allowedActions, parseDecision } from "../src/arena-rules.ts";
 import { DEFAULT_CREW, clipCost, videoRequest } from "../src/crew.ts";
 import { estimate } from "../src/costs.ts";
@@ -186,4 +188,18 @@ test("D37: mixes go to a fixed pool of named mixers under the cap, the next one 
 	assert.equal(mixerSlot(MIXER_POOL - 1, 2), "mixer-0");
 	const slots = new Set(Array.from({ length: 12 }, (_, i) => mixerSlot(5, i + 1)));
 	assert.equal(slots.size, MIXER_POOL);
+});
+
+test("D39: a clip's own sound drops out under a line, and a voiced model isn't handed the line to say", () => {
+	const clip = (cell: string, audio: boolean) => ({ cell, file: `video/${cell}.mp4`, seconds: 4, audio });
+	const lines = [{ cell: "02", file: "sound/lines/02-1.mp3", seconds: 2.5, speaker: "Maya", text: "This season, we don't have to pick." }];
+	const plan = mixPlan([clip("01", true), clip("02", true), clip("03", true)], undefined, lines);
+	assert.deepEqual(plan.clips.map((c) => c.audio), [true, false, true]);
+	const filter = plan.args[plan.args.indexOf("-filter_complex") + 1];
+	assert.match(filter, /\[0:a\]/);
+	assert.doesNotMatch(filter, /\[1:a\]/);
+	// A line running on into the next shot silences that one too
+	assert.deepEqual(quietUnderLines([clip("01", true), clip("02", true)], [{ at: 3, seconds: 2 }]).map((c) => c.audio), [false, false]);
+	assert.equal(unspoken('Maya turns to Theo: "This season, we don\'t have to pick." He nods.'), "Maya turns to Theo: He nods.");
+	assert.equal(unspoken("Theo laughs at the monitor."), "Theo laughs at the monitor.");
 });
