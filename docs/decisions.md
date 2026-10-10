@@ -632,7 +632,7 @@ and the record didn't say who had.
   Its new board forks from that one with every branch (takes, cuts, saved versions), the ledger starts
   empty (the old rows stay in the `jobs` branch's history), and board.json records where it stopped:
   the commit, and the cuts, saved versions and comparisons that came with it. The team keeps its
-  showrunner, cinematographer and cast unless given others, drafts a crew for the new budget, and skips
+  showrunner, cinematographer, cast and pinned lead unless given others, drafts a crew for the new budget, and skips
   the plan: its plan and printed shots are its own to keep or change. Its earlier cuts are there to
   watch; the submission must be a new cut (`roundCuts`). The process record says what was carried over
   and counts only this round's moves; the replay shows only this arena's events. This is Git doing what

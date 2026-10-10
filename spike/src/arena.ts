@@ -64,7 +64,7 @@ export interface TeamSpec {
 	// A twist the lead took (format-rules.ts): money on its budget, minutes off its clock
 	twist?: { usd: number; minutes: number; text: string };
 	// A board to carry on from (D40): the team starts where that board stopped, every branch with it, and
-	// keeps its showrunner, cinematographer and cast unless given others
+	// keeps its showrunner, cinematographer, cast and pinned lead unless given others
 	from?: string;
 }
 export const teamSpec = (t: string | TeamSpec): TeamSpec => (typeof t === "string" ? { team: t } : t);
@@ -158,6 +158,8 @@ export async function createArena(
 			if (from && !prior?.skills) throw new Error(`${from} is not a board`);
 			const carried: CarriedFrom | undefined = from ? await stoppedAt(env, from) : undefined;
 			cast ??= prior?.cast;
+			// Its pinned lead too: a season's GPT team stays GPT
+			lead ??= prior?.lead;
 			showrunner ??= prior?.skills?.showrunner ?? `showrunner-${team}`;
 			const source = from ?? opts.season?.teamRepos[team];
 			// A season team's showrunner skill lives in its own repo (it evolves there); others in the template
