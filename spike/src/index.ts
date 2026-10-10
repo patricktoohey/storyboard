@@ -34,12 +34,14 @@
 //                                              ("judge": a round's final judging again, after running out of credits)
 //                                              ("cast": true or {"undersold": n}: characters, a draft, talk; "blind_final")
 //   POST /arenas/:id/close                     after the deadline: record submissions, queue the final round (cron does this too)
-//   GET  /credits                              the AI Gateway's credit balance (with AI_GATEWAY_TOKEN; POST /seasons checks it)
+//   GET  /credits                              the AI Gateway's credit balance (with AI_GATEWAY_TOKEN; POST /seasons checks it);
+//                                              ?rounds=&teams=&budget= adds what that would cost
+//   GET  /menu                                 every model the crew draft can choose: prices, and why an option is off
 //   POST /sweep                                mark jobs with no progress for 10 minutes failed (also runs every 5 minutes)
 //   POST /template[?reset=1]                   create the template / add newly bundled skills (reset: overwrite with bundled)
 // Every route except GET / requires `Authorization: Bearer $SPIKE_KEY`.
 import { addNote, boardState, chooseSkill, editSkill, listBoards, printTake, startBoard, startCut } from "./board";
-import { DEFAULT_TEAMS, type TeamSpec, arenaState, closeArena, createArena, listArenas, teamSpec } from "./arena";
+import { DEFAULT_TEAMS, PANEL, type TeamSpec, arenaState, closeArena, createArena, listArenas, teamSpec } from "./arena";
 import { creditBalance, seasonEstimate, tooLittle } from "./credits";
 import { addProducerNoteTo } from "./showrunner";
 import { arenaTimeline, saveReplay } from "./replay";
@@ -55,7 +57,13 @@ import { isRole, listSkills } from "./skills";
 import { TEMPLATE, ensureTemplate, promoteSkill, repoRemote } from "./template";
 import ui from "./ui.html?raw";
 import { animate, frameJpeg, frameUrl, verifyFrame } from "./video";
-import { type Crew, DEFAULT_CREW, MENU, isCrew } from "./crew.ts";
+import { type Crew, DEFAULT_CREW, MENU, isCrew, menuView } from "./crew.ts";
+import { PRODUCER_NOTES } from "./producer-rules.ts";
+
+async function readMain(env: Env, repo: string, path: string) {
+	using handle = await env.ARTIFACTS.get(repo);
+	return (await handle.readFile({ ref: "main", path }).catch(() => null))?.text();
+}
 
 /** A request's team specs: names are slugs, and a pinned lead must be on the menu. */
 function badTeams(teams: (string | TeamSpec)[] | undefined) {
@@ -67,7 +75,7 @@ function badTeams(teams: (string | TeamSpec)[] | undefined) {
 	return undefined;
 }
 import { withCrew } from "./crew-env";
-import { probeLlm } from "./models";
+import { probeLlm, rerender } from "./models";
 
 const json = async <T>(request: Request) => (await request.json().catch(() => ({}))) as T;
 
@@ -217,6 +225,13 @@ export default {
 				const clip = await animate(withCrew(env, crew), frame, "Subtle natural motion; the camera stays still.", seconds, true);
 				return Response.json({ ...clip.meta, input: undefined });
 			}
+			// A printed shot rendered again with another renderer (models.ts rerender), returned as a JPEG; nothing is committed
+			if (method === "POST" && root === "debug" && repoName === "render") {
+				const { board, cell, renderer } = await json<{ board?: string; cell?: string; renderer?: string }>(request);
+				if (!board || !cell || !renderer || !(renderer in MENU.renderer)) return Response.json({ error: `board, cell and a renderer (${Object.keys(MENU.renderer).join(", ")}) are required` }, { status: 400 });
+				const r = await rerender(env, board, cell, renderer as keyof typeof MENU.renderer);
+				return new Response(r.jpeg, { headers: { "content-type": "image/jpeg", "x-elapsed-ms": String(r.ms), "x-references": r.references.join(",") } });
+			}
 			// Any catalog model with a raw input, for checking what a provider accepts: "$FRAME" in the input becomes a
 			// signed URL for a printed frame ({board, cell}); a returned audio or video URL is downloaded and measured
 			if (method === "POST" && root === "debug" && repoName === "run") {
@@ -239,7 +254,14 @@ export default {
 			}
 			if (method === "GET" && root === "credits") {
 				const balance = await creditBalance(env).catch((e) => String(e));
-				return Response.json(balance === undefined ? { balance: null, reason: "set CF_ACCOUNT_ID and AI_GATEWAY_TOKEN (AI Gateway Read) in .env" } : { balance });
+				// With ?rounds=&teams=&budget=, what that would cost by the same estimate POST /seasons and /arenas check
+				const q = (k: string) => Number(url.searchParams.get(k));
+				const estimate = q("teams") && q("budget") ? { estimate: seasonEstimate(q("rounds") || 1, q("teams"), q("budget")) } : {};
+				return Response.json(balance === undefined ? { balance: null, reason: "set CF_ACCOUNT_ID and AI_GATEWAY_TOKEN (AI Gateway Read) in .env", ...estimate } : { balance, ...estimate });
+			}
+			// Every model the crew draft can choose, with prices and why an option is off (the UI's Models page)
+			if (method === "GET" && root === "menu") {
+				return Response.json({ slots: menuView(), default_crew: DEFAULT_CREW, default_teams: DEFAULT_TEAMS, panel: PANEL });
 			}
 			if (method === "POST" && root === "sweep") {
 				return Response.json({ swept: await sweep(env, (await listBoards(env)).map((b) => b.name)) });
@@ -262,7 +284,14 @@ export default {
 			}
 
 			if (root === "boards" && repoName) {
-				if (method === "GET" && action === "state") return Response.json(await boardState(env, repoName));
+				if (method === "GET" && action === "state") {
+					// An arena board also shows its team's setup (lead, drafted crew, budget, where it carried on from)
+					// and the producer's notes with the lead's answers (D40)
+					const [s, cfg, notes] = await Promise.all([boardState(env, repoName), readMain(env, repoName, "board.json"), readMain(env, repoName, PRODUCER_NOTES)]);
+					const c = cfg ? JSON.parse(cfg) : {};
+					const team = c.arena ? { arena: c.arena, team: c.team, lead: c.lead ?? c.crew?.lead ?? null, crew: c.crew ?? null, budget_usd: c.budget_usd, deadline: c.deadline, from: c.from ?? null, team_name: c.cast?.team_name ?? null } : null;
+					return Response.json({ ...s, team, producer: notes ? JSON.parse(notes) : [] });
+				}
 				if (method === "GET" && action === "jobs") return Response.json(await ledger(env, repoName));
 				if (method === "POST" && action === "cut") {
 					// One image-to-video job per printed cell; the ledger assembles the cut when they finish

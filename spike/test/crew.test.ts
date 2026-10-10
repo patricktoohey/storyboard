@@ -2,7 +2,7 @@
 // crew to a budget, and the per-provider video requests.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { DEFAULT_CREW, MENU, SLOTS, type Crew, cheapestFilm, clipCost, crewCosts, crewFrom, draftOptions, fitToBudget, isCrew, videoRequest } from "../src/crew.ts";
+import { DEFAULT_CREW, MENU, SLOTS, type Crew, cheapestFilm, clipCost, crewCosts, crewFrom, draftOptions, fitToBudget, isCrew, menuView, nearestRatio, videoRequest } from "../src/crew.ts";
 import { estimate } from "../src/costs.ts";
 
 const budget: Crew = { llm: "gemma-4", lead: "gemma-4", renderer: "flux-2-klein-4b", critic: "clef-flash", video: "hailuo-2.3-fast" };
@@ -38,7 +38,7 @@ test("the draft only offers video models that work on photoreal people: LTX, See
 	// that show realistic people; Grok refuses every request (7003); Runway refuses our 21:9 frames; FLUX.3
 	// animated a two-person medium shot with its own sound; Veo 3.1 and H3 Max animated a close-up (2026-10-10)
 	assert.deepEqual(draftOptions("video").sort(), ["flux-3-video", "h3-max", "hailuo-2.3-fast", "veo-3.1", "wan-2.7-i2v"]);
-	assert.equal(draftOptions("renderer").length, 3);
+	assert.equal(draftOptions("renderer").length, 4);
 });
 
 test("an affordable draft is kept as is", () => {
@@ -99,4 +99,24 @@ test("frontier leads cost cents per plan, not dollars: the video is still the bi
 	assert.ok(opus.turn < 0.1, `turn ${opus.turn}`);
 	// The cinematographer is the llm slot: a frontier lead doesn't change what a take costs
 	assert.equal(opus.take, llama.take);
+});
+
+test("Nano Banana Pro gets the nearest aspect ratio it offers: frames and locations 21:9, portraits square", () => {
+	assert.equal(nearestRatio(1344, 576), "21:9");
+	assert.equal(nearestRatio(1024, 448), "21:9");
+	assert.equal(nearestRatio(768, 768), "1:1");
+	assert.equal(nearestRatio(1280, 720), "16:9");
+	assert.equal(MENU.renderer["nano-banana-pro"].maxRefs, 3);
+});
+
+test("the Models page lists every option with its price, and why an off option is off", () => {
+	const m = menuView();
+	assert.deepEqual(Object.keys(m), SLOTS);
+	const video = Object.fromEntries(m.video.map((o) => [o.key, o]));
+	assert.equal(video["veo-3.1"].price, "$1.20 a 5 s clip (billed 6 s)");
+	assert.match(video["seedance-2.5"].unavailable ?? "", /realistic person/);
+	assert.equal(video["veo-3.1"].unavailable, undefined);
+	assert.equal(video["flux-3-video"].audio, true);
+	assert.match(m.renderer.find((o) => o.key === "nano-banana-pro")!.price, /^\$0\.140 a frame/);
+	assert.match(m.lead.find((o) => o.key === "claude-opus-5.5")!.price, /^\$4 in, \$20 out per million tokens$/);
 });

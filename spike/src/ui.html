@@ -77,7 +77,7 @@ aside.log h3 + ul { margin-bottom: 16px; }
 .job .dot { position: static; margin-top: 4px; width: 8px; height: 8px; border-radius: 50%; }
 .dot.queued { background: var(--line); } .dot.running { background: var(--accent); animation: pulse 1s infinite alternate; }
 .dot.done { background: var(--ok); } .dot.failed { background: var(--bad); }
-.newboard { display: grid; gap: 10px; max-width: 720px; }
+.newboard { display: grid; gap: 10px; max-width: 900px; }
 .cut { display: grid; grid-template-columns: minmax(0, 1fr) 280px; gap: 16px; margin-bottom: 18px; }
 .cut video { width: 100%; aspect-ratio: 16 / 9; background: #000; border-radius: 8px; display: block; }
 .cut ol { margin: 0; padding-left: 20px; display: grid; gap: 6px; font-size: 12px; }
@@ -102,6 +102,20 @@ table.lb th { color: var(--muted); font-weight: 500; font-size: 12px; }
 .replay-box { width: min(1280px, 100%); display: grid; gap: 10px; }
 .replay-box canvas, .replay-box video { width: 100%; aspect-ratio: 16 / 9; background: #000; border-radius: 8px; }
 .teams { display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: 16px; margin-top: 16px; }
+table.menu { width: 100%; border-collapse: collapse; font-size: 13px; }
+table.menu th, table.menu td { text-align: left; padding: 7px 6px; border-bottom: 1px solid var(--line); vertical-align: top; }
+table.menu th { color: var(--muted); font-weight: 500; font-size: 12px; }
+table.menu tr.off td { color: var(--muted); }
+table.menu code { font-size: 12px; }
+.slot { margin-top: 16px; overflow-x: auto; }
+.slot h3 { margin: 0 0 2px; }
+.producer textarea { width: 100%; box-sizing: border-box; }
+.producer li { list-style: none; border-left: 2px solid var(--accent); padding: 4px 0 4px 10px; margin: 0 0 8px; font-size: 13px; }
+.producer li .answer { color: var(--muted); margin-top: 3px; }
+.teamrows { display: grid; gap: 6px; }
+.teamrows .row input[type=text] { width: 120px; }
+.estimate { font-size: 12px; color: var(--muted); }
+.estimate.short { color: var(--bad); }
 dialog { background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: var(--radius); max-width: 520px; width: calc(100% - 32px); }
 dialog::backdrop { background: rgba(0,0,0,.6); }
 @media (max-width: 900px) { .layout { grid-template-columns: 1fr; } .board-head { grid-template-columns: 1fr; } .grid { grid-template-columns: 1fr; } main, header { padding-left: 16px; padding-right: 16px; } }
@@ -113,6 +127,7 @@ dialog::backdrop { background: rgba(0,0,0,.6); }
   <select id="boards"><option value="">Loading boards…</option></select>
   <button id="refresh" title="Reload board">Refresh</button>
   <button id="new">New board</button>
+  <button id="models">Models</button>
   <span class="spacer"></span>
   <span id="busy" class="small muted"></span>
   <button id="key" class="small">Key</button>
@@ -167,6 +182,7 @@ $("#keydlg").addEventListener("close", () => { key = $("#keyin").value.trim(); s
 $("#key").onclick = askKey;
 $("#refresh").onclick = () => arena ? openArena(arena.arena) : state && openBoard(state.repo);
 $("#new").onclick = () => { history.replaceState(null, "", "#"); renderNew(); };
+$("#models").onclick = () => { history.replaceState(null, "", "#models"); renderModels(); };
 $("#boards").onchange = (e) => e.target.value ? open(e.target.value) : renderNew();
 
 function setBusy() { $("#busy").textContent = inflight ? `${inflight} operation${inflight > 1 ? "s" : ""} running…` : ""; }
@@ -195,7 +211,7 @@ const openJob = (j) => j.status === "queued" || j.status === "running";
  */
 let ticks = 0;
 async function watch(force = false) {
-  if (!state?.repo || document.hidden) return;
+  if (!state?.repo || (document.hidden && !force)) return;
   const repo = state.repo;
   const next = await api(`/boards/${repo}/jobs`).catch(() => null);
   if (!next || state?.repo !== repo) return;
@@ -207,6 +223,8 @@ async function watch(force = false) {
   if (force || changed || (jobs.some(openJob) && ticks % 3 === 0)) await refresh();
 }
 setInterval(() => watch().catch(console.error), 2500);
+// A board opened in a background tab loads at once (a forced watch); coming back to it catches up
+document.addEventListener("visibilitychange", () => { if (!document.hidden) watch(true).catch(console.error); });
 
 async function loadBoards() {
   if (!key) return askKey();
@@ -220,14 +238,21 @@ async function loadBoards() {
   if (want) { sel.value = want; open(want); } else renderNew();
 }
 
-const open = (name) => (name.startsWith("season-") ? openSeason(name) : name.startsWith("arena-") ? openArena(name) : openBoard(name));
+// What's on screen, so links to another board, arena or season (#name) open it, and a view setting its own hash doesn't reopen
+let showing = "";
+window.addEventListener("hashchange", () => {
+  const name = decodeURIComponent(location.hash.slice(1));
+  if (name && name !== showing) { $("#boards").value = name; open(name); }
+});
+const open = (name) => (name === "models" ? renderModels() : name.startsWith("season-") ? openSeason(name) : name.startsWith("arena-") ? openArena(name) : openBoard(name));
 
 async function renderNew() {
+  showing = "";
   state = null;
   clearInterval(arenaTimer);
   arena = null;
   $("#boards").value = "";
-  const skills = await api("/skills").catch(() => []);
+  const [skills, menu, boardList] = await Promise.all([api("/skills").catch(() => []), api("/menu").catch(() => null), api("/boards").catch(() => [])]);
   const opts = (role) => skills.filter((s) => s.role === role).map((s) => `<option value="${esc(s.name)}">${esc(s.style)}</option>`).join("");
   $("#main").innerHTML = `
     <div class="panel newboard">
@@ -243,14 +268,18 @@ async function renderNew() {
     </div>
     <div class="panel newboard" style="margin-top:18px">
       <h2 style="margin:0">New arena</h2>
-      <p class="muted" style="margin:0">Three autonomous teams (auteur, documentarian, safe) answer one brief with a budget and a deadline. Each team's showrunner agent plans, gives notes, prints, cuts video and submits; Clef judges score the boards live. Video is required.</p>
+      <p class="muted" style="margin:0">Autonomous teams answer one brief with a budget and a deadline. Each team's showrunner agent plans, gives notes, prints, cuts video and submits; Clef judges score the boards live. Video is required. A team can carry on from an earlier board, with every branch, and must submit a new cut.</p>
       <textarea id="brief" rows="3" placeholder="A 30-second story about something lost and found."></textarea>
+      <div class="teamrows" id="teamrows"></div>
+      <div class="row"><button id="addteam" class="small">Add a team</button></div>
       <div class="row">
         <label class="small muted">Minutes <input id="aminutes" type="number" min="5" max="120" value="20" style="width:64px"></label>
         <label class="small muted">Budget per team $<input id="abudget" type="number" min="1" max="50" value="5" style="width:64px"></label>
         <label class="small muted">Cells <input id="acells" type="number" min="2" max="8" value="4" style="width:64px"></label>
+        <label class="small muted"><input id="aignore" type="checkbox"> start even if credits look short</label>
         <button class="primary" id="createArena">Start arena</button>
       </div>
+      <div class="estimate" id="aestimate"></div>
       <div class="status" id="arenastatus"></div>
     </div>
     <div class="panel newboard" style="margin-top:18px">
@@ -277,13 +306,48 @@ async function renderNew() {
       await loadBoards();
     } catch (err) { $("#seasonstatus").textContent = `Error: ${err.message}`; $("#createSeason").disabled = false; }
   };
+  // Teams: a showrunner skill, an optional pinned lead, and optionally a board to carry on from (D40)
+  const showrunners = skills.filter((s) => s.role === "showrunner");
+  const leads = (menu?.slots.lead ?? []).filter((o) => !o.unavailable);
+  const fromBoards = boardList.filter((b) => b.name.startsWith("board-"));
+  const teamRow = (t = {}) => `<div class="row" data-team>
+      <input type="text" data-k="team" value="${esc(t.team ?? "")}" placeholder="team name">
+      <select data-k="showrunner">${showrunners.map((s) => `<option value="${esc(s.name)}" ${s.name === `showrunner-${t.team}` ? "selected" : ""}>${esc(s.style)}</option>`).join("")}</select>
+      <select data-k="lead"><option value="">lead: drafted</option>${leads.map((o) => `<option value="${esc(o.key)}">lead: ${esc(o.key)}</option>`).join("")}</select>
+      <select data-k="from" style="max-width:260px"><option value="">fresh board</option>${fromBoards.map((b) => `<option value="${esc(b.name)}">carry on from ${esc(b.name.replace("board-", ""))}</option>`).join("")}</select>
+      <button class="small" data-remove title="Remove this team">✕</button></div>`;
+  const rows = $("#teamrows");
+  const wire = () => {
+    rows.querySelectorAll("[data-remove]").forEach((b) => (b.onclick = () => { b.closest("[data-team]").remove(); estimate(); }));
+    rows.querySelectorAll("[data-k=from]").forEach((sel) => (sel.onchange = () => { sel.closest("[data-team]").querySelector("[data-k=showrunner]").disabled = Boolean(sel.value); }));
+  };
+  rows.innerHTML = (menu?.default_teams ?? ["auteur", "documentarian", "safe"]).map((team) => teamRow({ team })).join("");
+  wire();
+  $("#addteam").onclick = () => { rows.insertAdjacentHTML("beforeend", teamRow()); wire(); estimate(); };
+  const teamsOf = () => [...rows.querySelectorAll("[data-team]")].map((r) => {
+    const v = (k) => r.querySelector(`[data-k=${k}]`).value.trim();
+    return { team: v("team"), ...(v("from") ? { from: v("from") } : { showrunner: v("showrunner") }), ...(v("lead") ? { lead: v("lead") } : {}) };
+  }).filter((t) => t.team);
+  // What it can cost, by the estimate the server checks against the balance
+  const estimate = async () => {
+    const out = await api(`/credits?rounds=1&teams=${teamsOf().length}&budget=${Number($("#abudget").value)}`).catch(() => null);
+    const el = $("#aestimate");
+    if (!out || out.estimate == null) return (el.textContent = "");
+    const short = typeof out.balance === "number" && out.balance < out.estimate;
+    el.className = `estimate${short ? " short" : ""}`;
+    el.textContent = `Can cost about $${out.estimate.toFixed(2)}${typeof out.balance === "number" ? ` · $${out.balance.toFixed(2)} in AI Gateway credits${short ? ": too little, top up first" : ""}` : ""}`;
+  };
+  $("#abudget").oninput = estimate;
+  estimate();
   $("#createArena").onclick = async () => {
     const brief = $("#brief").value.trim();
     if (!brief) return;
+    const teams = teamsOf();
+    if (!teams.length) return ($("#arenastatus").textContent = "Add at least one team");
     $("#createArena").disabled = true;
     $("#arenastatus").textContent = "Creating the arena and forking a board per team…";
     try {
-      const out = await api("/arenas", { method: "POST", body: JSON.stringify({ brief, minutes: Number($("#aminutes").value), budget: Number($("#abudget").value), cells: Number($("#acells").value) }) });
+      const out = await api("/arenas", { method: "POST", body: JSON.stringify({ brief, teams, minutes: Number($("#aminutes").value), budget: Number($("#abudget").value), cells: Number($("#acells").value), ignore_credits: $("#aignore").checked }) });
       location.hash = out.arena;
       await loadBoards();
     } catch (err) { $("#arenastatus").textContent = `Error: ${err.message}`; $("#createArena").disabled = false; }
@@ -317,6 +381,7 @@ async function frameOf(repo, ref, path) {
 }
 
 async function openArena(name) {
+  showing = name;
   location.hash = name;
   state = null;
   clearInterval(arenaTimer);
@@ -351,7 +416,7 @@ function renderArena() {
   const rows = a.leaderboard.map((r, i) => {
     const t = team(r.team);
     const status = t.submission ? (t.submission.cut ? `submitted cut ${t.submission.cut}` : "no submission") : t.lastAction;
-    return `<tr><td>${i + 1}</td><td><b>${esc(r.team)}</b>${r.disqualified ? ` <span class="pill bad">${esc(r.disqualified)}</span>` : ""}<br><span class="small muted">${esc(t.showrunner)} · ${esc(t.cinematographer)}</span>${t.crew ? `<br><span class="small muted">crew: ${esc(Object.values(t.crew).join(" · "))}</span>` : `<br><span class="small muted">crew: ${t.turns ? "default (no draft)" : "drafting…"}</span>`}</td>
+    return `<tr><td>${i + 1}</td><td><b>${esc(r.team)}</b>${r.disqualified ? ` <span class="pill bad">${esc(r.disqualified)}</span>` : ""}<br><span class="small muted">${esc(t.showrunner)} · ${esc(t.cinematographer)}</span>${t.crew ? `<br><span class="small muted">${Object.entries(t.crew).map(([slot, m]) => `${esc(SLOT_NAMES[slot]?.short ?? slot)} <b>${esc(m)}</b>`).join(" · ")}</span>` : `<br><span class="small muted">crew: ${t.turns ? "default (no draft)" : "drafting…"}</span>`}</td>
       <td><b>${r.winRate != null ? `${(r.winRate * 100).toFixed(0)}%` : "–"}</b><br><span class="small muted">abs ${r.score.toFixed(2)}</span></td>${judges.map((j) => `<td>${r.byJudge[j] != null ? r.byJudge[j].toFixed(2) : "–"}</td>`).join("")}
       <td>$${t.spent.toFixed(2)} / $${a.rules.budget_usd}<div class="bar"><i style="width:${Math.min(100, (t.spent / a.rules.budget_usd) * 100)}%"></i></div></td>
       <td>${t.turns}</td><td class="small">${esc(status)}${t.openJobs ? `<br><span class="muted">${t.openJobs} job(s) running</span>` : ""}</td></tr>`;
@@ -385,6 +450,7 @@ function renderArena() {
 
 // ── Season view ─────────────────────────────────────────────────────────────────────────────
 async function openSeason(name) {
+  showing = name;
   location.hash = name;
   state = null; arena = null;
   clearInterval(arenaTimer);
@@ -632,6 +698,7 @@ async function buildReplay(tl, canvas) {
 async function openBoard(repo) {
   clearInterval(arenaTimer);
   arena = null;
+  showing = repo;
   location.hash = repo;
   $("#main").innerHTML = `<p class="muted">Loading ${esc(repo)}…</p>`;
   state = { repo };
@@ -692,15 +759,92 @@ function render() {
       <div class="roles"><span class="small muted">Skills on this board</span>${["director", "cinematographer", "casting"].map(roleSelect).join("")}
         ${makeVideoButton(s)}</div>
     </section>
+    ${teamHtml(s)}
     ${cutHtml(s)}
     ${soundHtml(s)}
     <div class="layout">
       <div class="grid">${s.cells.map(cellHtml).join("")}</div>
       <aside class="log panel">${jobsHtml()}<h3>main</h3><ul>${s.log.map((l) => `<li><code>${esc(l.hash)}</code> <b>${esc(l.author)}</b> ${esc(l.message)}</li>`).join("")}</ul></aside>
     </div>`;
+  const pn = $("#pnote");
+  if (pn) { pn.value = producerDraft; pn.oninput = () => (producerDraft = pn.value); if (producerFocus) { pn.focus(); pn.onblur = () => (producerFocus = false); } pn.onfocus = () => (producerFocus = true); }
+  const send = $("#psend");
+  if (send) send.onclick = async () => {
+    const note = $("#pnote").value.trim();
+    if (!note) return;
+    send.disabled = true;
+    const cell = $("#pcell").value || undefined;
+    try {
+      await run("Sending the producer's note…", [], () => api(`/boards/${state.repo}/producer`, { method: "POST", body: JSON.stringify({ note, cell }) }));
+      producerDraft = "";
+      await openBoard(state.repo);
+    } catch (err) { $("#pstatus").textContent = `Error: ${err.message}`; send.disabled = false; }
+  };
   const newCut = $("#cutpanel");
   if (oldCut && newCut && oldCut.dataset.key === newCut.dataset.key) newCut.replaceWith(oldCut);
   hydrate(oldCut && $("#cutpanel") === oldCut);
+}
+
+// The crew's slots, as people say them
+const SLOT_NAMES = {
+  lead: { short: "lead", title: "Lead", what: "The team's mind: plans the board, makes every decision, writes notes and retrospectives. A season pins it to compare labs." },
+  llm: { short: "writer", title: "Cinematographer", what: "Writes each take's image prompt from the beat and the bible. One call per take." },
+  renderer: { short: "renderer", title: "Renderer", what: "Draws every frame, portrait and location. Falls back to a lighter model when rate-limited." },
+  critic: { short: "critic", title: "Continuity critic", what: "Checks each take against the bible: faces, wardrobe, props." },
+  video: { short: "video", title: "Video", what: "Animates the printed frames into the cut. Score and lines carry the sound." },
+};
+
+let producerDraft = "";
+let producerFocus = false;
+
+/** An arena board's team (lead, crew, budget, where it carried on from) and the producer's notes (D40). */
+function teamHtml(s) {
+  const t = s.team;
+  if (!t) return "";
+  const notes = s.producer || [];
+  const crew = t.crew ? Object.entries(t.crew).map(([slot, m]) => `${esc(SLOT_NAMES[slot]?.short ?? slot)} <b>${esc(m)}</b>`).join(" · ") : t.lead ? `lead <b>${esc(t.lead)}</b> · drafting the rest…` : "drafting…";
+  return `<section class="panel producer" style="margin-bottom:18px;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:18px">
+    <div>
+      <h3 style="margin:0 0 6px">${esc(t.team_name ?? t.team)} <span class="small muted">in <a href="#${esc(t.arena)}">${esc(t.arena)}</a></span></h3>
+      <div class="small">${crew}</div>
+      <div class="small muted" style="margin-top:4px">$${esc(t.budget_usd)} budget · deadline ${esc(new Date(t.deadline).toLocaleTimeString())}</div>
+      ${t.from ? `<div class="small muted" style="margin-top:4px">Carried on from <a href="#${esc(t.from.board)}">${esc(t.from.board)}</a> at <code>${esc(t.from.commit.slice(0, 7))}</code>: its cuts ${esc(t.from.cuts.join(", ") || "none")} are there to watch; this round's submission is a new cut.</div>` : ""}
+    </div>
+    <div>
+      <h3 style="margin:0 0 6px">Producer's notes</h3>
+      <ul style="padding:0;margin:0 0 8px">${notes.length ? notes.map((n) => `<li><b>${n.cell ? `Cell ${esc(n.cell)}` : "Whole board"}:</b> ${esc(n.note)}
+        <div class="answer">${n.answer ? `→ turn ${esc(n.answer.turn)} (${esc(n.answer.action)}): “${esc(n.answer.reply)}”` : "waiting for the lead's answer"}</div></li>`).join("") : `<li class="muted" style="border:0;padding:0">None yet. The lead answers each one on its next turn, and the panel reads both.</li>`}</ul>
+      <textarea id="pnote" rows="2" placeholder="e.g. Shot 6: he's wearing two pairs of glasses."></textarea>
+      <div class="row" style="margin-top:6px"><select id="pcell"><option value="">Whole board</option>${s.cells.map((c) => `<option value="${esc(c.id)}">Cell ${esc(c.id)}</option>`).join("")}</select>
+        <button class="primary" id="psend">Send note</button><span class="status" id="pstatus"></span></div>
+    </div></section>`;
+}
+
+/** Every model the crew draft can choose, with prices, and why an option is off. */
+async function renderModels() {
+  showing = "models";
+  state = null;
+  clearInterval(arenaTimer);
+  arena = null;
+  $("#boards").value = "";
+  $("#main").innerHTML = `<p class="muted">Loading the menu…</p>`;
+  const [menu, credits] = await Promise.all([api("/menu"), api("/credits").catch(() => null)]);
+  const balance = credits?.balance != null && typeof credits.balance === "number" ? `$${credits.balance.toFixed(2)} in AI Gateway credits` : "credit balance unknown (no AI Gateway token)";
+  const slot = (name) => {
+    const s = SLOT_NAMES[name] ?? { title: name, what: "" };
+    const rows = menu.slots[name].map((o) => `<tr class="${o.unavailable ? "off" : ""}"><td><b>${esc(o.key)}</b>${menu.default_crew[name] === o.key ? ` <span class="pill printed">default</span>` : ""}${o.audio ? ` <span class="pill">own sound</span>` : ""}<br><span class="small muted">${esc(o.label)}</span></td>
+      <td><code>${esc(o.id)}</code></td><td class="small">${esc(o.price)}</td>
+      <td class="small">${o.unavailable ? `<span class="pill bad">off</span> ${esc(o.unavailable)}` : `<span class="pill ok">in the draft</span>`}</td></tr>`).join("");
+    return `<div class="slot"><h3>${esc(s.title)}</h3><p class="small muted" style="margin:0 0 6px">${esc(s.what)}</p>
+      <table class="menu"><tr><th>option</th><th>model</th><th>price</th><th>status</th></tr>${rows}</table></div>`;
+  };
+  $("#main").innerHTML = `<section class="panel">
+    <h2 style="margin:0 0 4px">Models</h2>
+    <p class="muted" style="margin:0">What a team can draft for its crew, at Cloudflare's prices. A team's lead drafts the rest within its budget; options marked off failed a live check and stay out of the draft until they pass one. ${esc(balance)}.</p>
+    ${["lead", "llm", "renderer", "critic", "video"].map(slot).join("")}
+    <div class="slot"><h3>The panel</h3><p class="small muted" style="margin:0 0 6px">Each round's final judges: one per lab, every pair of teasers both ways round, 75% film and 25% process.</p>
+      <table class="menu"><tr><th>judge</th><th>model</th><th>weight</th></tr>${menu.panel.map((j) => `<tr><td><b>${esc(j.name)}</b></td><td><code>${esc(j.model)}</code></td><td>${esc(j.weight)}</td></tr>`).join("")}</table></div>
+  </section>`;
 }
 
 const VIDEO_PRICE_PER_S = 0.10;   // wan-2.7-i2v at 720p

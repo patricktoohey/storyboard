@@ -650,3 +650,37 @@ and the record didn't say who had.
 Who wrote what stays plain: the producer's commits are the producer's, the team's are the team's.
 
 Tests: `test/producer.test.ts`.
+
+## D41: premium models, by test, and a page that shows them
+
+**After Season 2** the teams' crews were capped by the menu: the best video model a team could draft was
+Wan 2.7 or FLUX.3 Video, and the best renderer FLUX.2 dev, which falls back to klein when it's rate
+limited. Opus's round 2 confessional of Theo shows the cost: his character's look says "black-rimmed
+glasses" and the shot says "glasses pushed up on his forehead", and klein drew both pairs. Every premium
+model was tried on that board before joining the menu (`POST /debug/run`, `POST /debug/render`):
+
+- **Video**, on the close-up of Maya (shot 03): **Veo 3.1** (the full model; the Fast tier refuses people)
+  animated it in 74 s, ~$0.20/s. **MiniMax H3 Max** did in 22 s, $0.08/s. **Seedance 2.5** refused it and
+  rendered the empty corridor (shot 08) in 144 s: like Seedance 2.0 Fast, it won't animate a realistic
+  person. **Runway Gen-4.5** refused every one of our frames, people or not, and rendered a 16:9 crop in
+  92 s: it takes nothing wider than about 2:1, and ours are 21:9. Veo 3.1 and H3 Max are in the draft;
+  Seedance 2.5 and Runway are on the menu as off, with why.
+- **Images**, on Theo (shot 06), the same prompt and portrait: **FLUX.2 max** drew both pairs too, tinted
+  like sunglasses. **Nano Banana Pro** put one pair on his forehead and left his eyes bare, the only one of
+  three, and is the most cinematic. It joins as a renderer (~$0.14 a frame, 3 references, falling back to
+  FLUX.2 dev). A **FLUX.2 max edit** of the existing frame ("one pair, pushed up") fixed it and changed
+  nothing else, which is what a producer's note about one detail wants; that's next.
+- **The shot wins**: every frame with references is now told that where the shot changes how someone wears
+  or holds something, the description wins over the reference image.
+- **A crew whose model left the menu** downgraded wrongly when it didn't fit its budget (`indexOf` of a
+  missing option is -1, so "cheaper" was everything but the dearest); it now goes by price.
+
+**The UI shows it**: a **Models** page (`GET /menu`) lists every option per slot with its price and, for
+an option that's off, the check it failed. An arena board shows its team (the lead and the drafted crew,
+the budget, where it carried on from) and the producer's notes with the lead's answers, with a box to send
+one. The arena page labels each crew's slots. The new-arena form takes teams (a showrunner, a pinned lead,
+a board to carry on from) and shows what the arena can cost against the balance
+(`GET /credits?rounds=&teams=&budget=`). Links between views work, and a board opened in a background tab
+loads.
+
+Tests: `test/crew.test.ts`.

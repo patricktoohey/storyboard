@@ -18,6 +18,8 @@ export interface RendererOption {
 	label: string;
 	perFrame: number; // one 1344x576 frame with up to 3 reference images
 	perPortrait: number; // one 768x768 casting portrait
+	// Reference images it takes at most (the location's and the portraits'); 4 when absent
+	maxRefs?: number;
 }
 export interface CriticOption {
 	id: "clef" | "clef-flash";
@@ -77,6 +79,16 @@ export const MENU = {
 			label: "FLUX.2 dev: the most detail and prompt fidelity, slowest and dearest",
 			perFrame: 0.05,
 			perPortrait: 0.03,
+		},
+		// Billed by token: ~1,100 output tokens a 1K image at $120 per million, references ~$0.001 each
+		// (2026-10-10). On Opus's round 2 close-up of Theo, the only model of three that put his glasses where
+		// the shot said (pushed up, eyes bare); FLUX.2 max drew two pairs, as klein had
+		"nano-banana-pro": {
+			id: "google/nano-banana-pro",
+			label: "Nano Banana Pro: Google's image model; the most cinematic, and follows the shot's details over the references; dearest",
+			perFrame: 0.14,
+			perPortrait: 0.14,
+			maxRefs: 3,
 		},
 	} satisfies Record<string, RendererOption>,
 	critic: {
@@ -176,7 +188,43 @@ export const MENU = {
 	} satisfies Record<string, VideoOption>,
 };
 
+// Nano Banana Pro takes an aspect ratio, not a size: the nearest it offers
+const RATIOS = ["1:1", "3:2", "2:3", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "21:9"];
+export const nearestRatio = (width: number, height: number) =>
+	RATIOS.reduce((best, r) => {
+		const [w, h] = r.split(":").map(Number);
+		const [bw, bh] = best.split(":").map(Number);
+		return Math.abs(Math.log(w / h / (width / height))) < Math.abs(Math.log(bw / bh / (width / height))) ? r : best;
+	});
+
 export type Slot = keyof typeof MENU;
+
+/** Every option on the menu as the UI's Models page shows it (GET /menu): its price in words, and why it's off. */
+export function menuView() {
+	const price = (slot: string, o: Record<string, unknown>) => {
+		if (slot === "lead" || slot === "llm") return `$${o.in} in, $${o.out} out per million tokens`;
+		if (slot === "renderer") return `$${(o.perFrame as number).toFixed(3)} a frame, $${(o.perPortrait as number).toFixed(3)} a portrait`;
+		if (slot === "critic") return `$${(o.perTake as number).toFixed(3)} a take`;
+		const v = o as unknown as VideoOption;
+		return `$${v.usd(v.billedSeconds(5)).toFixed(2)} a 5 s clip (billed ${v.billedSeconds(5)} s)`;
+	};
+	return Object.fromEntries(
+		(Object.keys(MENU) as (keyof typeof MENU)[]).map((slot) => [
+			slot,
+			Object.entries(MENU[slot]).map(([key, option]) => {
+				const o = option as unknown as Record<string, unknown>;
+				return {
+					key,
+					id: o.id as string,
+					label: o.label as string,
+					price: price(slot, o),
+					...(o.audio ? { audio: true } : {}),
+					...(o.unavailable ? { unavailable: o.unavailable as string } : {}),
+				};
+			}),
+		]),
+	);
+}
 export const SLOTS = Object.keys(MENU) as Slot[];
 export type Crew = { [S in Slot]: keyof (typeof MENU)[S] & string };
 

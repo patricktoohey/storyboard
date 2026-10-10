@@ -3,6 +3,7 @@
 // what stays here is each role's output contract, which code depends on.
 import { SETTING_SHOTS, continuityQuestions, continuityVerdict } from "./continuity-rules.ts";
 import { llmFor } from "./crew-env";
+import { MENU, type RendererOption, nearestRatio } from "./crew.ts";
 import { RATE_LIMITED, llmRequest, llmText, llmUsage, retryDelay } from "./llm.ts";
 import { normalizePositions, withBlocking, withStaged } from "./blocking.ts";
 import { insertLooks } from "./looks";
@@ -201,7 +202,9 @@ interface RenderOptions {
 export const RENDER_FALLBACK: Record<string, string> = {
 	"@cf/black-forest-labs/flux-2-dev": "@cf/black-forest-labs/flux-2-klein-9b",
 	"@cf/black-forest-labs/flux-2-klein-9b": "@cf/black-forest-labs/flux-2-klein-4b",
+	"google/nano-banana-pro": "@cf/black-forest-labs/flux-2-dev",
 };
+
 
 async function runImageModel(env: Env, prompt: string, opts: RenderOptions) {
 	let model: string = env.RENDER_MODEL;
@@ -225,6 +228,22 @@ async function runImageModel(env: Env, prompt: string, opts: RenderOptions) {
 /** flux-2 models take multipart form data (and reference images); flux-1-schnell takes JSON with no seed. */
 async function runImageModelOnce(env: Env, model: string, prompt: string, opts: RenderOptions & { seed: number }) {
 	let out: { image: string };
+	if (model === "google/nano-banana-pro") {
+		const res = (await env.AI.run(model as keyof AiModels, {
+			prompt,
+			aspect_ratio: nearestRatio(opts.width, opts.height),
+			image_size: "1K",
+			output_format: "jpg",
+			...(opts.references?.length ? { image_input: opts.references.slice(0, 3).map((r) => `data:image/jpeg;base64,${toBase64(r.jpeg)}`) } : {}),
+		} as never)) as unknown as { image?: string; result?: { image?: string } };
+		// A URL to the image (the gateway's output store), bare or wrapped in { state, result }
+		const url = res?.image ?? res?.result?.image;
+		if (!url) throw new Error(`${model} returned no image: ${JSON.stringify(res).slice(0, 200)}`);
+		if (!url.startsWith("http")) return Uint8Array.from(atob(url), (c) => c.charCodeAt(0));
+		const img = await fetch(url);
+		if (!img.ok) throw new Error(`downloading the image failed: ${img.status}`);
+		return new Uint8Array(await img.arrayBuffer());
+	}
 	if (model.includes("flux-2")) {
 		const form = new FormData();
 		form.append("prompt", prompt);
@@ -281,7 +300,8 @@ export async function render(env: Env, cell: Cell, prompt: string, references: R
 	const started = Date.now();
 	// The location's reference anchors the set for shots wide enough to show it; portraits anchor faces
 	const place = location && SETTING_SHOTS.includes(cell.shot) ? location : undefined;
-	const refs = usesPortraits(cell.shot) ? references.slice(0, place ? 3 : 4) : [];
+	const most = (Object.values(MENU.renderer) as RendererOption[]).find((r) => r.id === env.RENDER_MODEL)?.maxRefs ?? 4;
+	const refs = usesPortraits(cell.shot) ? references.slice(0, place ? most - 1 : most) : [];
 	// Image models don't know "EWS"; spell the framing out first
 	const framed = `${SHOT_SIZES[cell.shot]}. ${prompt}`;
 	// Tie each reference image to the description it anchors
@@ -290,12 +310,16 @@ export async function render(env: Env, cell: Cell, prompt: string, references: R
 		...(place ? [`The setting is the place in image 0: keep its architecture, layout, props and light.`] : []),
 		...refs.map((r, i) => `The ${r.character.look.split(",")[0]} is the person in image ${i + offset}: keep the same face, hair and wardrobe.`),
 	];
+	// Theo's look said "black-rimmed glasses" and his shot "glasses pushed up on his forehead": klein and
+	// FLUX.2 max drew both pairs. The shot is the newer instruction
+	if (refs.length) anchors.push("Where this shot's description changes how someone wears or holds something, follow the description, not the reference image.");
 	const anchored = anchors.length ? `${framed} ${anchors.join(" ")}` : framed;
 	// 1344x576 is close to 2.39:1 anamorphic and divisible by 16
 	const { bytes: source, seed, attempts, model } = await runImageModel(env, anchored, { width: 1344, height: 576, references: [...(place ? [place] : []), ...refs] });
 	// 384px for the per-frame critic; 640px for continuity, where hair and clothing need to be legible
+	// Nano Banana Pro's 21:9 is 1584x672: every frame is stored at most 1344 wide, like the rest
 	const [frame, preview, detail] = await Promise.all([
-		encode(env, source, "image/webp"),
+		encode(env, source, "image/webp", 1344),
 		encode(env, source, "image/webp", 384),
 		encode(env, source, "image/webp", 640),
 	]);
@@ -316,6 +340,29 @@ export async function render(env: Env, cell: Cell, prompt: string, references: R
 			elapsed_ms: Date.now() - started,
 		},
 	};
+}
+
+/**
+ * A printed shot rendered again with another renderer, from the prompt and references it was shot with, for
+ * comparing renderers (POST /debug/render). Nothing is committed.
+ */
+export async function rerender(env: Env, repo: string, cell: string, renderer: keyof typeof MENU.renderer) {
+	using handle = await env.ARTIFACTS.get(repo);
+	const read = async (path: string) => {
+		const blob = await handle.readFile({ ref: "main", path });
+		if (!blob) throw new Error(`${repo} has no ${path}`);
+		return new Uint8Array(await new Response(blob.stream()).arrayBuffer());
+	};
+	const meta = JSON.parse(new TextDecoder().decode(await read(`cells/${cell}/render.json`))) as { prompt_sent: string; references?: string[] };
+	const option: RendererOption = MENU.renderer[renderer];
+	const paths = (meta.references ?? []).slice(0, option.maxRefs ?? 4);
+	const references = await Promise.all(paths.map(async (p) => ({ jpeg: await encode(env, await read(p), "image/jpeg", 496) })));
+	const prompt = references.length && !meta.prompt_sent.includes("follow the description")
+		? `${meta.prompt_sent} Where this shot's description changes how someone wears or holds something, follow the description, not the reference image.`
+		: meta.prompt_sent;
+	const started = Date.now();
+	const source = await runImageModelOnce(env, option.id, prompt, { width: 1344, height: 576, references, seed: randomSeed() });
+	return { jpeg: await encode(env, source, "image/jpeg", 1344), ms: Date.now() - started, references: paths };
 }
 
 async function clef(env: Env, state: unknown, images: string[], questions: Record<string, unknown>, model: string = env.CLEF_MODEL) {

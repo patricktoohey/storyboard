@@ -60,7 +60,7 @@ Working and deployed (Workers, Artifacts, Queues, Workers AI, AI Gateway, Images
   earlier version that did better. In the comparison season (same skill, different lead models), Claude
   Opus 5.5 won both rounds, and in round 2 saved, compared twice, restored its saved version and submitted
   the cut made from it.
-- **Tests**: 172 unit tests (`npm test`), live model evals (`npm run eval`), an end-to-end smoke test.
+- **Tests**: 174 unit tests (`npm test`), live model evals (`npm run eval`), an end-to-end smoke test.
 
 ### Season 2
 
@@ -91,7 +91,9 @@ team's lines, and the remixed teasers are 30 seconds.
 
 Rather than run the same season again, the next round carries on from where teams stopped: an arena team
 can fork from an earlier board with every branch, and its submission must be a new cut. A human producer
-can send notes to any board, which the team's lead must answer, and the panel reads both (D40).
+can send notes to any board, which the team's lead must answer, and the panel reads both (D40). Teams can
+now draft Veo 3.1 for video and Nano Banana Pro for frames, each chosen by a test on Season 2's own shots,
+and the UI's Models page shows every option, its price and why any is off (D41).
 
 ## Try it
 
