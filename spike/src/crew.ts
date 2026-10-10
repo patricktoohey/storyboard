@@ -132,6 +132,38 @@ export const MENU = {
 			imageAs: "url",
 			audio: true,
 		},
+		// Premium tiers (Cloudflare's model pages, 2026-10-10), each tried on Opus's round 2 close-up of Maya
+		"veo-3.1": {
+			id: "google/veo-3.1",
+			label: "Veo 3.1: Google's full model, the best motion and faces; clips of 4, 6 or 8 s, dearest",
+			billedSeconds: snapUp([4, 6, 8]),
+			// $0.20-0.60/s by resolution and sound: 720p without sound is the low end
+			usd: (billed) => billed * 0.2,
+			imageAs: "base64",
+		},
+		"runway-gen-4.5": {
+			id: "runwayml/gen-4.5",
+			label: "Runway Gen-4.5: cinematic, keeps the wide frame; 2-10 s",
+			billedSeconds: (s) => Math.max(2, Math.min(10, Math.round(s))),
+			usd: (billed) => billed * 0.12,
+			imageAs: "base64",
+			unavailable: "rejects frames wider than about 2:1 (7003 at once on our 21:9 frames, people or not); a 16:9 crop rendered in 92 s (2026-10-10)",
+		},
+		"h3-max": {
+			id: "minimax/h3-max",
+			label: "MiniMax H3 Max: quick (~20 s a clip) and cheap, 768p; clips at least 5 s",
+			billedSeconds: (s) => Math.max(5, Math.min(15, Math.round(s))),
+			usd: (billed) => billed * 0.08,
+			imageAs: "url",
+		},
+		"seedance-2.5": {
+			id: "bytedance/seedance-2.5",
+			label: "Seedance 2.5: cinematic, with an optional last frame",
+			billedSeconds: (s) => Math.max(4, Math.min(12, Math.round(s))),
+			usd: (billed) => billed * 0.2312,
+			imageAs: "url",
+			unavailable: "refuses frames with a realistic person (7003 on a close-up); an empty corridor rendered in 144 s (2026-10-10)",
+		},
 		"grok-imagine-video": {
 			id: "xai/grok-imagine-video",
 			label: "Grok Imagine Video: clips with dialogue, effects and music of their own",
@@ -219,9 +251,12 @@ export function cheapestFilm(crew: Crew, clipSeconds: number[], turns = 8) {
 export function fitToBudget(crew: Crew, clipSeconds: number[], budget: number, share = 0.8, fixed: Slot[] = []) {
 	const changes: string[] = [];
 	let current = { ...crew };
+	// Options cheaper than the current one, cheapest first; by price, since the current one may no longer be on
+	// the menu (a crew drafted before its model became unavailable)
 	const cheaperOptions = (slot: Slot) => {
-		const order = draftOptions(slot).sort((a, b) => cheapestFilm({ ...current, [slot]: a }, clipSeconds) - cheapestFilm({ ...current, [slot]: b }, clipSeconds));
-		return order.slice(0, order.indexOf(current[slot]));
+		const cost = (key: string) => cheapestFilm({ ...current, [slot]: key }, clipSeconds);
+		const now = cost(current[slot]);
+		return draftOptions(slot).filter((k) => cost(k) < now).sort((a, b) => cost(a) - cost(b));
 	};
 	while (cheapestFilm(current, clipSeconds) > budget * share) {
 		let best: { slot: Slot; option: string; saves: number } | undefined;
@@ -279,6 +314,23 @@ export function videoRequest(
 				return { mode: "i2v", prompt, keyframes: imageUrl, duration: billed, aspect_ratio: "21:9", resolution: "hd", generate_audio: true };
 			case "grok-imagine-video":
 				return { ...base, image: { url: imageUrl }, duration: billed, aspect_ratio: "16:9", resolution: "720p" };
+			case "veo-3.1":
+				return { ...base, image_input: image.base64, duration: `${billed}s`, aspect_ratio: "16:9", resolution: "720p", generate_audio: false };
+			case "runway-gen-4.5":
+				return { ...base, image_input: `data:image/jpeg;base64,${image.base64}`, duration: billed, ratio: "1584:672", seed: opts.seed };
+			case "h3-max":
+				return {
+					content: [
+						{ type: "text", text: prompt },
+						{ type: "image_url", image_url: { url: imageUrl }, role: "first_frame" },
+					],
+					duration: billed,
+					resolution: "768P",
+					ratio: "adaptive",
+					extra: { prompt_expansion_mode: "disabled" },
+				};
+			case "seedance-2.5":
+				return { ...base, image: imageUrl, duration: billed, resolution: "720p", generate_audio: false, seed: opts.seed, watermark: false };
 		}
 	})();
 	return { model: video.id, input, billed, usd: video.usd(billed) };

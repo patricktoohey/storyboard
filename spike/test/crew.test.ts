@@ -33,10 +33,11 @@ test("a 4-cell film: ~$0.85 with the budget crew, ~$2.30 with the premium one", 
 	assert.ok(Math.abs(cheapestFilm(premium, clips) - 2.3) < 0.2, String(cheapestFilm(premium, clips)));
 });
 
-test("the draft only offers video models that work on photoreal people: LTX, Seedance, Veo and Grok are out", () => {
-	// Checked live: LTX's provider is out of funds; Seedance and Veo refuse frames that show realistic people;
-	// Grok refuses every request (7003); FLUX.3 animated a two-person medium shot with its own sound
-	assert.deepEqual(draftOptions("video").sort(), ["flux-3-video", "hailuo-2.3-fast", "wan-2.7-i2v"]);
+test("the draft only offers video models that work on photoreal people: LTX, Seedance, Veo Fast, Runway and Grok are out", () => {
+	// Checked live: LTX's provider is out of funds; Seedance (2.0 Fast and 2.5) and Veo 3.1 Fast refuse frames
+	// that show realistic people; Grok refuses every request (7003); Runway refuses our 21:9 frames; FLUX.3
+	// animated a two-person medium shot with its own sound; Veo 3.1 and H3 Max animated a close-up (2026-10-10)
+	assert.deepEqual(draftOptions("video").sort(), ["flux-3-video", "h3-max", "hailuo-2.3-fast", "veo-3.1", "wan-2.7-i2v"]);
 	assert.equal(draftOptions("renderer").length, 3);
 });
 
@@ -65,6 +66,11 @@ test("each video model gets its own request shape", () => {
 	assert.equal(req("veo-3.1-fast", 3).input.duration, "4s");
 	// Veo takes raw base64: a URL fails and a data: URL is "Invalid base64"
 	assert.equal(req("veo-3.1-fast").input.image_input, "QUJD");
+	assert.equal(req("veo-3.1").input.image_input, "QUJD");
+	assert.equal(req("runway-gen-4.5").input.image_input, "data:image/jpeg;base64,QUJD");
+	const h3 = req("h3-max", 3).input as { content: unknown[]; duration: number };
+	assert.deepEqual(h3.content, [{ type: "text", text: "move" }, { type: "image_url", image_url: { url: "https://img" }, role: "first_frame" }]);
+	assert.equal(h3.duration, 5);
 	assert.equal(req("ltx-2.5-fast").input.image_uri, "https://img");
 	assert.equal(req("hailuo-2.3-fast").input.first_frame_image, "https://img");
 	assert.equal(req("hailuo-2.3-fast", 3).input.duration, 6);

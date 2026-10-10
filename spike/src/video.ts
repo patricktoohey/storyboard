@@ -73,29 +73,32 @@ export async function animate(
 	const started = Date.now();
 	const seed = Math.floor(Math.random() * 2 ** 31);
 	const crew = crewOf(env);
-	// Veo takes the frame as raw base64; the others fetch the signed URL themselves
+	// Veo and Runway take the frame inline; the others fetch the signed URL themselves
 	const base64 = MENU.video[crew.video].imageAs === "base64" ? toBase64(await frame.jpeg()) : undefined;
 	// A clip with its own sound gets the scene's ambience only: music and voices are the score's and the lines'
 	const audio = Boolean((MENU.video[crew.video] as VideoOption).audio);
 	const req = videoRequest(crew, { url: frame.url, base64 }, audio ? `${unspoken(prompt)} ${SOUND_HINT}` : prompt, seconds, { seed, staticCamera });
 	if (crew.video === "wan-2.7-i2v") req.input.negative_prompt = NEGATIVE_PROMPT;
-	type Out = { video?: string; state?: string; result?: { video?: string } } | undefined;
+	type Task = { task?: { content?: { url?: string } } };
+	type Out = ({ video?: string; state?: string; result?: { video?: string } & Task } & Task) | undefined;
 	const out = (await env.AI.run(req.model as keyof AiModels, req.input as never).catch(async (err) => {
 		// Hailuo answered one beat's motion prompt with "7003: User Input Error"; the same frame animated with
 		// the plain prompt (season-2026-10-08-0a8064). One retry with it, recorded in the clip's metadata.
 		if (!String(err).includes("7003") || prompt === PLAIN_MOTION) throw err;
-		req.input.prompt = PLAIN_MOTION;
+		// MiniMax H3 carries its prompt as the first content item
+		if (Array.isArray(req.input.content)) req.input.content[0] = { type: "text", text: PLAIN_MOTION };
+		else req.input.prompt = PLAIN_MOTION;
 		return env.AI.run(req.model as keyof AiModels, req.input as never);
 	})) as unknown as Out;
-	// The catalog returns the clip as a URL, either bare or wrapped in { state, result }
-	const url = out?.video ?? out?.result?.video;
+	// The catalog returns the clip as a URL, either bare or wrapped in { state, result }; MiniMax H3 as a task
+	const url = out?.video ?? out?.result?.video ?? out?.result?.task?.content?.url ?? out?.task?.content?.url;
 	if (!url) throw new Error(`${req.model} returned no video: ${JSON.stringify(out).slice(0, 300)}`);
 	const res = await fetch(url);
 	if (!res.ok) throw new Error(`downloading the clip failed: ${res.status}`);
 	const mp4 = new Uint8Array(await res.arrayBuffer());
 	return {
 		mp4,
-		meta: { model: req.model, audio, prompt: req.input.prompt as string, planned_seconds: seconds, seconds: req.billed, usd: req.usd, seed, input: { ...req.input, image: undefined, image_uri: undefined, image_input: undefined, first_frame_image: undefined }, bytes: mp4.byteLength, elapsed_ms: Date.now() - started },
+		meta: { model: req.model, audio, prompt: (req.input.prompt as string) ?? prompt, planned_seconds: seconds, seconds: req.billed, usd: req.usd, seed, input: { ...req.input, image: undefined, image_uri: undefined, image_input: undefined, first_frame_image: undefined, content: undefined }, bytes: mp4.byteLength, elapsed_ms: Date.now() - started },
 	};
 }
 
