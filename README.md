@@ -60,7 +60,7 @@ Working and deployed (Workers, Artifacts, Queues, Workers AI, AI Gateway, Images
   earlier version that did better. In the comparison season (same skill, different lead models), Claude
   Opus 5.5 won both rounds, and in round 2 saved, compared twice, restored its saved version and submitted
   the cut made from it.
-- **Tests**: 177 unit tests (`npm test`), live model evals (`npm run eval`), an end-to-end smoke test.
+- **Tests**: 180 unit tests (`npm test`), live model evals (`npm run eval`), an end-to-end smoke test.
 
 ### Season 2
 
@@ -95,7 +95,7 @@ can send notes to any board, which the team's lead must answer, and the panel re
 now draft Veo 3.1 for video and Nano Banana Pro for frames, each chosen by a test on Season 2's own shots,
 and the UI's Models page shows every option, its price and why any is off (D41). One wrong detail in a
 frame can be fixed by an edit instead of a re-shoot, and the continuity check now catches the impossible,
-like a second pair of glasses (D42).
+like a second pair of glasses (D42). A job that fails for the platform's reasons is refunded to the team (D43).
 
 ## Try it
 

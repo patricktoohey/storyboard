@@ -83,6 +83,9 @@ among the tools in `src/arena-rules.ts`, Git among them: save, restore, compare,
   frame is the printed one (or that take's) edited by FLUX.2 max, changing nothing else; leads have an
   `edit` tool, and every shot in the UI an edit button. The continuity check flags anything impossible or
   duplicated in a frame.
+- **Refunds** (`src/ledger.ts`, D43): a job that fails for the platform's reasons (a branch conflict, a lost
+  job, a provider out of capacity or rate limited, no credits, a network error) is refunded to the team's
+  budget, with the reason in its detail; the team's own failures keep their charge (D19).
 - **Models** (`src/crew.ts`, D41): `GET /menu` lists every crew option with its price and why an option is
   off (the UI's Models page). `POST /debug/render {"board", "cell", "renderer"}` renders a printed shot again
   with another renderer and returns the JPEG, committing nothing.

@@ -724,3 +724,22 @@ and the casting portrait, and a second pair of the right glasses matches both.
   five correct frames of Theo and four ordinary frames from the same season.
 
 Tests: `test/producer.test.ts`, `test/continuity-rules.test.ts`.
+
+## D43: our failures, our bill
+
+**D19** charges a job its estimate when it's queued and keeps the charge if it fails, so a team can never
+spend past its budget by failing. That's fair when the team's own choice failed: a prompt that's flagged,
+a model that won't take its frame. It isn't when the platform did. In the rehearsal (D40) all eight clips
+of GPT's cut were rendered, charged, and refused on branches we had numbered wrong; the team was left
+$0.38 short of a cut it had planned well, and asked the producer for the money in public.
+
+- **Refunded**: a failure whose detail matches one of ours (`OUR_FAILURES` in `ledger.ts`): a branch
+  conflict, a job the queue lost ("interrupted", "stalled"), a provider out of capacity (3040, 3043) or rate
+  limiting past our retries (3021), the AI Gateway out of credits (2021), or a provider or network error.
+  Its reservation goes to $0 and its detail says why ("refunded $0.17: a branch conflict on our side"), so
+  the lead sees it and the money is back in its budget.
+- **Kept**: every other failure, as before.
+- The house pays for a refund: the provider was paid for the rendered clips either way. Refunds don't
+  change what the gateway spends, only whose budget it comes out of.
+
+Tests: `test/refunds.test.ts`.

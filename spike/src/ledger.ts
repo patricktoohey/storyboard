@@ -97,6 +97,25 @@ export function appendJobs(
  * its follow-up (for a first cut: print the best take of every cell). Because the whole edit is one
  * commit, exactly one job's report can be the one that closes a group. Mutates `rows`.
  */
+/**
+ * Failures that are the platform's, not the team's (D43): a job that fails this way is refunded. D19 keeps a
+ * failed job's charge so a team can't spend past its budget by failing; that's fair when the team's choices
+ * failed (a refused prompt, a model that won't take its frame), not when ours did. The rehearsal's carried
+ * board had all eight clips of a cut rendered, charged, and refused on branches we had numbered wrong, which
+ * left the team $0.38 short of the cut it had planned. Each pattern is a failure seen in a ledger.
+ */
+export const OUR_FAILURES: [RegExp, string][] = [
+	[/PushRejectedError|not a simple fast-forward/i, "a branch conflict on our side"],
+	[/^interrupted|^stalled/i, "the job was lost by the queue"],
+	[/\b(3040|3043)\b|out of capacity/i, "the provider was out of capacity"],
+	[/\b3021\b|rate.?limit/i, "the provider's rate limit"],
+	[/\b2021\b|insufficient (ai gateway credits|balance)/i, "the AI Gateway was out of credits"],
+	[/downloading the (clip|image|edit) failed|internal server error|bad gateway|service unavailable|\b50[234]\b/i, "a provider or network error"],
+];
+
+/** Why a failure is ours to pay for, if it is. */
+export const ourFailure = (detail = "") => OUR_FAILURES.find(([pattern]) => pattern.test(detail))?.[1];
+
 export function recordProgress(
 	rows: LedgerRow[],
 	id: string,
@@ -112,6 +131,12 @@ export function recordProgress(
 	// What the job really cost replaces its reservation: a turn reserves a lead-model decision, and pays
 	// nothing when it only waits, or the tokens it used when it decides
 	if (update.cost !== undefined) job.cost_est = update.cost.toFixed(4);
+	// Our failure, our bill: the reservation is released and the detail says so (D43)
+	const ours = update.status === "failed" ? ourFailure(update.detail) : undefined;
+	if (ours && Number(job.cost_est) > 0) {
+		job.detail = `${job.detail} (refunded $${Number(job.cost_est).toFixed(2)}: ${ours})`;
+		job.cost_est = "0";
+	}
 	job.updated = update.now;
 
 	const group = job.group && rows.find((r) => r.kind === "group" && r.id === job.group);
