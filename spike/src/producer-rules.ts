@@ -41,7 +41,7 @@ export function producerView(notes: ProducerNote[]) {
 		...(open.length
 			? {
 					open: open.map((n) => ({ ...(n.cell ? { cell: n.cell } : { to: "the whole board" }), note: n.note })),
-					must: 'Answer in "to_producer": what you are doing about it this turn or next, or why you won\'t. You decide, but the panel reads your answer beside the note.',
+					must: 'Answer in "to_producer": what you are doing about it this turn or next, or why you won\'t. You decide, but the panel reads your answer beside the note. A note about one wrong detail in a frame is what "edit" is for.',
 				}
 			: {}),
 		...(answered.length ? { answered: answered.map((n) => ({ note: n.note, you_said: n.answer!.reply })) } : {}),

@@ -39,6 +39,12 @@ export const HEADCOUNT = { "0": "No people", "1": "One person", "2": "Two people
 export const SETTING_SHOTS: Cell["shot"][] = ["EWS", "WS", "MS"];
 // Below this, the frame is unlikely to be set in its planned location
 export const PLACE_MATCH_MIN = 0.4;
+// Something impossible in the frame (D42): Opus's Theo wore one pair of glasses on his head and another on
+// his eyes, and nothing caught it. Clef said yes at 0.85 and 0.76 to the two frames with both pairs, and at
+// 0.01-0.06 to five correct frames and four ordinary ones (2026-10-10)
+export const IMPOSSIBLE_MAX = 0.6;
+export const IMPOSSIBLE_QUESTION =
+	"Is anything in image 1 physically impossible or duplicated: a person wearing two of the same item at once (two pairs of glasses, two hats), extra hands, arms or fingers, or an object passing through another?";
 // Below this, the frame is unlikely to be staged as the blocking says (who sits where, who faces whom)
 export const BLOCKING_MATCH_MIN = 0.3;
 
@@ -59,6 +65,7 @@ export function continuityQuestions(cell: Pick<Cell, "beat" | "shot" | "position
 	const faces = usesPortraits(cell.shot);
 	// In an extreme wide shot figures are too small for colours to be reliable
 	const attributes = cell.shot !== "EWS";
+	questions.impossible = { type: "noul", instructions: IMPOSSIBLE_QUESTION };
 	// A head count: extra people (a stranger in the back seat) are a continuity break
 	if (cell.shot !== "ECU") questions.people = { type: "choice", instructions: "How many people are visible in image 1?", criteria: HEADCOUNT };
 	if (placeChecked) {
@@ -132,6 +139,10 @@ export function continuityVerdict(
 	const expected = Math.min(4, characters.length || cell.characters?.length || 0);
 	if (people?.choice && Number(people.choice) > expected && (people.probabilities?.[String(expected)] ?? 0) < ATTRIBUTE_MATCH_MIN) {
 		issues.push(`${people.choice === "4" ? "four or more" : people.choice} people are visible but the shot plans ${expected}`);
+	}
+	const impossible = answers.impossible?.noul;
+	if (impossible !== undefined && impossible > IMPOSSIBLE_MAX) {
+		issues.push(`something in the frame is impossible or duplicated, like two pairs of the same glasses or an extra hand (p=${impossible.toFixed(2)})`);
 	}
 	const place = answers.place?.noul;
 	if (place !== undefined && place < PLACE_MATCH_MIN) {

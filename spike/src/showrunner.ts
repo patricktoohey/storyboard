@@ -349,6 +349,7 @@ export async function runTurnJob(env: Env, job: TurnJob, progress: Progress) {
 								? "shooting"
 								: t.stale ? "stale (a character changed since)" : t.continuity?.ok ? "continuity ok" : `continuity: ${(t.continuity?.issues ?? []).join("; ")}`,
 						...(t.idea ? { idea: t.idea } : {}),
+						...(t.edit ? { edit_of: t.edit.from, edit: t.edit.instruction } : {}),
 						prompt: t.prompt?.slice(0, 300),
 					})),
 			})),
@@ -458,6 +459,11 @@ export async function runTurnJob(env: Env, job: TurnJob, progress: Progress) {
 				await submit(env, board, [{ kind: "take", cell: args.cell as string }]);
 				detail += ` on cell ${args.cell}`;
 				break;
+			case "edit": {
+				const [job] = await submit(env, board, [{ kind: "take", cell: args.cell as string, opts: { edit: { instruction: args.instruction as string, from: args.from as string } } }]);
+				detail += ` on cell ${args.cell} (${args.from === "main" ? "the printed frame" : args.from} → take ${job.kind === "take" ? job.take : "?"}): "${args.instruction}"`;
+				break;
+			}
 			case "ideas": {
 				// One take branch per idea, shot in parallel; the lead prints one
 				const ideas = args.ideas as { name: string; text: string }[];

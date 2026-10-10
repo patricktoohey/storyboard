@@ -941,6 +941,7 @@ function cellHtml(cell) {
         ${cont}
         ${t?.adherence != null ? `<span class="pill">adherence ${t.adherence.toFixed(2)}</span>` : ""}
         ${t?.skill ? `<span class="pill">${esc(t.skill)}</span>` : ""}
+        ${t?.edit ? `<span class="pill printed" title="${esc(t.edit.instruction)}">edit of ${esc(t.edit.from === "main" ? "the printed frame" : t.edit.from.replace(/^cell\/\d+\//, ""))}</span>` : ""}
         ${cell.characters.length ? `<span class="pill">${esc(cell.characters.join(", "))}</span>` : ""}
         ${cell.location ? `<span class="pill" title="${esc(cell.blocking || "")}">${esc(cell.location)}${cell.positions && Object.keys(cell.positions).length ? ` · ${esc(Object.entries(cell.positions).map(([n, p]) => `${n} ${p}`).join(", "))}` : ""}</span>` : ""}
       </div>
@@ -951,6 +952,7 @@ function cellHtml(cell) {
           <span class="dot ${!k.done ? "wip" : k.stale ? "stale" : k.continuity?.ok ? "ok" : "bad"}"></span>
         </button>`).join("")}</div>
       ${t?.continuity && !t.continuity.ok && !t.stale ? `<div class="issues">${t.continuity.issues.map(esc).join("<br>")}</div>` : ""}
+      ${t?.edit ? `<div class="prompt">Edit: ${esc(t.edit.instruction)}</div>` : ""}
       ${t?.prompt ? `<div class="prompt">${esc(t.prompt)}</div>` : ""}
       <div class="row">
         ${t && t.done && !printedHere ? `<button class="primary" data-act="print">Print take ${t.take}</button>` : ""}
@@ -958,8 +960,8 @@ function cellHtml(cell) {
         <button data-act="retake">Retake</button>
       </div>
       ${cell.notes ? `<div class="notes">${esc(cell.notes.replace(/^# Notes.*\n+/, "").replace(/\*\*/g, ""))}</div>` : ""}
-      <div class="row"><textarea rows="2" data-note placeholder="Note on this shot, e.g. “her coat should be red” or “move the camera lower”">${esc(drafts[cell.id] || "")}</textarea></div>
-      <div class="row"><button data-act="note">Send note</button><span class="status">${esc(cellActivity(cell.id) || cellStatus[cell.id] || "")}</span></div>
+      <div class="row"><textarea rows="2" data-note placeholder="A note re-shoots it: “move the camera lower”. An edit fixes one detail of the frame shown: “one pair of glasses, pushed up”">${esc(drafts[cell.id] || "")}</textarea></div>
+      <div class="row"><button data-act="note">Send note</button>${t?.done ? `<button data-act="editframe" title="An image model edits take ${t.take}'s frame as you say and changes nothing else: a new take, about $0.11">Edit take ${t.take}'s frame</button>` : ""}<span class="status">${esc(cellActivity(cell.id) || cellStatus[cell.id] || "")}</span></div>
     </div>
   </article>`;
 }
@@ -1001,6 +1003,15 @@ async function hydrate(cutKept = false) {
           const out = await run("Queueing a take…", [id], () => api(`/boards/${state.repo}/cells/${id}/takes`, { method: "POST", body: JSON.stringify({ skill }) }));
           selected[id] = out.jobs[0].take;
           cellStatus[id] = `Take ${selected[id]} queued`;
+        } else if (act === "editframe") {
+          const instruction = card.querySelector("[data-note]").value.trim();
+          if (!instruction) return;
+          const t = currentTake(cell);
+          drafts[id] = "";
+          card.querySelector("[data-note]").value = "";
+          const out = await run("Queueing an edit…", [id], () => api(`/boards/${state.repo}/cells/${id}/edits`, { method: "POST", body: JSON.stringify({ instruction, ...(t.take === cell.printed ? {} : { take: t.take }) }) }));
+          selected[id] = out.jobs[0].take;
+          cellStatus[id] = `Edit of take ${t.take} queued as take ${selected[id]}`;
         } else if (act === "note") {
           const note = card.querySelector("[data-note]").value.trim();
           if (!note) return;

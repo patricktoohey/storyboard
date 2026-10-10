@@ -12,7 +12,7 @@ export function estimate(req: JobRequest, crew: Crew = DEFAULT_CREW): number {
 		case "board":
 			return c.board;
 		case "take":
-			return c.take;
+			return req.opts?.edit ? c.edit : c.take;
 		case "bible":
 			return c.bible;
 		case "turn":

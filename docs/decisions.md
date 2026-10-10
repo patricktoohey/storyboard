@@ -684,3 +684,30 @@ a board to carry on from) and shows what the arena can cost against the balance
 loads.
 
 Tests: `test/crew.test.ts`.
+
+## D42: fixing a detail without shooting again, and catching the impossible
+
+**Theo's two pairs of glasses** (Opus, round 2, shot 06) needed one detail fixed, and the only tools were a
+note, which re-shoots the whole frame through the cinematographer and renderer, or a retake, which rolls
+the dice again. Nothing flagged it either: the continuity check compares each character with the bible
+and the casting portrait, and a second pair of the right glasses matches both.
+
+- **An edit is a take**: `{"edit": {"instruction", "from"}}` on a take job starts from the printed frame
+  (`from: "main"`) or a named take, sends it to FLUX.2 max with the instruction and "change nothing
+  else", and commits the result as a new take branch: `edit.md` says what and from where, `prompt.md`
+  keeps the source take's prompt, which the critic and the continuity check still judge it by. It costs
+  the edit (~$0.10) and the critic, with no cinematographer and no render. Print it like any take; the
+  source stays on its branch.
+- **Three ways in**: `POST /boards/:repo/cells/:id/edits {"instruction", "take"?}`; the lead's new `edit`
+  tool (a printed frame, or a finished take named), which the producer's notes point to for "one wrong
+  detail in a frame"; and an "Edit take N's frame" button on every shot in the UI.
+- **Tried live** on the beekeeper's close-up (`board-2026-10-08-8cff5c`, shot 02): "a single honeybee
+  rests on his right cheek" took 23 s, and the bee is there with nothing else changed (though on his left
+  cheek: the model read "right" as the viewer's right). Its continuity check flagged his hair as light
+  brown (p=0.12) where the same pixels had passed before: the colour checks are noisy near their bar.
+- **The impossible, caught**: every continuity check now asks whether anything in the frame is impossible
+  or duplicated (two of the same item worn at once, extra hands, an object through another) and calls it a
+  break above 0.6. Clef said 0.85 and 0.76 to the two frames with both pairs of glasses, and 0.01-0.06 to
+  five correct frames of Theo and four ordinary frames from the same season.
+
+Tests: `test/producer.test.ts`, `test/continuity-rules.test.ts`.

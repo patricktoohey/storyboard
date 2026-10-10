@@ -17,6 +17,7 @@
 //   POST /boards/:repo/cells/:id/takes         {"note"?, "skill"?}  queue a new take (optionally in another style)
 //   POST /boards/:repo/cells/:id/notes         {"note"}  commit the note, route it, queue the work
 //   POST /boards/:repo/cells/:id/print         {"take"}  merge that take into main
+//   POST /boards/:repo/cells/:id/edits         {"instruction", "take"?}  a new take: the printed frame (or that take's) edited (D42)
 //   POST /boards/:repo/producer                {"note", "cell"?}  the producer's note; the team's lead answers it on its next turn (D40)
 //   POST /boards/:repo/roles/:role             {"skill"} which skill fills a role on this board
 //   PUT  /boards/:repo/skills/:name            SKILL.md body; optional x-message header -> commit to board main
@@ -318,6 +319,13 @@ export default {
 					const { cut } = await json<{ cut?: string }>(request);
 					if (!cut) return Response.json({ error: "cut is required (v1, v2, ...)" }, { status: 400 });
 					return Response.json({ jobs: await submit(env, repoName, [{ kind: "mix", cut: cut.replace(/^cut\//, "") }]) }, { status: 202 });
+				}
+				// Fix one detail of a frame (D42): a new take whose frame is the printed one (or a named take's), edited
+				if (method === "POST" && action === "cells" && id && sub === "edits") {
+					const { instruction, take } = await json<{ instruction?: string; take?: number }>(request);
+					if (!instruction?.trim()) return Response.json({ error: "instruction is required" }, { status: 400 });
+					const from = take ? `cell/${id}/take-${take}` : "main";
+					return Response.json({ jobs: await submit(env, repoName, [{ kind: "take", cell: id, opts: { edit: { instruction: instruction.trim().slice(0, 500), from } } }]) }, { status: 202 });
 				}
 				if (method === "POST" && action === "cells" && id) {
 					if (sub === "takes") {

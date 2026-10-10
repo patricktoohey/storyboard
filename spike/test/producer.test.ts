@@ -68,3 +68,26 @@ test("D40: a carried-over board's earlier cuts are there to watch, not to submit
 	const r = processRecord({ turns: [], start: new Date(at(0)), saved: [], comparisons: [], cuts: ["v3"], submitted: "v3", from });
 	assert.match(r, /^Carried on from board-gpt-2026-10-09-fe8616-r2 at abc1234, every branch with it: its cuts \(v1, v2\)/);
 });
+
+test("D42: an edit fixes one detail of the printed frame or a finished take, priced without a cinematographer or a render", async () => {
+	const { estimate } = await import("../src/costs.ts");
+	const { DEFAULT_CREW, EDIT_USD, MENU } = await import("../src/crew.ts");
+	const { publicMove } = await import("../src/format-rules.ts");
+	const take = (n: number, done = true) => ({ take: n, done, ok: true, stale: false, issues: [] });
+	const s = { cells: [{ id: "06", printed: 3, takes: [take(2), take(3), take(4, false)] }, { id: "07", takes: [take(1)] }], cuts: [] } as unknown as BoardSummary;
+	const d = (args: unknown) => parseDecision(JSON.stringify({ action: "edit", args, reason: "the producer's note" }), ["edit"], s);
+	assert.deepEqual(d({ cell: "06", instruction: "One pair of glasses, pushed up; his eyes bare." }), {
+		action: "edit",
+		args: { cell: "06", instruction: "One pair of glasses, pushed up; his eyes bare.", from: "main" },
+		reason: "the producer's note",
+	});
+	assert.deepEqual((d({ cell: "06", instruction: "x", take: 2 }) as { args: unknown }).args, { cell: "06", instruction: "x", from: "cell/06/take-2" });
+	assert.ok("error" in d({ cell: "06", instruction: "x", take: 4 }), "still shooting");
+	assert.ok("error" in d({ cell: "07", instruction: "x" }), "nothing printed to edit");
+	assert.deepEqual((d({ cell: "07", instruction: "x", take: 1 }) as { args: unknown }).args, { cell: "07", instruction: "x", from: "cell/07/take-1" });
+	assert.ok("error" in d({ cell: "06" }));
+	assert.equal(publicMove("edit", { cell: "06", instruction: "secret" }), "edited a frame on cell 06");
+	const edit = estimate({ kind: "take", cell: "06", opts: { edit: { instruction: "x", from: "main" } } });
+	assert.equal(edit, EDIT_USD + MENU.critic[DEFAULT_CREW.critic].perTake);
+	assert.ok(edit < estimate({ kind: "take", cell: "06" }) + EDIT_USD);
+});

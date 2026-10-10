@@ -79,6 +79,10 @@ among the tools in `src/arena-rules.ts`, Git among them: save, restore, compare,
   "board-…"}` forks from that board with every branch and an empty ledger, keeps its plan, and must submit
   a new cut. `POST /boards/:repo/producer {"note", "cell"?}` commits the producer's note; the lead answers
   in `"to_producer"` on its next turn, committed beside it, and the panel reads both in the process record.
+- **Edits** (D42): `POST /boards/:repo/cells/:id/edits {"instruction", "take"?}` makes a new take whose
+  frame is the printed one (or that take's) edited by FLUX.2 max, changing nothing else; leads have an
+  `edit` tool, and every shot in the UI an edit button. The continuity check flags anything impossible or
+  duplicated in a frame.
 - **Models** (`src/crew.ts`, D41): `GET /menu` lists every crew option with its price and why an option is
   off (the UI's Models page). `POST /debug/render {"board", "cell", "renderer"}` renders a printed shot again
   with another renderer and returns the JPEG, committing nothing.

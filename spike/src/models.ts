@@ -3,7 +3,7 @@
 // what stays here is each role's output contract, which code depends on.
 import { SETTING_SHOTS, continuityQuestions, continuityVerdict } from "./continuity-rules.ts";
 import { llmFor } from "./crew-env";
-import { MENU, type RendererOption, nearestRatio } from "./crew.ts";
+import { EDIT_MODEL, MENU, type RendererOption, nearestRatio } from "./crew.ts";
 import { RATE_LIMITED, llmRequest, llmText, llmUsage, retryDelay } from "./llm.ts";
 import { normalizePositions, withBlocking, withStaged } from "./blocking.ts";
 import { insertLooks } from "./looks";
@@ -339,6 +339,41 @@ export async function render(env: Env, cell: Cell, prompt: string, references: R
 			bytes: { source: source.byteLength, frame_webp: frame.byteLength, preview_webp: preview.byteLength },
 			elapsed_ms: Date.now() - started,
 		},
+	};
+}
+
+/**
+ * A frame edited, not shot again (D42): the edit model gets the frame and the instruction, and is told to
+ * change nothing else. Same outputs as render(), so the critic and the continuity check judge it as a take.
+ */
+export async function editFrame(env: Env, source: Uint8Array, instruction: string) {
+	const started = Date.now();
+	const prompt = `Edit this film frame: ${instruction.trim().replace(/\.?$/, ".")} Change nothing else: keep every face, expression, wardrobe item, prop, the light, the framing and any text exactly as they are.`;
+	const jpeg = await encode(env, source, "image/jpeg", 1344);
+	const { result, attempts } = await withRetry(async (attempt) => {
+		const out = (await env.AI.run(EDIT_MODEL as keyof AiModels, {
+			prompt,
+			width: 1344,
+			height: 576,
+			input_images: [`data:image/jpeg;base64,${toBase64(jpeg)}`],
+			output_format: "jpeg",
+		} as never)) as unknown as { image?: string; result?: { image?: string } };
+		const url = out?.image ?? out?.result?.image;
+		if (!url) throw new Error(`${EDIT_MODEL} returned no image: ${JSON.stringify(out).slice(0, 200)}`);
+		const res = await fetch(url);
+		if (!res.ok) throw new Error(`downloading the edit failed: ${res.status}`);
+		return { result: new Uint8Array(await res.arrayBuffer()), attempts: attempt };
+	}, [...TRANSIENT, RATE_LIMITED], 4);
+	const [frame, preview, detail] = await Promise.all([
+		encode(env, result, "image/webp", 1344),
+		encode(env, result, "image/webp", 384),
+		encode(env, result, "image/webp", 640),
+	]);
+	return {
+		frame,
+		previewBase64: toBase64(preview),
+		detailBase64: toBase64(detail),
+		meta: { model: EDIT_MODEL, attempts, width: 1344, height: 576, prompt_sent: prompt, bytes: { frame_webp: frame.byteLength }, elapsed_ms: Date.now() - started },
 	};
 }
 

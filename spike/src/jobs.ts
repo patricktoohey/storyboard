@@ -9,6 +9,9 @@ export interface TakeOptions {
 	prompt?: string;
 	// One of several ideas for this shot, shot side by side on their own take branches (D35)
 	idea?: { name: string; text: string };
+	// Fix one detail of an existing frame (D42): an image model edits the frame at `from` (main, for the
+	// printed take, or a take branch) as the instruction says. No cinematographer, no new render
+	edit?: { instruction: string; from: string };
 }
 
 interface JobBase {

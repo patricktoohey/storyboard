@@ -28,6 +28,7 @@ import {
 	scout,
 	portraitReference,
 	render,
+	editFrame,
 	review,
 	routeNote,
 } from "./models";
@@ -163,7 +164,7 @@ async function castCharacters(env: Env, remote: Remote, characters: Character[],
 }
 
 /** Files a take writes for its cell. A new take branch deletes main's copies first (see shootCell). */
-export const TAKE_OUTPUTS = ["frame.webp", "render.json", "review.json", "continuity.json", "idea.md"];
+export const TAKE_OUTPUTS = ["frame.webp", "render.json", "review.json", "continuity.json", "idea.md", "edit.md"];
 
 /** Reports what a job is doing now, to the coordinator's live feed. */
 export type Progress = (detail: string) => Promise<unknown>;
@@ -239,7 +240,24 @@ async function shootCell(
 	// first commit, or until the renderer commits, this take would serve the previous take's frame.
 	const inherited = TAKE_OUTPUTS.map((f) => `${dir}/${f}`);
 	let prompt: string;
-	if (opts.prompt) {
+	// An edit (D42): the frame it starts from, and that take's prompt, which the edited frame is still judged by
+	let source: Uint8Array | undefined;
+	if (opts.edit) {
+		// Main's files are the tree as cloned; a take's, fetched into it
+		const files = opts.edit.from === "main"
+			? Object.fromEntries(await Promise.all([`${dir}/frame.webp`, `${dir}/prompt.md`].map(async (p) => [p, (await tree.exists(p)) ? await tree.readBytes(p) : undefined] as const)))
+			: await tree.filesAt(await tree.fetchBranch(opts.edit.from), `${dir}/`);
+		source = files[`${dir}/frame.webp`];
+		if (!source) throw new Error(`no frame for cell ${cell.id} at ${opts.edit.from} to edit`);
+		const was = files[`${dir}/prompt.md`];
+		prompt = (was ? new TextDecoder().decode(was) : cell.beat).trim();
+		await tree.commit(
+			{ name: `editor-${cell.id}` },
+			`Cell ${cell.id} take ${take}: edit of ${opts.edit.from === "main" ? "the printed frame" : opts.edit.from}\n\n${opts.edit.instruction}`,
+			{ [`${dir}/prompt.md`]: `${prompt}\n`, [`${dir}/edit.md`]: `# Edit\n\nFrom: ${opts.edit.from}\n\n${opts.edit.instruction.trim()}\n` },
+			inherited,
+		);
+	} else if (opts.prompt) {
 		prompt = opts.prompt;
 		await tree.commit(
 			{ name: `cinematographer-${cell.id}` },
@@ -270,11 +288,12 @@ async function shootCell(
 	}
 	await tree.push(branch);
 
-	await progress("renderer rendering the frame");
-	const frame = await render(env, cell, prompt, cellRefs, place);
-	await tree.commit({ name: `renderer-${cell.id}` }, `Cell ${cell.id} take ${take}: render`, {
+	await progress(opts.edit ? "editing the frame" : "renderer rendering the frame");
+	const frame = opts.edit && source ? await editFrame(env, source, opts.edit.instruction) : await render(env, cell, prompt, cellRefs, place);
+	const edited = opts.edit ? { edited_from: opts.edit.from, instruction: opts.edit.instruction } : {};
+	await tree.commit({ name: opts.edit ? `editor-${cell.id}` : `renderer-${cell.id}` }, `Cell ${cell.id} take ${take}: ${opts.edit ? "edit" : "render"}`, {
 		[`${dir}/frame.webp`]: frame.frame,
-		[`${dir}/render.json`]: JSON.stringify({ ...frame.meta, branch, skill: `${skill.name}@${skill.version}` }, null, 2) + "\n",
+		[`${dir}/render.json`]: JSON.stringify({ ...frame.meta, ...edited, branch, skill: `${skill.name}@${skill.version}` }, null, 2) + "\n",
 	});
 	await tree.push(branch);
 
@@ -665,7 +684,7 @@ export async function boardState(env: Env, repoName: string) {
 	const takes = await Promise.all(
 		branches.map(async (branch) => {
 			const cell = branch.split("/")[1];
-			const [prompt, renderMeta, critic, continuity, characters, idea] = await Promise.all([
+			const [prompt, renderMeta, critic, continuity, characters, idea, edit] = await Promise.all([
 				repo.readFile({ ref: branch, path: `cells/${cell}/prompt.md` }).then((b) => b?.text()),
 				readJson(repo, branch, `cells/${cell}/render.json`),
 				readJson(repo, branch, `cells/${cell}/review.json`),
@@ -673,6 +692,7 @@ export async function boardState(env: Env, repoName: string) {
 				// The bible's characters as they were when this take branched from main
 				repo.readFile({ ref: branch, path: "characters.json" }).then((b) => b?.text()),
 				repo.readFile({ ref: branch, path: `cells/${cell}/idea.md` }).then((b) => b?.text()),
+				repo.readFile({ ref: branch, path: `cells/${cell}/edit.md` }).then((b) => b?.text()),
 			]);
 			return {
 				cell,
@@ -683,6 +703,8 @@ export async function boardState(env: Env, repoName: string) {
 				prompt: prompt?.trim(),
 				// One of several ideas for the shot: its name (the first line of idea.md)
 				idea: idea ? idea.split("\n")[0].replace(/^#\s*/, "").trim() : undefined,
+				// An edit of another take's frame (D42): what it fixed, and from where
+				edit: edit ? { from: /^From: (.+)$/m.exec(edit)?.[1], instruction: edit.split("\n").slice(4).join(" ").trim() } : undefined,
 				adherence: critic?.adherence?.score,
 				framing: critic?.framing?.choice,
 				continuity: continuity && { ok: continuity.ok, issues: continuity.issues },

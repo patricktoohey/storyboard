@@ -265,6 +265,11 @@ const CHARACTERS = 2;
 // Location scouting: one establishing image per location, typically two
 const LOCATIONS = 2;
 
+// A frame edit (D42): FLUX.2 max, which on Theo's two pairs of glasses removed one and changed nothing else.
+// Billed by megapixel: $0.07 for the first out, $0.03 for the frame in (2026-10-10)
+export const EDIT_MODEL = "black-forest-labs/flux-2-max";
+export const EDIT_USD = 0.1;
+
 /** What each kind of job costs with this crew, in USD. */
 export function crewCosts(crew: Crew) {
 	const renderer: RendererOption = MENU.renderer[crew.renderer];
@@ -272,6 +277,8 @@ export function crewCosts(crew: Crew) {
 	return {
 		board: llmCall(crew, "director") + (CHARACTERS + LOCATIONS) * renderer.perPortrait,
 		take: renderer.perFrame + llmCall(crew, "cinematographer") + critic.perTake,
+		// An edit has no cinematographer and no render, but is reviewed like any take
+		edit: EDIT_USD + critic.perTake,
 		bible: llmCall(crew, "revision") + renderer.perPortrait + ROUTER,
 		turn: llmCall(crew, "turn"),
 	};

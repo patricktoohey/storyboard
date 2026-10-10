@@ -40,6 +40,7 @@ test("CU asks age, look, visibility, attributes for frame and portrait, and iden
 		"hair.frame.driver",
 		"hair.portrait.driver",
 		"identity.driver",
+		"impossible",
 		"look.driver",
 		"outerwear.frame.driver",
 		"outerwear.portrait.driver",
@@ -56,7 +57,7 @@ test("portrait image numbers follow the character order", () => {
 
 test("EWS skips attributes and identity: figures are too small", () => {
 	const { questions } = continuityQuestions({ beat: "b", shot: "EWS" }, [driver]);
-	assert.deepEqual(Object.keys(questions).sort(), ["age.driver", "look.driver", "people"]);
+	assert.deepEqual(Object.keys(questions).sort(), ["age.driver", "impossible", "look.driver", "people"]);
 });
 
 test("at most MAX_PORTRAITS characters are checked (Clef takes 4 images)", () => {
@@ -178,4 +179,14 @@ test("blocking is checked in plain words where people have room to be staged, an
 	// Both people side by side on the back seat when the plan has one at the wheel
 	assert.match(continuityVerdict({ shot: "MS" }, [], { blocking: { noul: 0.1 } }, undefined).issues.join(), /staging doesn't follow the blocking/);
 	assert.equal(continuityVerdict({ shot: "MS" }, [], { blocking: { noul: 0.7 } }, undefined).ok, true);
+});
+
+test("D42: something impossible in the frame is a continuity break, above Clef's 0.6", async () => {
+	const { IMPOSSIBLE_MAX } = await import("../src/continuity-rules.ts");
+	const verdict = (p: number) => continuityVerdict({ shot: "CU" }, [], { impossible: { noul: p } }, undefined);
+	// Theo with two pairs of glasses: 0.85 (klein) and 0.76 (FLUX.2 max); one pair: 0.03 to 0.06
+	assert.match(verdict(0.85).issues.join(), /impossible or duplicated.*p=0\.85/);
+	assert.match(verdict(0.76).issues.join(), /impossible or duplicated/);
+	assert.deepEqual(verdict(0.06).issues, []);
+	assert.ok(IMPOSSIBLE_MAX > 0.06 && IMPOSSIBLE_MAX < 0.76);
 });

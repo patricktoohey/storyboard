@@ -75,7 +75,7 @@ test("with a cut in hand and time left, the team may keep working toward a bette
 });
 
 test("with time and money, the lead chooses among working, Git tools, cutting and waiting", () => {
-	assert.deepEqual(allowedActions(board()), ["note", "retake", "ideas", "cut", "save", "restore", "compare", "wait"]);
+	assert.deepEqual(allowedActions(board()), ["note", "retake", "edit", "ideas", "cut", "save", "restore", "compare", "wait"]);
 	// Replanning needs its price known, the money for a plan, takes and a cut, and the time to shoot them
 	assert.ok(allowedActions(board({ prices: { take: 0.03, turn: 0.005, cut: 1.0, board: 0.1 } })).includes("replan"));
 	assert.ok(!allowedActions(board({ prices: { take: 0.03, turn: 0.005, cut: 1.0, board: 0.1 }, deadline: minutes(9) })).includes("replan"));

@@ -19,6 +19,7 @@ export const ACTIONS = {
 		'{"direction": string} Plan the whole board again, in a new direction you describe (a different idea, structure or tone). The current board is saved first as a branch, so you can compare the two and restore either',
 	note: '{"cell": "02", "note": string, "insist"?: true} Give a director\'s note on one cell, so it is re-shot with the note. Any cell, not only broken ones',
 	retake: '{"cell": "02"} Re-shoot one cell as it is, for a different render',
+	edit: '{"cell": "06", "instruction": string, "take"?: 3} Fix one wrong detail of a frame without shooting it again: an image model edits the printed frame (or the take you name) as the instruction says and changes nothing else. For a detail (two pairs of glasses, a missing prop, a hood that should be up), not a new idea. It becomes a new take on its own branch, checked like any other; print it to use it. About the price of a take',
 	ideas:
 		'{"cell": "03", "ideas": [{"name": "mirror", "idea": "..."}, {"name": "profile", "idea": "..."}]} Two or three different ideas for one shot, shot at the same time, each on its own take branch. Use it where a shot isn\'t coming together or you want options. Rivals see that you tried ideas, not what they are. Print the one you want; compare two takes first ("a": "cell/03/take-3", "b": "cell/03/take-4") to see which plays better beside its neighbours. A take each',
 	print:
@@ -150,6 +151,8 @@ export function allowedActions(s: BoardSummary): Action[] {
 	// Work may never eat the money the required video needs (a further cut, when one exists)
 	const affordWork = s.spent + s.prices.take + s.prices.turn + videoCost <= s.budget;
 	if (affordWork && s.cells.length) actions.push("note", "retake");
+	// An edit needs a frame to edit: a printed one, or a finished take (D42)
+	if (affordWork && s.cells.some((c) => c.printed !== undefined || c.takes.some((t) => t.done))) actions.push("edit");
 	// Two ideas at once cost two takes
 	if (s.cells.length && s.spent + 2 * s.prices.take + s.prices.turn + videoCost <= s.budget) actions.push("ideas");
 	// A new plan needs a plan, a take per cell and a cut, and the time to shoot and cut them
@@ -249,6 +252,19 @@ function decisionOf(text: string, allowed: Action[], s: BoardSummary): Decision 
 			const cell = cellOf(a.cell);
 			if (!cell) return { error: `retake needs a cell (${cellIds.join(", ")})` };
 			return { action, args: { cell }, reason };
+		}
+		case "edit": {
+			const cell = cellOf(a.cell);
+			const instruction = str(a.instruction, 500);
+			if (!cell || !instruction) return { error: `edit needs a cell (${cellIds.join(", ")}) and an instruction` };
+			const c = s.cells.find((x) => x.id === cell)!;
+			if (a.take === undefined || a.take === c.printed) {
+				if (c.printed === undefined) return { error: `cell ${cell} has nothing printed: name a finished take to edit` };
+				return { action, args: { cell, instruction, from: "main" }, reason };
+			}
+			const take = Number(a.take);
+			if (!c.takes.some((t) => t.take === take && t.done)) return { error: `cell ${cell} has no finished take ${a.take}` };
+			return { action, args: { cell, instruction, from: `cell/${cell}/take-${take}` }, reason };
 		}
 		case "recap": {
 			const shots = Array.isArray(a.shots) ? [...new Set(a.shots.filter((x): x is string => typeof x === "string" && TAKE_REF.test(x)))] : [];
