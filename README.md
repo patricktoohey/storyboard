@@ -115,3 +115,7 @@ AI Gateway Read) to `spike/.env` before deploying.
 - [docs/competition-plan.md](docs/competition-plan.md): the original plan and demo video outline
 - [skills/](skills/): the agent skills every board starts from
 - [examples/lighthouse-keeper/](examples/lighthouse-keeper/): a hand-written example of a board's files
+
+## License
+
+[MIT](LICENSE), © 2026 PythonMuse LLC.
