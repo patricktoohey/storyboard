@@ -17,6 +17,7 @@
 //   POST /boards/:repo/cells/:id/takes         {"note"?, "skill"?}  queue a new take (optionally in another style)
 //   POST /boards/:repo/cells/:id/notes         {"note"}  commit the note, route it, queue the work
 //   POST /boards/:repo/cells/:id/print         {"take"}  merge that take into main
+//   POST /boards/:repo/producer                {"note", "cell"?}  the producer's note; the team's lead answers it on its next turn (D40)
 //   POST /boards/:repo/roles/:role             {"skill"} which skill fills a role on this board
 //   PUT  /boards/:repo/skills/:name            SKILL.md body; optional x-message header -> commit to board main
 //   POST /boards/:repo/skills/:name/promote    copy the board's skill to storyboard-template
@@ -24,6 +25,7 @@
 //   GET  /boards/:repo/file?ref=&path=         read a file at a ref (images are served as images)
 //   POST /boards/:repo/token                   short-lived read token + remote URL, for `git clone`
 //   POST /arenas                               {"brief", "minutes"?, "budget"?, "cells"?, "teams"?} -> arena + team boards, first turns queued
+//                                              a team {"team", "from": "board-…"} carries on from that board, every branch with it (D40)
 //   GET  /arenas, GET /arenas/:id/state        arenas; rules, teams, spend, scores, leaderboard, arena log
 //   GET  /arenas/:id/timeline                  the arena rebuilt from Git history (replay.ts); POST /arenas/:id/replay stores a recording
 //   POST /arenas/:id/compare {"final"?}         queue comparative judging (every pair of boards, both ways)
@@ -39,6 +41,7 @@
 import { addNote, boardState, chooseSkill, editSkill, listBoards, printTake, startBoard, startCut } from "./board";
 import { DEFAULT_TEAMS, type TeamSpec, arenaState, closeArena, createArena, listArenas, teamSpec } from "./arena";
 import { creditBalance, seasonEstimate, tooLittle } from "./credits";
+import { addProducerNoteTo } from "./showrunner";
 import { arenaTimeline, saveReplay } from "./replay";
 import { createSeason, listSeasons, type SeasonStep, seasonState } from "./season";
 import { type Format, badFormat } from "./format-rules.ts";
@@ -58,6 +61,7 @@ import { type Crew, DEFAULT_CREW, MENU, isCrew } from "./crew.ts";
 function badTeams(teams: (string | TeamSpec)[] | undefined) {
 	for (const t of (teams ?? []).map(teamSpec)) {
 		if (!/^[a-z0-9-]{1,24}$/.test(t.team ?? "")) return `team names are lowercase slugs: "${t.team}"`;
+		if (t.from !== undefined && !/^board-[a-z0-9-]+$/.test(t.from)) return `"from" names a board repo: "${t.from}"`;
 		if (t.lead && !(t.lead in MENU.lead)) return `no lead model "${t.lead}"; choose from ${Object.keys(MENU.lead).join(", ")}`;
 	}
 	return undefined;
@@ -159,14 +163,19 @@ export default {
 			if (root === "arenas") {
 				if (method === "GET" && !repoName) return Response.json(await listArenas(env));
 				if (method === "POST" && !repoName) {
-					const body = await json<{ brief?: string; minutes?: number; budget?: number; cells?: number; teams?: (string | TeamSpec)[] }>(request);
+					const body = await json<{ brief?: string; minutes?: number; budget?: number; cells?: number; teams?: (string | TeamSpec)[]; ignore_credits?: boolean }>(request);
 					const bad = badTeams(body.teams);
 					if (bad) return Response.json({ error: bad }, { status: 400 });
 					if (!body.brief) return Response.json({ error: "brief is required" }, { status: 400 });
+					const budget = Math.min(Math.max(body.budget ?? 5, 1), 50);
+					// One round's worth of AI Gateway credits (D39)
+					const estimate = seasonEstimate(1, (body.teams ?? DEFAULT_TEAMS).length, budget);
+					const short = body.ignore_credits ? undefined : tooLittle(await creditBalance(env), estimate);
+					if (short) return Response.json({ error: short.replace("this season", "this arena"), estimate }, { status: 402 });
 					const created = await createArena(env, {
 						brief: body.brief,
 						minutes: Math.min(Math.max(body.minutes ?? 20, 5), 120),
-						budget: Math.min(Math.max(body.budget ?? 5, 1), 50),
+						budget,
 						cells: Math.min(Math.max(body.cells ?? 4, 2), 8),
 						teams: body.teams,
 						origin: url.origin,
@@ -266,6 +275,15 @@ export default {
 					if (!direction) return Response.json({ error: "direction is required" }, { status: 400 });
 					const req: JobRequest = action === "score" ? { kind: "score", direction, seconds: await filmSeconds(env, repoName) } : { kind: "lines", direction };
 					return Response.json({ jobs: await submit(env, repoName, [req]) }, { status: 202 });
+				}
+				// The producer's note (D40): to a shot or the whole board, committed under the producer's name; the lead
+				// answers it on its next turn. Unlike a cell note, it queues no work: the team decides what to do
+				if (method === "POST" && action === "producer") {
+					const { note, cell } = await json<{ note?: string; cell?: string | number }>(request);
+					const id = cell === undefined ? undefined : String(cell).padStart(2, "0");
+					if (!note?.trim()) return Response.json({ error: "note is required" }, { status: 400 });
+					if (id !== undefined && !/^\d{2}$/.test(id)) return Response.json({ error: `no cell "${cell}"` }, { status: 400 });
+					return Response.json({ note: await addProducerNoteTo(env, repoName, note, id) }, { status: 201 });
 				}
 				if (method === "POST" && action === "mix") {
 					const { cut } = await json<{ cut?: string }>(request);

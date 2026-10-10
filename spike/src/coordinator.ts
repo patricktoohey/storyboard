@@ -131,6 +131,11 @@ export async function ledger(env: Env, repo: string) {
 	return rows.filter((r) => r.kind !== "group").reverse();
 }
 
+/** A board carried into a new round (D40) starts its ledger empty: the earlier round's rows stay in the branch's history. */
+export async function startLedger(env: Env, repo: string, message: string) {
+	await onLedger(await repoRemote(env, repo), message, (rows) => void rows.splice(0));
+}
+
 /** No progress for this long and a job is presumed lost (its message dropped, its invocation killed). */
 export const STALL_MS = 10 * 60 * 1000;
 

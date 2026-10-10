@@ -4,7 +4,8 @@
 // Each team is its own board repo, run by a showrunner (showrunner.ts).
 import { type Comparison, type Criterion, type JudgeScore, leaderboard, matchups, rubricOf, sampleCells, winRates } from "./arena-rules.ts";
 import { onMain } from "./board";
-import { submit, ledger } from "./coordinator";
+import { submit, ledger, startLedger } from "./coordinator";
+import { HELD } from "./cast";
 import { lastTalk } from "./cast-rules.ts";
 import { parseCsv } from "./csv.ts";
 import { WorkingTree } from "./git";
@@ -14,6 +15,7 @@ import type { LlmKey } from "./cast-rules.ts";
 import { MENU } from "./crew.ts";
 import { ENDING_RUBRIC, type EndingsResult, PROCESS_RUBRIC, PROCESS_SHARE, briefWithNote, endingsNote, gitMoves, networkNote, processPrompt, processRecord, processWeight } from "./process-rules.ts";
 import { COMPARISONS, SAVED } from "./history.ts";
+import { type CarriedFrom, PRODUCER_NOTES, type ProducerNote, roundCuts } from "./producer-rules.ts";
 import { TRANSIENT, ask, withRetry } from "./models";
 import { OUT_OF_CREDITS, RATE_LIMITED, outOfCredits } from "./llm";
 import type { Heard } from "./sound-rules.ts";
@@ -35,7 +37,7 @@ export interface Rules {
 	// Teasers may open on a recap from the board's own history (D38)
 	recap?: boolean;
 	// A team's own deadline when a twist changed its clock
-	teams: { team: string; board: string; showrunner: string; cinematographer: string; source?: string; lead?: string; team_name?: string; deadline?: string }[];
+	teams: { team: string; board: string; showrunner: string; cinematographer: string; source?: string; lead?: string; team_name?: string; deadline?: string; from?: CarriedFrom }[];
 	created: string;
 	// A blind round: teams see neither the commons nor each other (a cast season's finale)
 	blind?: boolean;
@@ -61,6 +63,9 @@ export interface TeamSpec {
 	bonus?: number;
 	// A twist the lead took (format-rules.ts): money on its budget, minutes off its clock
 	twist?: { usd: number; minutes: number; text: string };
+	// A board to carry on from (D40): the team starts where that board stopped, every branch with it, and
+	// keeps its showrunner, cinematographer and cast unless given others
+	from?: string;
 }
 export const teamSpec = (t: string | TeamSpec): TeamSpec => (typeof t === "string" ? { team: t } : t);
 // Clef on contact sheets: quick and cheap, so they score live during a round and judge teams' own comparisons
@@ -89,6 +94,25 @@ const json = (v: unknown) => JSON.stringify(v, null, 2) + "\n";
 async function readText(env: Env, repo: string, path: string, ref = "main") {
 	using handle = await env.ARTIFACTS.get(repo);
 	return (await handle.readFile({ ref, path }).catch(() => null))?.text();
+}
+
+/** Where a board stopped (D40): its main, and the cuts it made, which a new round carries but can't submit. */
+async function stoppedAt(env: Env, board: string): Promise<CarriedFrom> {
+	using handle = await env.ARTIFACTS.get(board);
+	const [head] = await handle.log({ ref: "main", limit: 1 });
+	const remote = await repoRemote(env, board);
+	const [cuts, saved, comparisons] = await Promise.all([
+		WorkingTree.listBranches(remote, "cut/"),
+		WorkingTree.listBranches(remote, SAVED),
+		readText(env, board, COMPARISONS),
+	]);
+	return {
+		board,
+		commit: head.hash,
+		cuts: cuts.filter((b) => /^cut\/v\d+$/.test(b)).map((b) => b.slice(4)),
+		saved: saved.map((b) => b.slice(SAVED.length)),
+		comparisons: comparisons ? JSON.parse(comparisons).length : 0,
+	};
 }
 
 export async function readRules(env: Env, arena: string): Promise<Rules> {
@@ -128,13 +152,19 @@ export async function createArena(
 	// Read each team's showrunner skill from the arena's own copy of the skills
 	const arenaTree = await WorkingTree.clone(remote, "main");
 	const teams = await Promise.all(
-		(opts.teams ?? DEFAULT_TEAMS).map(teamSpec).map(async ({ team, showrunner = `showrunner-${team}`, lead, cast, bonus, twist }) => {
-			const source = opts.season?.teamRepos[team];
+		(opts.teams ?? DEFAULT_TEAMS).map(teamSpec).map(async ({ team, showrunner, lead, cast, bonus, twist, from }) => {
+			// A carried-over board (D40): where it stopped, its crew's skills and its cast
+			const prior = from ? JSON.parse((await readText(env, from, "board.json")) ?? "null") : undefined;
+			if (from && !prior?.skills) throw new Error(`${from} is not a board`);
+			const carried: CarriedFrom | undefined = from ? await stoppedAt(env, from) : undefined;
+			cast ??= prior?.cast;
+			showrunner ??= prior?.skills?.showrunner ?? `showrunner-${team}`;
+			const source = from ?? opts.season?.teamRepos[team];
 			// A season team's showrunner skill lives in its own repo (it evolves there); others in the template
-			const skill = await loadSkill(source ? await WorkingTree.clone(await repoRemote(env, source), "main") : arenaTree, showrunner);
-			const cinematographer = opts.season?.cinematographers[team] ?? skill.metadata.cinematographer ?? "cinematographer";
+			const skill = await loadSkill(source ? await WorkingTree.clone(await repoRemote(env, source), "main") : arenaTree, showrunner!);
+			const cinematographer = opts.season?.cinematographers[team] ?? prior?.skills?.cinematographer ?? skill.metadata.cinematographer ?? "cinematographer";
 			const own = twist?.minutes ? { deadline: new Date(Date.parse(deadline) + twist.minutes * 60_000).toISOString() } : {};
-			return { team, board: `board-${team}-${id}`, showrunner, cinematographer, source, ...(lead ? { lead } : {}), ...(cast ? { team_name: cast.team_name } : {}), ...own, cast, bonus, twist };
+			return { team, board: `board-${team}-${id}`, showrunner: showrunner!, cinematographer, source, ...(lead ? { lead } : {}), ...(cast ? { team_name: cast.team_name } : {}), ...(carried ? { from: carried } : {}), ...own, cast, bonus, twist };
 		}),
 	);
 	for (const name of [...JUDGES.map((j) => j.name), PANEL_RUBRIC]) rubricOf((await loadSkill(arenaTree, name)).body);
@@ -171,9 +201,12 @@ export async function createArena(
 	// Each team's board: a fork of the template whose board.json carries the arena's limits
 	await Promise.all(
 		teams.map(async (t) => {
-			const board = await forkBoard(env, t.board, `${t.team} in ${arena}`, t.source);
-			await onMain(board, (tree) =>
-				tree.commit({ name: "arena" }, `Join ${arena} as ${t.team}`, {
+			const board = await forkBoard(env, t.board, `${t.team} in ${arena}`, t.source, Boolean(t.from));
+			if (t.from) await startLedger(env, t.board, `New round in ${arena}: the ledger starts empty; ${t.from.board}'s rows are in this branch's history`);
+			await onMain(board, async (tree) =>
+				tree.commit({ name: "arena" }, t.from ? `Join ${arena} as ${t.team}, carrying on from ${t.from.board} at ${t.from.commit.slice(0, 7)}` : `Join ${arena} as ${t.team}`, {
+					// Notes held over from the earlier round were about its shots, not this round's work
+					...(t.from && (await tree.exists(HELD)) ? { [HELD]: "{}\n" } : {}),
 					"board.json": json({
 						arena,
 						team: t.team,
@@ -184,6 +217,7 @@ export async function createArena(
 						...(opts.blind ? { blind: true } : {}),
 						...(t.lead ? { lead: t.lead } : {}),
 						...(t.cast ? { cast: t.cast } : {}),
+						...(t.from ? { from: t.from } : {}),
 						skills: { director: "director", cinematographer: t.cinematographer, casting: "casting", showrunner: t.showrunner },
 					}),
 				}),
@@ -461,13 +495,14 @@ async function endingsOf(env: Env, rules: Rules, team: string, sub: { cut: strin
 
 /** A team's process record and Git moves for the round, from its board's ledger and history (D34). */
 async function processOf(env: Env, rules: Rules, team: string, submitted: string | null, endings?: EndingsResult) {
-	const board = rules.teams.find((t) => t.team === team)!.board;
+	const { board, from } = rules.teams.find((t) => t.team === team)!;
 	const remote = await repoRemote(env, board);
-	const [rows, saved, cuts, comparisons] = await Promise.all([
+	const [rows, saved, cuts, comparisons, notes] = await Promise.all([
 		ledger(env, board),
 		WorkingTree.listBranches(remote, SAVED),
 		WorkingTree.listBranches(remote, "cut/"),
 		readText(env, board, COMPARISONS),
+		readText(env, board, PRODUCER_NOTES),
 	]);
 	const turns = rows.filter((r) => r.kind === "turn").map((r) => ({ detail: r.detail, result: r.result, updated: r.updated }));
 	return {
@@ -475,9 +510,12 @@ async function processOf(env: Env, rules: Rules, team: string, submitted: string
 		record: processRecord({
 			turns,
 			start: new Date(rules.created),
-			saved: saved.map((b) => ({ name: b.slice(SAVED.length) })),
-			comparisons: comparisons ? JSON.parse(comparisons) : [],
-			cuts: cuts.filter((b) => /^cut\/v\d+$/.test(b)).map((b) => b.slice(4)),
+			// A carried-over board's earlier work isn't this round's (D40)
+			saved: saved.map((b) => ({ name: b.slice(SAVED.length) })).filter((s) => !from?.saved.includes(s.name)),
+			comparisons: comparisons ? JSON.parse(comparisons).slice(from?.comparisons ?? 0) : [],
+			cuts: roundCuts(cuts.filter((b) => /^cut\/v\d+$/.test(b)).map((b) => b.slice(4)), from),
+			...(from ? { from } : {}),
+			producer: notes ? (JSON.parse(notes) as ProducerNote[]) : [],
 			submitted,
 			...(rules.network_note ? { note: rules.network_note } : {}),
 			...(endings ? { endings } : {}),

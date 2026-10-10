@@ -183,6 +183,8 @@ export interface Decision {
 	reason: string;
 	// Public: what rivals read beside the move (a cast season's open rounds). May say anything
 	message?: string;
+	// The lead's answer to the producer's open notes (D40), committed beside them
+	to_producer?: string;
 }
 
 const str = (v: unknown, max = 400) => (typeof v === "string" && v.trim() ? v.trim().slice(0, max) : undefined);
@@ -207,13 +209,15 @@ export function parseDecision(text: string, allowed: Action[], s: BoardSummary):
 	const parsed = decisionOf(text, allowed, s);
 	if ("error" in parsed) return parsed;
 	let message: string | undefined;
+	let toProducer: string | undefined;
 	try {
-		const raw = JSON.parse(text.slice(text.indexOf("{"), text.lastIndexOf("}") + 1)) as { message?: unknown };
+		const raw = JSON.parse(text.slice(text.indexOf("{"), text.lastIndexOf("}") + 1)) as { message?: unknown; to_producer?: unknown };
 		message = str(raw.message, 200);
+		toProducer = str(raw.to_producer, 300);
 	} catch {
 		// decisionOf already parsed it
 	}
-	return message ? { ...parsed, message } : parsed;
+	return { ...parsed, ...(message ? { message } : {}), ...(toProducer ? { to_producer: toProducer } : {}) };
 }
 
 function decisionOf(text: string, allowed: Action[], s: BoardSummary): Decision | { error: string } {

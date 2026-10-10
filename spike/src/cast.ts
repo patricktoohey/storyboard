@@ -13,6 +13,8 @@ import { repoRemote } from "./template";
 export const CREW_ROOM = "talk/crew.md";
 export const COMMONS = "talk/commons.md";
 export const CONFESSIONALS = "talk/confessionals.md";
+// Where a held note waits: the cinematographer pushed back, and the lead hasn't noted that cell again
+export const HELD = "talk/held.json";
 export const JUDGES_TALK = "talk/judges.md";
 // Judges are Clef, which can't talk; their remarks are written in character by this model
 export const JUDGE_VOICE: LlmKey = "claude-sonnet-5.5";

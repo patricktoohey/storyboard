@@ -76,8 +76,11 @@ export async function arenaTimeline(env: Env, arena: string) {
 		}
 	}
 	events.sort((a, b) => a.t - b.t);
+	// A board carried on from an earlier round (D40) holds that round's commits too: only this arena's are its story
+	const start = Date.parse(rules.created) / 1000 - 60;
+	const ours = events.filter((e) => e.t >= start);
 	const replays = (await WorkingTree.listBranches(await repoRemote(env, arena), "replay/")).sort();
-	return { arena, rules, events, replays };
+	return { arena, rules, events: ours, replays };
 }
 
 /** Commits a recorded replay to the arena on a new orphan branch, replay/rN. */

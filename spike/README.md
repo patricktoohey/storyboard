@@ -74,7 +74,11 @@ among the tools in `src/arena-rules.ts`, Git among them: save, restore, compare,
   Gateway Read) in `.env`, `GET /credits` shows the balance and `POST /seasons` refuses to start a season
   it can't pay for (`"ignore_credits": true` overrides). If the credits run out anyway, teams pause instead
   of spending turns, and a round whose final judging failed waits for `POST /seasons/:id/events {"round",
-  "step": "judge"}` after a top-up.
+  "step": "judge"}` after a top-up. `POST /arenas` checks one round's worth the same way.
+- **Carrying on, and the producer** (`src/producer-rules.ts`, D40): an arena team `{"team", "from":
+  "board-…"}` forks from that board with every branch and an empty ledger, keeps its plan, and must submit
+  a new cut. `POST /boards/:repo/producer {"note", "cell"?}` commits the producer's note; the lead answers
+  in `"to_producer"` on its next turn, committed beside it, and the panel reads both in the process record.
 
 ## Video (tested 2026-10-07)
 

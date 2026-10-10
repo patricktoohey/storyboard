@@ -46,11 +46,14 @@ export async function ensureTemplate(env: Env, reset = false) {
 	await tree.push("main");
 }
 
-/** Forks the template (or a season team's repo) into a new board repo and waits until it can be cloned. */
-export async function forkBoard(env: Env, name: string, description: string, from = TEMPLATE): Promise<Remote> {
+/**
+ * Forks the template (or a season team's repo) into a new board repo and waits until it can be cloned. A
+ * board carried into a new round (D40) brings every branch: its takes, cuts and saved versions.
+ */
+export async function forkBoard(env: Env, name: string, description: string, from = TEMPLATE, allBranches = false): Promise<Remote> {
 	if (from === TEMPLATE) await ensureTemplate(env);
 	using template = await env.ARTIFACTS.get(from);
-	const fork = await template.fork(name, { description, defaultBranchOnly: true });
+	const fork = await template.fork(name, { description, defaultBranchOnly: !allBranches });
 	for (let attempt = 0; ; attempt++) {
 		try {
 			using repo = await env.ARTIFACTS.get(name);

@@ -4,6 +4,7 @@
 // process, from what its repo and its ledger hold (never its public messages, which may mislead), and a
 // network note arrives mid-round to give a saved version a reason to exist. Pure: test/process.test.ts.
 import type { Criterion } from "./arena-rules.ts";
+import { type CarriedFrom, type ProducerNote, producerLines } from "./producer-rules.ts";
 
 /** The moves that use the history (ideas: parallel branches for one shot); anything else makes or changes the film. */
 export const GIT_MOVES = ["save", "restore", "compare", "ideas", "recap"] as const;
@@ -18,7 +19,7 @@ export const PROCESS_RUBRIC: Criterion[] = [
 	{
 		id: "effective",
 		question:
-			"Did the team's use of its history make its film better? A comparison that decided something, a restore that recovered the better version, a version tried against the network note and then kept or dropped, two endings shot and the stronger one chosen. A move that changed nothing counts for nothing.",
+			"Did the team's use of its history make its film better? A comparison that decided something, a restore that recovered the better version, a version tried against the network note and then kept or dropped, two endings shot and the stronger one chosen, a producer's note acted on, or argued against for a reason the film bears out. A move that changed nothing counts for nothing.",
 		levels: ["No use", "Moves without effect", "Some effect", "Clearly better for it", "Decisive"],
 	},
 	{
@@ -110,13 +111,17 @@ export function processRecord(r: {
 	// A round that closed early (every team in before the note) never saw it
 	now?: Date;
 	endings?: EndingsResult;
+	// D40: a board carried on from an earlier round, and the producer's notes with the team's answers
+	from?: CarriedFrom;
+	producer?: ProducerNote[];
 }): string {
 	const minute = (iso?: string) => (iso ? `${Math.max(0, Math.round((Date.parse(iso) - r.start.getTime()) / 60000))} min` : "?");
 	const acted = r.turns
 		.filter((t) => t.result === "acted")
 		.sort((a, b) => Number(/^turn (\d+)/.exec(a.detail)?.[1] ?? 0) - Number(/^turn (\d+)/.exec(b.detail)?.[1] ?? 0));
 	const moves = acted.map((t) => {
-		const clean = t.detail.replace(/ \[said publicly: ".*?"\]/, "");
+		// Public messages may mislead; answers to the producer are shown with the producer's notes
+		const clean = t.detail.replace(/ \[said publicly: ".*?"\]/, "").replace(/ \[to the producer: ".*?"\]/, "");
 		const [facts, ...reason] = clean.split(" — ");
 		return { at: Date.parse(t.updated ?? "") || 0, line: `- at ${minute(t.updated)}: ${facts.replace(/^turn \d+: /, "").slice(0, 220)}${reason.length ? ` (their reason: ${reason.join(" — ").slice(0, 200)})` : ""}` };
 	});
@@ -126,9 +131,17 @@ export function processRecord(r: {
 		const i = moves.findIndex((m) => m.at > at);
 		moves.splice(i < 0 ? moves.length : i, 0, { at, line: `- at ${minute(r.note.at)}: THE NETWORK'S NOTE ARRIVED: "${r.note.text}"` });
 	}
+	// The producer's notes too, each with what the team answered
+	for (const p of producerLines(r.producer ?? [], minute)) {
+		const i = moves.findIndex((m) => m.at > p.at);
+		moves.splice(i < 0 ? moves.length : i, 0, p);
+	}
 	const moved = gitMoves(r.turns);
 	const latest = r.cuts.length ? r.cuts.slice().sort((a, b) => Number(a.slice(1)) - Number(b.slice(1))).at(-1) : null;
 	return [
+		...(r.from
+			? [`Carried on from ${r.from.board} at ${r.from.commit.slice(0, 7)}, every branch with it: its cuts (${r.from.cuts.join(", ") || "none"}) and saved versions were made in the earlier round and aren't counted below.`]
+			: []),
 		`Moves, in order (${acted.length}; ${moved.total} of them used the history):`,
 		...(moves.length ? moves.slice(0, 41).map((m) => m.line) : ["- none"]),
 		`Saved versions: ${r.saved.length ? r.saved.map((s) => `${s.name}${s.commit ? ` (${s.commit})` : ""}`).join(", ") : "none"}`,

@@ -618,3 +618,35 @@ stops at once.
   model's prompt loses the beat's quoted lines (`unspoken`).
 
 Tests: `test/credits.test.ts`, `test/sound.test.ts`.
+
+## D40: carrying on from a board, and the producer's notes
+
+**After Season 2** the teasers were watchable but flat, and a full re-run would have made more of the
+same. Two things were missing. First, a team couldn't pick up where it had stopped: every arena forked its
+boards from the template (or a team's repo), so a finale that lost its credits mid-round, or a strong round
+2 cut worth taking further, meant starting again. Second, nobody outside a team could direct it. The one
+way in was a cell note, which became work at once: the lead never learned that the producer had spoken,
+and the record didn't say who had.
+
+- **Carrying on from a board**: an arena team can name a board, `{"team": "gpt", "from": "board-gpt-…-r2"}`.
+  Its new board forks from that one with every branch (takes, cuts, saved versions), the ledger starts
+  empty (the old rows stay in the `jobs` branch's history), and board.json records where it stopped:
+  the commit, and the cuts, saved versions and comparisons that came with it. The team keeps its
+  showrunner, cinematographer and cast unless given others, drafts a crew for the new budget, and skips
+  the plan: its plan and printed shots are its own to keep or change. Its earlier cuts are there to
+  watch; the submission must be a new cut (`roundCuts`). The process record says what was carried over
+  and counts only this round's moves; the replay shows only this arena's events. This is Git doing what
+  it's for: the history is real, and the new round's commits sit on top of it.
+- **The producer's notes**: `POST /boards/:repo/producer {"note", "cell"?}` commits a note to
+  `notes/producer.json` under the producer's name (`producer@people.storyboard`, not an agent's address).
+  It queues no work. On its next turn the lead sees it, is asked even if it was waiting on renders, and
+  must answer in `"to_producer"`: what it's doing about it, or why not. The answer is committed beside the
+  note under the lead's name. The panel reads each note at the minute it arrived with the answer, and
+  "effective" use of the history now includes a note acted on, or argued against for a reason the film
+  bears out.
+- **Arenas check credits too**: `POST /arenas` refuses (402) like `POST /seasons` when the balance is short
+  of one round's estimate.
+
+Who wrote what stays plain: the producer's commits are the producer's, the team's are the team's.
+
+Tests: `test/producer.test.ts`.

@@ -7,6 +7,7 @@
 import { ACTIONS, type Action, type BoardSummary, COMPARE_USD, type Decision, PAUSED, allowedActions, creditsFailure, parseDecision, turnsUsed } from "./arena-rules.ts";
 import { type Rules, closeArena, readRules, recordSubmission } from "./arena";
 import { PROCESS_RUBRIC, PROCESS_SHARE } from "./process-rules.ts";
+import { type CarriedFrom, PRODUCER, PRODUCER_NOTES, type ProducerNote, addProducerNote, answerNotes, openNotes, producerView, roundCuts } from "./producer-rules.ts";
 import { addNote, boardState, onMain, startCut } from "./board";
 import { type Crew, DEFAULT_CREW, MENU, SLOTS, type Slot, type VideoOption, clipCost, crewCosts, crewFrom, draftOptions, fitToBudget } from "./crew.ts";
 import { withCrew } from "./crew-env";
@@ -15,7 +16,7 @@ import { ledger, submit } from "./coordinator";
 import { WorkingTree } from "./git";
 import { SAVED, boardHistory, compareVersions, restoreVersion, saveVersion } from "./history";
 import { MOVES, moveLine, publicMove } from "./format-rules.ts";
-import { COMMONS, CREW_ROOM, type TeamCast, appendTalk, noteReply, personaSystem, readTalk, talkReply } from "./cast";
+import { COMMONS, CREW_ROOM, HELD, type TeamCast, appendTalk, noteReply, personaSystem, readTalk, talkReply } from "./cast";
 import { type Player, talkLine } from "./cast-rules.ts";
 import type { Job, JobRequest } from "./jobs";
 import { filmSeconds, soundState } from "./sound";
@@ -74,8 +75,6 @@ const RECAP_TEXT = `\nYour teaser may open on "previously on" (recap): stills fr
 history, in four seconds taken from your 30 (every shot is trimmed a little to make room). What you tried and
 dropped can be part of the story, and only a team that kept its history has one.`;
 
-// Where a held note waits: the cinematographer pushed back, and the lead hasn't noted that cell again
-const HELD = "talk/held.json";
 type Held = Record<string, { note: string; reply: string; alternative?: string; by: string }>;
 
 const crewWorks = (cast: TeamCast, blind: boolean) => `## Your crew and the room
@@ -87,13 +86,14 @@ as given whatever they say, add "insist": true to the note. Use the crew room (t
 disagreement. ${blind ? "This round is blind: the commons is closed and you can't see the other teams." : "The commons (post) is where every team talks to every other."} Everything said is recorded, and any team
 may use it in its film.`;
 
-const contract = (allowed: Action[], open = false) => `## Your tools this turn
+const contract = (allowed: Action[], open = false, producer = false) => `## Your tools this turn
 ${allowed.map((a) => `- ${a}: ${ACTIONS[a]}`).join("\n")}
 
 ## Output contract
-Reply with ONLY a JSON object: {"action": one of ${allowed.map((a) => `"${a}"`).join(", ")}, "args": {...}, "reason": string${open ? ', "message"?: string' : ""}}
+Reply with ONLY a JSON object: {"action": one of ${allowed.map((a) => `"${a}"`).join(", ")}, "args": {...}, "reason": string${open ? ', "message"?: string' : ""}${producer ? ', "to_producer": string' : ""}}
 "reason" is one sentence on why, for your team's log.${open ? ` Your rivals never see it.
-"message" (optional) is what your rivals read beside this move.` : ""}`;
+"message" (optional) is what your rivals read beside this move.` : ""}${producer ? `
+"to_producer" answers the producer's open notes (producer.open): what you're doing about them, or why not. It's committed beside the notes under your name, and the panel reads it.` : ""}`;
 
 const RIVALS = `## Your rivals
 This round is open: every turn you see what each rival team has done (its moves, with the message it
@@ -175,7 +175,9 @@ export async function runTurnJob(env: Env, job: TurnJob, progress: Progress) {
 
 	// What the showrunner sees
 	// A failed plan doesn't count: the showrunner plans again rather than waiting forever
-	const planRequested = rows.some((r) => r.kind === "board" && r.status !== "failed");
+	// A board carried on from an earlier round (D40) has its plan already
+	const from: CarriedFrom | undefined = cfg.from;
+	const planRequested = Boolean(from) || rows.some((r) => r.kind === "board" && r.status !== "failed");
 	const state = planRequested ? await boardState(env, board) : undefined;
 	const planned = Boolean(state && !("pending" in state && state.pending));
 	const cap = Number(env.VIDEO_MAX_SECONDS);
@@ -188,14 +190,24 @@ export async function runTurnJob(env: Env, job: TurnJob, progress: Progress) {
 	// Only takes of the current plan: after a replan, the old plan's takes stay on their branches (and in a
 	// saved version) but aren't this plan's shots. The ledger is newest first; takes queued after the last plan.
 	const lastPlan = rows.findIndex((r) => r.kind === "board" && r.status !== "failed");
-	const currentTakes = new Set(rows.slice(0, lastPlan < 0 ? undefined : lastPlan).filter((r) => r.kind === "take").map((r) => `${r.cell}#${r.take}`));
-	const cuts = state && "cuts" in state ? (state.cuts ?? []).map((c) => c.name) : [];
+	const taken = new Set(rows.slice(0, lastPlan < 0 ? undefined : lastPlan).filter((r) => r.kind === "take").map((r) => `${r.cell}#${r.take}`));
+	// A carried-over board's takes were shot for the plan it still has, until it plans again
+	const current = (cell: string, take: number) => (from && lastPlan < 0) || taken.has(`${cell}#${take}`);
+	// Its earlier cuts can be watched, never submitted: this round's film is a new cut
+	const cuts = roundCuts(state && "cuts" in state ? (state.cuts ?? []).map((c) => c.name) : [], from);
+	const notes: ProducerNote[] = JSON.parse((await readText(env, board, PRODUCER_NOTES)) ?? "[]");
+	const unanswered = openNotes(notes);
 	// A take that failed never finishes: it must read as failed, not "shooting" (Opus waited on one)
 	const failedTakes = new Map(rows.filter((r) => r.kind === "take" && r.status === "failed").map((r) => [`${r.cell}#${r.take}`, r.detail]));
 	const sound = planned ? await soundState(env, board, cuts) : undefined;
 	// The lead's last choice (a mandated turn isn't one): news since then, or acting then, asks it again (D38)
 	const lastAsk = rows.find((r) => r.kind === "turn" && r.status === "done" && /^turn \d+: \w+ \((?!required\))/.test(r.detail));
-	const fresh = !lastAsk || lastAsk.result === "acted" || rows.some((r) => r.kind !== "turn" && (r.status === "done" || r.status === "failed") && r.updated > lastAsk.updated);
+	const fresh =
+		!lastAsk ||
+		lastAsk.result === "acted" ||
+		rows.some((r) => r.kind !== "turn" && (r.status === "done" || r.status === "failed") && r.updated > lastAsk.updated) ||
+		// A producer's note is news too: the lead is asked, not left waiting on its renders
+		unanswered.some((n) => n.at > lastAsk.updated);
 	const running = rows.filter((r) => r.kind !== "turn" && r.kind !== "group" && (r.status === "queued" || r.status === "running"));
 	const summary: BoardSummary = {
 		drafted: Boolean(drafted),
@@ -205,7 +217,7 @@ export async function runTurnJob(env: Env, job: TurnJob, progress: Progress) {
 			id: c.id,
 			printed: c.printed,
 			takes: c.takes
-				.filter((t) => currentTakes.has(`${c.id}#${t.take}`))
+				.filter((t) => current(c.id, t.take))
 				.map((t) => ({ take: t.take, done: t.done, ok: Boolean(t.continuity?.ok), stale: Boolean(t.stale), issues: t.continuity?.issues ?? [] })),
 		})),
 		cut: cuts[0],
@@ -271,8 +283,15 @@ export async function runTurnJob(env: Env, job: TurnJob, progress: Progress) {
 		).filter((s) => s !== undefined);
 		await progress(`reading the board and its history`);
 		const history = await boardHistory(env, board, scores);
+		const producer = producerView(notes);
 		const view = {
 			brief: rules.brief,
+			...(from
+				? {
+						carried_over: `This board carries on from ${from.board}, where your team stopped: its plan, printed shots, takes, saved versions and sound are yours to keep or change. Its cuts (${from.cuts.join(", ") || "none"}) are there to watch and learn from; what you submit this round must be a new cut.`,
+					}
+				: {}),
+			...(producer ? { producer } : {}),
 			...(rules.network_note && Date.now() >= Date.parse(rules.network_note.at) ? { network_note: `From the network, to every team: "${rules.network_note.text}"` } : {}),
 			minutes_left: Math.round((deadline - Date.now()) / 60000),
 			// Said outright: Opus waited four turns for a "still rendering" take that had long finished
@@ -321,7 +340,7 @@ export async function runTurnJob(env: Env, job: TurnJob, progress: Progress) {
 				beat: c.beat,
 				printed_take: c.printed ?? null,
 				takes: c.takes
-					.filter((t) => currentTakes.has(`${c.id}#${t.take}`))
+					.filter((t) => current(c.id, t.take))
 					.map((t) => ({
 						take: t.take,
 						status: failedTakes.has(`${c.id}#${t.take}`)
@@ -337,8 +356,8 @@ export async function runTurnJob(env: Env, job: TurnJob, progress: Progress) {
 			history,
 		};
 		const system = cast
-			? `${personaSystem(cast.lead, `the lead (showrunner) of ${cast.team_name}`, undefined, cast.story)}\n\n${skill.body}\n\n${HOW_IT_WORKS}${judging(rules)}\n\n${crewWorks(cast, blind)}${blind ? "" : `\n\n${RIVALS}`}\n\n${contract(allowed, !blind)}`
-			: `${skill.body}\n\n${HOW_IT_WORKS}${judging(rules)}\n\n${contract(allowed)}`;
+			? `${personaSystem(cast.lead, `the lead (showrunner) of ${cast.team_name}`, undefined, cast.story)}\n\n${skill.body}\n\n${HOW_IT_WORKS}${judging(rules)}\n\n${crewWorks(cast, blind)}${blind ? "" : `\n\n${RIVALS}`}\n\n${contract(allowed, !blind, unanswered.length > 0)}`
+			: `${skill.body}\n\n${HOW_IT_WORKS}${judging(rules)}\n\n${contract(allowed, false, unanswered.length > 0)}`;
 		const leadEnv = withCrew(env, crew);
 		await progress(`${crew.lead} deciding among ${allowed.join(", ")}`);
 		// A lead that times out (Kimi: 3046) loses the turn, not the team: it waits and is asked again
@@ -363,6 +382,11 @@ export async function runTurnJob(env: Env, job: TurnJob, progress: Progress) {
 	let detail = `turn ${acted + 1}: ${action} (${choosing ? crew.lead : "required"})`;
 	let result: "acted" | "waited" = action === "wait" ? "waited" : "acted";
 	const agent = `showrunner-${job.team}`;
+	// The producer's notes answered (D40): committed beside them under the lead's name, whatever the move
+	if (choosing && unanswered.length && decision.to_producer) {
+		await answerProducer(env, board, cast?.lead.name ?? agent, decision.to_producer, acted + 1, action);
+		detail += ` [to the producer: "${decision.to_producer}"]`;
+	}
 	try {
 		switch (action) {
 			case "plan":
@@ -562,6 +586,30 @@ export async function runTurnJob(env: Env, job: TurnJob, progress: Progress) {
 	if (decision.reason) detail += ` — ${decision.reason}`;
 	if (noCredits) return next(env, job, { detail: `${PAUSED}: the AI Gateway is out of credits (the lead); asking again in ${CREDITS_PAUSE_S / 60} minutes`, result: "waited", cost }, CREDITS_PAUSE_S);
 	return next(env, job, { detail, result, cost });
+}
+
+/** Marks the producer's open notes answered, in one commit on the board's main. */
+async function answerProducer(env: Env, board: string, by: string, reply: string, turn: number, action: string) {
+	await onMain(await repoRemote(env, board), async (tree) => {
+		const notes: ProducerNote[] = JSON.parse(await tree.read(PRODUCER_NOTES).catch(() => "[]"));
+		const open = openNotes(notes).length;
+		await tree.commit({ name: by }, `To the producer (${open} note${open === 1 ? "" : "s"}): ${reply}`, {
+			[PRODUCER_NOTES]: JSON.stringify(answerNotes(notes, reply, turn, action, new Date().toISOString()), null, 2) + "\n",
+		});
+	});
+}
+
+/** The producer's note on a board (D40), committed under the producer's name; the lead answers on its next turn. */
+export async function addProducerNoteTo(env: Env, board: string, note: string, cell?: string) {
+	return onMain(await repoRemote(env, board), async (tree) => {
+		const notes: ProducerNote[] = JSON.parse(await tree.read(PRODUCER_NOTES).catch(() => "[]"));
+		const next = addProducerNote(notes, note, new Date().toISOString(), cell);
+		const added = next.at(-1)!;
+		await tree.commit({ name: PRODUCER, email: "producer@people.storyboard" }, `Producer's note${cell ? ` on cell ${cell}` : ""}: ${added.note}`, {
+			[PRODUCER_NOTES]: JSON.stringify(next, null, 2) + "\n",
+		});
+		return added;
+	});
 }
 
 /** A cast team's move, in public: the board's moves log, one commit whose message is the move itself. */
