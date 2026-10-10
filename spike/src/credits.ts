@@ -16,7 +16,8 @@ export function seasonEstimate(rounds: number, teams: number, budget: number) {
 	return Number((rounds * (teams * budget * SPEND_SHARE + PANEL_USD)).toFixed(2));
 }
 
-/** The balance in dollars, or undefined when the Worker has no token to read it with. */
+/** The balance in dollars, or undefined when the Worker has no token to read it with. The API answers in
+ * cents: 4968.29 the day after a $50 top-up. */
 export async function creditBalance(env: Env): Promise<number | undefined> {
 	const { CF_ACCOUNT_ID: account, AI_GATEWAY_TOKEN: token } = env as unknown as Record<string, string | undefined>;
 	if (!account || !token) return undefined;
@@ -27,7 +28,7 @@ export async function creditBalance(env: Env): Promise<number | undefined> {
 	if (!body.success || typeof body.result?.balance !== "number") {
 		throw new Error(`credit balance: HTTP ${res.status} ${(body.errors ?? []).map((e) => e.message).join("; ")}`);
 	}
-	return body.result.balance;
+	return Number((body.result.balance / 100).toFixed(2));
 }
 
 /** Why a season shouldn't start on this balance, if it shouldn't. */
