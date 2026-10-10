@@ -649,6 +649,19 @@ and the record didn't say who had.
 
 Who wrote what stays plain: the producer's commits are the producer's, the team's are the team's.
 
+**The rehearsal** (`arena-2026-10-10-9bdc60`: GPT alone, carrying on from its round 2 board, $3, 20
+minutes): the fork kept every branch (shot 04's eleven takes), the ledger started empty, the team kept its
+lead, cast and cinematographer, and its earlier cut, saves and comparisons were recorded as carried. A
+producer's note on shot 03 ("both sheets read SECEND PLACE") was answered on the lead's first chosen
+turn ("correcting both sheets with a detail edit now, then printing the repaired take before we cut"),
+and the edit came back with "SECOND PLACE" on both sheets, continuity ok. The lead followed its own
+lessons from the season: it cut early (turn 5), then spent on continuity fixes and saved before each.
+Then the cut failed: the round 2 board had an unfinished cut v2 (clip branches, never assembled, when
+the credits ran out), the new cut was numbered v2 again, and all eight clips were rendered, charged, and
+refused on the old branches. A cut is now numbered above every cut started (`nextCut`). Short of $0.38
+for another, the lead asked the producer in public for "a $0.38 render allowance now", which nothing yet
+lets a producer grant.
+
 Tests: `test/producer.test.ts`.
 
 ## D41: premium models, by test, and a page that shows them

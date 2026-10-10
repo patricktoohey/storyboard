@@ -35,6 +35,7 @@ import {
 import { type Role, type SkillChoice, DEFAULT_SKILLS, ROLES, listSkills, loadSkill, skillTrailer } from "./skills";
 import { forkBoard, repoRemote } from "./template";
 import { animate, clipSeconds, frameJpeg, frameUrl, motionPrompt } from "./video";
+import { nextCut } from "./producer-rules.ts";
 
 // ── Files on main ────────────────────────────────────────────────────────────────────────────────
 
@@ -551,8 +552,7 @@ const CLIP_STAGGER_S = 3;
 
 export async function startCut(env: Env, repo: string, origin: string) {
 	const remote = await repoRemote(env, repo);
-	const existing = (await WorkingTree.listBranches(remote, "cut/")).filter((b) => /^cut\/v\d+$/.test(b));
-	const cut = `v${Math.max(0, ...existing.map((b) => Number(b.slice(5)))) + 1}`;
+	const cut = nextCut(await WorkingTree.listBranches(remote, "cut/"));
 	using handle = await env.ARTIFACTS.get(repo);
 	const csv = await (await handle.readFile({ ref: "main", path: "storyboard.csv" }))?.text();
 	const printed = parseCsv(csv ?? "").filter((r) => r.take);

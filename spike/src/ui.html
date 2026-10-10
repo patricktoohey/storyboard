@@ -709,8 +709,15 @@ async function openBoard(repo) {
 async function refresh() {
   const next = await api(`/boards/${state.repo}/state`);
   state = next;
+  // Typing a note or an edit: a re-render would replace the box under the cursor, so the board catches up
+  // when the box loses focus instead
+  if (typing()) { behind = true; return; }
   render();
 }
+const typing = () => Boolean(document.activeElement?.matches?.("#main textarea, #main input[type=text]"));
+let behind = false;
+// After the click that took focus away has landed (a "Send note" button re-renders by itself)
+document.addEventListener("focusout", () => setTimeout(() => { if (behind && !typing() && state?.cells) { behind = false; render(); } }, 400));
 
 function currentTake(cell) {
   const n = selected[cell.id] ?? cell.printed ?? cell.takes.at(-1)?.take;

@@ -91,3 +91,12 @@ test("D42: an edit fixes one detail of the printed frame or a finished take, pri
 	assert.equal(edit, EDIT_USD + MENU.critic[DEFAULT_CREW.critic].perTake);
 	assert.ok(edit < estimate({ kind: "take", cell: "06" }) + EDIT_USD);
 });
+
+test("D40: a new cut is numbered above every cut started, finished or not", async () => {
+	const { nextCut } = await import("../src/producer-rules.ts");
+	// GPT's round 2 board: v1 finished, v2's clips rendered but never assembled
+	assert.equal(nextCut(["cut/v1", "cut/v1/01", "cut/v1/08", "cut/v2/01", "cut/v2/08"]), "v3");
+	assert.equal(nextCut(["cut/v1", "cut/v2"]), "v3");
+	assert.equal(nextCut([]), "v1");
+	assert.equal(nextCut(["cut/v10/03", "cut/v9"]), "v11");
+});

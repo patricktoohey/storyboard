@@ -69,5 +69,16 @@ export interface CarriedFrom {
 	comparisons: number;
 }
 
+/**
+ * The next cut's name, above every cut that was started: a finished cut is cut/vN, but a cut cut short
+ * leaves only its clip branches (cut/vN/01, ...). GPT's round 2 board had an unassembled v2 when its credits
+ * ran out; the rehearsal that carried it on numbered its new cut v2 again, and all eight clips were rendered
+ * and then refused (not a fast-forward) on the old clip branches.
+ */
+export function nextCut(branches: string[]) {
+	const n = branches.map((b) => Number(/^cut\/v(\d+)(?:\/|$)/.exec(b)?.[1] ?? 0));
+	return `v${Math.max(0, ...n) + 1}`;
+}
+
 /** This round's cuts, newest first as listed: a carried-over board's earlier cuts don't count. */
 export const roundCuts = (cuts: string[], from?: CarriedFrom) => (from ? cuts.filter((c) => !from.cuts.includes(c)) : cuts);
