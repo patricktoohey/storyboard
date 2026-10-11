@@ -56,7 +56,9 @@ A cut is mixed into one film with whatever sound the board has: a score (one mus
 and lines (dialogue and voiceover on cells, each in its speaker's voice), laid over the clips' own sound if
 your video model makes any. Sound lives on main like everything else; a new cut carries it, and a remix
 puts the current sound under an existing cut without rendering its video again. A film without sound is
-allowed, and judged as such.`;
+allowed, and judged as such. When a cell's only line is spoken by the one person in that shot, its clip is
+lip-synced to the line (we see them say it, in their voice); any other line is heard over its shot with
+nobody's mouth moving. Lines are synced when a cut is made, so write lines before you cut.`;
 
 /** How the final round is ranked, when a panel ranks it (D33, D34): the leads are told up front. */
 const judging = (rules: Rules) =>
@@ -288,7 +290,7 @@ export async function runTurnJob(env: Env, job: TurnJob, progress: Progress) {
 			brief: rules.brief,
 			...(from
 				? {
-						carried_over: `This board carries on from ${from.board}, where your team stopped: its plan, printed shots, takes, saved versions and sound are yours to keep or change. Its cuts (${from.cuts.join(", ") || "none"}) are there to watch and learn from; what you submit this round must be a new cut.`,
+						carried_over: `This board carries on from ${from.board}, where your team stopped: its plan, printed shots, takes, saved versions and sound are yours to keep or change. Its cuts (${from.cuts.join(", ") || "none"}) are there to watch and learn from; what you submit this round must be a new cut.${from.reshoot?.length ? ` Checked again on carry-over, the printed frames of cell${from.reshoot.length > 1 ? "s" : ""} ${from.reshoot.join(", ")} show something impossible (see their takes' continuity): reshoot or edit ${from.reshoot.length > 1 ? "them" : "it"} before your next cut.` : ""}`,
 					}
 				: {}),
 			...(producer ? { producer } : {}),

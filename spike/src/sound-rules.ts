@@ -97,6 +97,7 @@ export const MAX_LINE_CHARS = 200;
 export const LINES_ESTIMATE = MAX_LINES * MAX_LINE_CHARS * SPEECH_USD_PER_CHAR * 0.4 + 0.05;
 
 export const NARRATOR = "Narrator";
+export const LINES_CSV = "sound/lines.csv";
 
 export interface Line {
 	cell: string;
@@ -172,7 +173,26 @@ export interface MixClip {
 	audio: boolean;
 	// A still from the board's history, held for its seconds and washed out: the recap (D38)
 	still?: boolean;
+	// Lip-synced to its cell's line (D44): the speaker's mouth was animated from the line's audio, so the line
+	// starts with the clip and the clip keeps its length
+	synced?: boolean;
 }
+
+/**
+ * The line a shot's clip is lip-synced to (D44), if any: the shot's only line, spoken by the only person in
+ * it. The avatar model animates whichever face it picks, and with Maya beside him it gave her half of Theo's
+ * line (2026-10-11), so a line in a shot with others is heard over it instead, with nobody on screen speaking.
+ */
+export function syncedLine<L extends { cell: string; speaker: string }>(cell: { id: string; characters?: string[] }, lines: L[]): L | undefined {
+	const own = lines.filter((l) => l.cell === cell.id);
+	if (own.length !== 1) return undefined;
+	const people = cell.characters ?? [];
+	return people.length === 1 && people[0] === own[0].speaker ? own[0] : undefined;
+}
+
+/** Whether a shot's clip should show nobody speaking: it carries a line that isn't lip-synced to it. */
+export const voicedOver = (cell: { id: string; characters?: string[] }, lines: { cell: string; speaker: string }[]) =>
+	lines.some((l) => l.cell === cell.id) && !syncedLine(cell, lines);
 
 // "Previously on" (D38): stills from the team's own history, rejected takes and the like, before the film
 export const RECAP = "recap.json";
@@ -198,8 +218,13 @@ export function withRecap(clips: MixClip[], r: Recap | null, seconds = Infinity)
 	if (shots.length && length <= RECAP_SECONDS) return clips;
 	const each = shots.length ? Number((RECAP_SECONDS / shots.length).toFixed(2)) : 0;
 	const room = length - each * shots.length;
-	const trimmed = clips.map((c) => ({ ...c, seconds: Number(((c.seconds * room) / film).toFixed(2)) }));
-	trimmed[trimmed.length - 1].seconds = Number((room - trimmed.slice(0, -1).reduce((s, c) => s + c.seconds, 0)).toFixed(2));
+	// A lip-synced clip keeps its length (cut short, the mouth would stop mid-line); the others share the rest
+	const kept = clips.reduce((s, c) => s + (c.synced ? c.seconds : 0), 0);
+	const keep = kept < room && clips.some((c) => !c.synced);
+	const share = keep ? (room - kept) / (film - kept) : room / film;
+	const trimmed = clips.map((c) => (keep && c.synced ? { ...c } : { ...c, seconds: Number((c.seconds * share).toFixed(2)) }));
+	const last = keep ? trimmed.map((c) => !c.synced).lastIndexOf(true) : trimmed.length - 1;
+	trimmed[last].seconds = Number((room - trimmed.reduce((s, c, i) => s + (i === last ? 0 : c.seconds), 0)).toFixed(2));
 	return [...shots.map((x, i) => ({ cell: `r${i + 1}`, file: x.file, seconds: each, audio: false, still: true })), ...trimmed];
 }
 export interface MixLine {
@@ -224,7 +249,8 @@ export function cueLines(clips: MixClip[], lines: MixLine[]) {
 	const cues: (MixLine & { at: number })[] = [];
 	for (const clip of clips) {
 		for (const line of lines.filter((l) => l.cell === clip.cell)) {
-			const at = Number(Math.max(start + LINE_LEAD_IN, free).toFixed(2));
+			// A lip-synced clip's line starts with it: the mouth moves from its first frame
+			const at = Number((clip.synced ? start : Math.max(start + LINE_LEAD_IN, free)).toFixed(2));
 			// A line needs room to be heard (its first 1.5 s), or it's cut
 			if (at + Math.min(line.seconds, 1.5) > total) break;
 			cues.push({ ...line, at });

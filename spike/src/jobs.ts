@@ -1,6 +1,12 @@
 // Work items on the storyboard-jobs queue. The coordinator (coordinator.ts) creates them, numbers takes and
 // tracks status; the queue consumer (consumer.ts) runs one per invocation.
 
+/** The line a clip is lip-synced to (D44): its file on main and what it says, to tell if it changed. */
+export interface LineSync {
+	file: string;
+	text: string;
+}
+
 export interface TakeOptions {
 	note?: string;
 	// Cinematographer skill for this take; defaults to the board's choice
@@ -28,8 +34,9 @@ export type Job = JobBase &
 		| { kind: "take"; cell: string; take: number; attempt: 1 | 2; opts: TakeOptions }
 		| { kind: "bible"; cell: string; note: string }
 		| { kind: "print"; picks: { cell: string; branch: string }[]; message: string }
-		// Animate one cell's printed frame into cut/<cut>/<cell>; `origin` is where the frame's signed URL points
-		| { kind: "video"; cell: string; cut: string; origin: string; seconds: number }
+		// Animate one cell's printed frame into cut/<cut>/<cell>; `origin` is where the frame's signed URL points.
+		// With `sync`, the clip is lip-synced to that line (D44) and runs its length
+		| { kind: "video"; cell: string; cut: string; origin: string; seconds: number; sync?: LineSync }
 		// Merge a cut's video branches into cut/<cut> with an edit decision list
 		| { kind: "assemble"; cut: string; cells: string[] }
 		// Sound (sound.ts): the score at the film's length, the lines in their voices, and the mix of a cut
@@ -58,7 +65,7 @@ export type JobRequest =
 	| { kind: "take"; cell: string; attempt?: 1 | 2; opts?: TakeOptions }
 	| { kind: "bible"; cell: string; note: string }
 	| { kind: "print"; picks: { cell: string; branch: string }[]; message: string }
-	| { kind: "video"; cell: string; cut: string; origin: string; seconds: number }
+	| { kind: "video"; cell: string; cut: string; origin: string; seconds: number; sync?: LineSync }
 	| { kind: "assemble"; cut: string; cells: string[] }
 	| { kind: "score"; direction: string; seconds: number }
 	| { kind: "lines"; direction: string }

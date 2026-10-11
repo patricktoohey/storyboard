@@ -3,7 +3,7 @@
 // (so its judges are skills like any other) holding brief.md, rules.json, teams/, scores/ and submissions/.
 // Each team is its own board repo, run by a showrunner (showrunner.ts).
 import { type Comparison, type Criterion, type JudgeScore, leaderboard, matchups, rubricOf, sampleCells, winRates } from "./arena-rules.ts";
-import { onMain } from "./board";
+import { onMain, recheckPrints } from "./board";
 import { submit, ledger, startLedger } from "./coordinator";
 import { HELD } from "./cast";
 import { lastTalk } from "./cast-rules.ts";
@@ -205,6 +205,9 @@ export async function createArena(
 		teams.map(async (t) => {
 			const board = await forkBoard(env, t.board, `${t.team} in ${arena}`, t.source, Boolean(t.from));
 			if (t.from) await startLedger(env, t.board, `New round in ${arena}: the ledger starts empty; ${t.from.board}'s rows are in this branch's history`);
+			// Its printed frames checked again for the impossible (D44); a check that can't run blocks nothing
+			const reshoot = t.from ? await recheckPrints(env, t.board).catch(() => []) : [];
+			const from = t.from && { ...t.from, ...(reshoot.length ? { reshoot } : {}) };
 			await onMain(board, async (tree) =>
 				tree.commit({ name: "arena" }, t.from ? `Join ${arena} as ${t.team}, carrying on from ${t.from.board} at ${t.from.commit.slice(0, 7)}` : `Join ${arena} as ${t.team}`, {
 					// Notes held over from the earlier round were about its shots, not this round's work
@@ -219,7 +222,7 @@ export async function createArena(
 						...(opts.blind ? { blind: true } : {}),
 						...(t.lead ? { lead: t.lead } : {}),
 						...(t.cast ? { cast: t.cast } : {}),
-						...(t.from ? { from: t.from } : {}),
+						...(from ? { from } : {}),
 						skills: { director: "director", cinematographer: t.cinematographer, casting: "casting", showrunner: t.showrunner },
 					}),
 				}),

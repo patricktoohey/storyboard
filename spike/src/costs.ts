@@ -2,7 +2,7 @@
 // don't report billed cost, so these estimates are the bill: a job is charged its estimate when it is
 // queued (reserved) and keeps it whether it succeeds or fails, which errs toward spending less than the
 // budget, never more (D19).
-import { type Crew, DEFAULT_CREW, clipCost, crewCosts } from "./crew.ts";
+import { type Crew, DEFAULT_CREW, avatarCost, clipCost, crewCosts } from "./crew.ts";
 import type { JobRequest } from "./jobs.ts";
 import { LINES_ESTIMATE, scoreEstimate } from "./sound-rules.ts";
 
@@ -18,8 +18,9 @@ export function estimate(req: JobRequest, crew: Crew = DEFAULT_CREW): number {
 		case "turn":
 			return c.turn;
 		case "video":
-			// Billed at the provider's clip length, which can exceed the plan (Hailuo bills at least 6 s)
-			return clipCost(crew, req.seconds).usd;
+			// A lip-synced clip (D44) is the avatar model's, at its line's length; the rest are billed at the
+			// provider's clip length, which can exceed the plan (Hailuo bills at least 6 s)
+			return req.sync ? avatarCost(req.seconds) : clipCost(crew, req.seconds).usd;
 		case "score":
 			return scoreEstimate(req.seconds);
 		case "lines":

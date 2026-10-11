@@ -45,6 +45,17 @@ export const PLACE_MATCH_MIN = 0.4;
 export const IMPOSSIBLE_MAX = 0.6;
 export const IMPOSSIBLE_QUESTION =
 	"Is anything in image 1 physically impossible or duplicated: a person wearing two of the same item at once (two pairs of glasses, two hats), extra hands, arms or fingers, or an object passing through another?";
+export const impossibleIssue = (p: number) => `something in the frame is impossible or duplicated, like two pairs of the same glasses or an extra hand (p=${p.toFixed(2)})`;
+
+/**
+ * A carried-over print checked again (D44): a frame printed before the impossible question existed keeps its
+ * old verdict unless the question now fails it; then it is a break like any other, and says it was re-checked.
+ */
+export function recheckedVerdict<V extends { ok?: boolean; issues?: string[] }>(prior: V | null, p: number | undefined): (V & { ok: false; issues: string[]; rechecked: string }) | null {
+	if (p === undefined || p <= IMPOSSIBLE_MAX) return null;
+	const issue = impossibleIssue(p);
+	return { ...(prior ?? ({} as V)), ok: false, issues: [...(prior?.issues ?? []).filter((i) => !i.startsWith("something in the frame is impossible")), issue], rechecked: "carried over: printed before the impossible-frame check (D42), checked again (D44)" };
+}
 // Below this, the frame is unlikely to be staged as the blocking says (who sits where, who faces whom)
 export const BLOCKING_MATCH_MIN = 0.3;
 
@@ -142,7 +153,7 @@ export function continuityVerdict(
 	}
 	const impossible = answers.impossible?.noul;
 	if (impossible !== undefined && impossible > IMPOSSIBLE_MAX) {
-		issues.push(`something in the frame is impossible or duplicated, like two pairs of the same glasses or an extra hand (p=${impossible.toFixed(2)})`);
+		issues.push(impossibleIssue(impossible));
 	}
 	const place = answers.place?.noul;
 	if (place !== undefined && place < PLACE_MATCH_MIN) {

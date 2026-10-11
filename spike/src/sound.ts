@@ -36,6 +36,7 @@ import {
 	mp3Seconds,
 	parseLines,
 	parseVoiceCast,
+	LINES_CSV,
 } from "./sound-rules.ts";
 import { repoRemote } from "./template";
 import type { Character } from "./vocab.ts";
@@ -43,7 +44,7 @@ import type { Character } from "./vocab.ts";
 type Progress = (detail: string) => Promise<unknown>;
 
 export const SCORE = "sound/score.mp3";
-export const LINES_CSV = "sound/lines.csv";
+export { LINES_CSV };
 export const VOICES_JSON = "sound/voices.json";
 const LINES_HEADER = ["order", "cell", "speaker", "voice", "text", "file", "seconds"] as const;
 
@@ -73,7 +74,7 @@ async function filmOf(env: Env, repo: string) {
 		["concept.md", "bible.md", "storyboard.csv", "characters.json", "board.json"].map((p) => readText(env, repo, p)),
 	);
 	const cap = Number(env.VIDEO_MAX_SECONDS);
-	const cells = parseCsv(csv ?? "").map((r) => ({ cell: r.id, shot: r.shot, beat: r.beat, seconds: Math.max(2, Math.min(cap, Math.round(Number(r.duration_s)) || 3)) }));
+	const cells = parseCsv(csv ?? "").map((r) => ({ cell: r.id, shot: r.shot, beat: r.beat, on_screen: r.characters ? r.characters.split(";") : [], seconds: Math.max(2, Math.min(cap, Math.round(Number(r.duration_s)) || 3)) }));
 	const characters = JSON.parse(chars ?? "[]") as Character[];
 	return {
 		brief: (concept ?? "").replace(/^# Concept\s*/, "").trim(),
@@ -183,7 +184,10 @@ line sits on one cell and is heard during that shot. A shot of N seconds holds a
 less if someone is to be seen before they speak; silence is allowed, and few strong lines beat many. At most
 12 lines. Speakers: ${[...names, NARRATOR].join(", ")}. You may put audio tags in a line for how
 it's said ([whispers], [sighs], [pause], [laughs]); never actions or stage directions, which would be
-spoken or lost: the picture shows what people do. Then one or two sentences to your lead ("say").
+spoken or lost: the picture shows what people do. Lips are synced only when the speaker is the one person
+on screen in that cell ("on_screen") and it is the cell's only line: then we see them say it. Any other line
+is heard over the shot with nobody's mouth moving, as voiceover or from off-screen, so write it as one. Then
+one or two sentences to your lead ("say").
 
 Reply with ONLY a JSON object: {"lines": [{"cell": "01", "speaker": string, "text": string}], "say": string}`;
 	const cells = film.cells.map((c) => c.cell);
@@ -270,16 +274,23 @@ export async function runMixJob(env: Env, repo: string, cut: string, progress: P
 	const clips: MixClip[] = await Promise.all(
 		edl.map(async (e) => {
 			const meta = JSON.parse((await readText(env, repo, e.file.replace(/\.mp4$/, ".json"), branch)) ?? "{}");
-			return { cell: e.cell, file: e.file, seconds: Number(e.seconds), audio: Boolean(meta.audio) };
+			return { cell: e.cell, file: e.file, seconds: Number(e.seconds), audio: Boolean(meta.audio), lipsync: meta.lipsync as { file: string; text: string } | undefined };
 		}),
 	);
 	// "Previously on" (D38): main's recap stills open the film, in four seconds taken from it; and a film
 	// planned longer than the brief is fitted to it (D39)
 	const recapJson = await readText(env, repo, RECAP);
-	clips.splice(0, clips.length, ...withRecap(clips, recapJson ? (JSON.parse(recapJson) as Recap) : null, FILM_SECONDS));
+
 	const scoreMp3 = await readBytes(env, repo, SCORE);
 	const lineRows = parseCsv<Record<string, string>>(await readText(env, repo, LINES_CSV) ?? "");
 	const lines: MixLine[] = lineRows.map((r) => ({ cell: r.cell, file: r.file, seconds: Number(r.seconds), speaker: r.speaker, text: r.text }));
+	// A clip lip-synced to a line that is still on main word for word starts that line with it (D44); one
+	// synced to a line since rewritten is cut like any other clip, and the new line is heard over it
+	for (const c of clips) {
+		const sync = (c as MixClip & { lipsync?: { file: string; text: string } }).lipsync;
+		if (sync && lines.some((l) => l.file === sync.file && l.text === sync.text)) c.synced = true;
+	}
+	clips.splice(0, clips.length, ...withRecap(clips, recapJson ? (JSON.parse(recapJson) as Recap) : null, FILM_SECONDS));
 	const plan = mixPlan(clips, scoreMp3 ? { file: SCORE } : undefined, lines);
 
 	await progress(`mixing ${clips.length} clips${scoreMp3 ? ", the score" : ""}${plan.cues.length ? `, ${plan.cues.length} lines` : ""}`);
@@ -339,7 +350,7 @@ export async function runMixJob(env: Env, repo: string, cut: string, progress: P
 		seconds: plan.total,
 		sound_signature: soundSignature(scoreJson, linesCsv, recapJson),
 		...(recapJson ? { recap: JSON.parse(recapJson) } : {}),
-		clips: plan.clips.map((c, i) => ({ cell: c.cell, file: c.file, seconds: c.seconds, own_sound: c.audio, ...(clips[i].audio && !c.audio ? { own_sound_dropped: "under a line" } : {}) })),
+		clips: plan.clips.map((c, i) => ({ cell: c.cell, file: c.file, seconds: c.seconds, own_sound: c.audio, ...(c.synced ? { lip_synced: true } : {}), ...(clips[i].audio && !c.audio ? { own_sound_dropped: "under a line" } : {}) })),
 		score: scoreMp3 ? { file: SCORE, ...JSON.parse((await readText(env, repo, "sound/score.json")) ?? "{}") } : null,
 		lines: plan.cues,
 		levels: { clips_under_score: 0.6, score: 0.8, lines: 1.3, ducking: "sidechain, ratio 6" },

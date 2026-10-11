@@ -98,6 +98,10 @@ assembles the clips into the `cut/vN` branch with `video/edl.csv`; the UI plays 
 Clips take about 5 minutes each to render (in parallel), so a cut is ready in roughly 6 minutes.
 See docs/decisions.md D17 and D18.
 
+**Lip sync** (D44): a shot whose only line is spoken by the only person in it is animated by
+`pruna/p-video-avatar` from the line's audio, so the speaker says it in the cast voice ($0.025/s, the line's
+length). Other lines are heard over their shots, whose clips are told nobody on screen speaks.
+
 ## Review UI
 
 Open the Worker URL (`https://storyboard-spike.<subdomain>.workers.dev/`) and paste `SPIKE_KEY` from

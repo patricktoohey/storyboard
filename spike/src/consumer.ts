@@ -60,7 +60,7 @@ async function run(env: Env, job: Job) {
 			return { detail: job.picks.map((p) => p.branch).join(", ") };
 		}
 		case "video": {
-			const clip = await runVideoJob(env, job.repo, job.cut, job.cell, job.origin, job.seconds, progress);
+			const clip = await runVideoJob(env, job.repo, job.cut, job.cell, job.origin, job.seconds, progress, job.sync);
 			return { detail: `${clip.seconds}s clip (${clip.model}), ${(clip.bytes / 1e6).toFixed(1)} MB in ${Math.round(clip.elapsed_ms / 1000)}s` };
 		}
 		case "assemble": {

@@ -1,7 +1,7 @@
 // The model roles from docs/design.md: director, casting, cinematographer, renderer, critic, continuity.
 // Director, cinematographer and casting take their craft from a skill in the board repo (skills.ts);
 // what stays here is each role's output contract, which code depends on.
-import { SETTING_SHOTS, continuityQuestions, continuityVerdict } from "./continuity-rules.ts";
+import { IMPOSSIBLE_QUESTION, SETTING_SHOTS, continuityQuestions, continuityVerdict } from "./continuity-rules.ts";
 import { llmFor } from "./crew-env";
 import { EDIT_MODEL, MENU, type RendererOption, nearestRatio } from "./crew.ts";
 import { RATE_LIMITED, llmRequest, llmText, llmUsage, retryDelay } from "./llm.ts";
@@ -466,6 +466,16 @@ export async function checkContinuity(
 	const { answers, elapsed_ms } = await clef(env, asked.state, images, asked.questions);
 	const verdict = continuityVerdict(cell, characters, answers, framing);
 	return { ...verdict, identity_checked: asked.identityChecked, model: env.CLEF_MODEL, elapsed_ms, answers };
+}
+
+/**
+ * The impossible-frame question alone (D44), for a printed frame carried over from a board shot before the
+ * question existed: Opus's carried Theo kept both pairs of glasses through the Finale Special.
+ */
+export async function checkImpossible(env: Env, webp: Uint8Array) {
+	const detail = await encode(env, webp, "image/webp", 640);
+	const { answers } = await clef(env, {}, [toBase64(detail)], { impossible: { type: "noul", instructions: IMPOSSIBLE_QUESTION } });
+	return answers.impossible?.noul;
 }
 
 export async function routeNote(env: Env, note: string, cell: Cell, prompt: string | undefined, characters: Character[]) {

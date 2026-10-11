@@ -19,6 +19,7 @@ import {
 	blastRadius,
 	cast,
 	checkContinuity,
+	checkImpossible,
 	cinematograph,
 	direct,
 	editBible,
@@ -34,8 +35,11 @@ import {
 } from "./models";
 import { type Role, type SkillChoice, DEFAULT_SKILLS, ROLES, listSkills, loadSkill, skillTrailer } from "./skills";
 import { forkBoard, repoRemote } from "./template";
-import { animate, clipSeconds, frameJpeg, frameUrl, motionPrompt } from "./video";
+import { NOBODY_SPEAKS, animate, clipSeconds, frameJpeg, frameUrl, lipSync, motionPrompt } from "./video";
+import { LINES_CSV, syncedLine, voicedOver } from "./sound-rules.ts";
+import type { LineSync } from "./jobs";
 import { nextCut } from "./producer-rules.ts";
+import { recheckedVerdict } from "./continuity-rules.ts";
 
 // ── Files on main ────────────────────────────────────────────────────────────────────────────────
 
@@ -320,6 +324,40 @@ async function shootCell(
 	};
 }
 
+/**
+ * A carried-over board's printed frames, checked again for the impossible (D44). They were judged when they
+ * were shot, some before the question existed, and carry-over counts a print as finished: Opus's Theo kept
+ * both pairs of glasses through the Finale Special. A frame that fails gets a continuity break committed on
+ * its take branch, which is how the lead sees any break. Returns the cells that failed.
+ */
+export async function recheckPrints(env: Env, repo: string) {
+	const remote = await repoRemote(env, repo);
+	using handle = await env.ARTIFACTS.get(repo);
+	const csv = await (await handle.readFile({ ref: "main", path: "storyboard.csv" }))?.text();
+	const printed = parseCsv(csv ?? "").filter((r) => r.take);
+	const failed = await Promise.all(
+		printed.map(async (r) => {
+			const blob = await handle.readFile({ ref: "main", path: `cells/${r.id}/frame.webp` });
+			if (!blob) return undefined;
+			const p = await checkImpossible(env, new Uint8Array(await new Response(blob.stream()).arrayBuffer())).catch(() => undefined);
+			const branch = `cell/${r.id}/take-${r.take}`;
+			const tree = await WorkingTree.clone(remote, branch).catch(() => undefined);
+			if (!tree) return undefined;
+			const path = `cells/${r.id}/continuity.json`;
+			const verdict = recheckedVerdict((await tree.exists(path)) ? JSON.parse(await tree.read(path)) : null, p);
+			if (!verdict) return undefined;
+			await tree.commit(
+				{ name: `continuity-${r.id}` },
+				`Cell ${r.id} take ${r.take}: continuity break on carry-over\n\n${verdict.issues.at(-1)}`,
+				{ [path]: JSON.stringify(verdict, null, 2) + "\n" },
+			);
+			await tree.push(branch);
+			return r.id;
+		}),
+	);
+	return failed.filter((c): c is string => Boolean(c));
+}
+
 /** Continuity agent: commits its verdict onto the take branch it judged. */
 async function judgeContinuity(env: Env, take: Take, progress: Progress = quiet) {
 	await progress("continuity checking against the bible");
@@ -557,14 +595,21 @@ export async function startCut(env: Env, repo: string, origin: string) {
 	const csv = await (await handle.readFile({ ref: "main", path: "storyboard.csv" }))?.text();
 	const printed = parseCsv(csv ?? "").filter((r) => r.take);
 	if (!printed.length) throw new Error("print at least one take before making a cut");
+	// A shot whose only line is spoken by the only person in it is lip-synced to that line (D44), at its length
+	const lines = parseCsv(await (await handle.readFile({ ref: "main", path: LINES_CSV }))?.text() ?? "").map((l) => ({ cell: l.cell, speaker: l.speaker, file: l.file, text: l.text, seconds: Number(l.seconds) }));
 	// Priced per second, so the clip length is part of the request (and of the budget check)
 	const cap = Number(env.VIDEO_MAX_SECONDS);
-	const requests: JobRequest[] = printed.map((r) => ({ kind: "video", cell: r.id, cut, origin, seconds: clipSeconds(cellFromRow(r), cap) }));
+	const requests: JobRequest[] = printed.map((r) => {
+		const line = syncedLine(cellFromRow(r), lines);
+		return line
+			? { kind: "video", cell: r.id, cut, origin, seconds: Number(line.seconds.toFixed(2)), sync: { file: line.file, text: line.text } }
+			: { kind: "video", cell: r.id, cut, origin, seconds: clipSeconds(cellFromRow(r), cap) };
+	});
 	return { cut, requests, group: { id: `cut-${cut}-${crypto.randomUUID().slice(0, 6)}`, kind: `cut:${cut}` as const }, stagger: CLIP_STAGGER_S };
 }
 
 /** Job: animate one cell's printed frame and commit the clip to cut/<cut>/<cell>. */
-export async function runVideoJob(env: Env, repo: string, cut: string, cellId: string, origin: string, seconds: number, progress: Progress = quiet) {
+export async function runVideoJob(env: Env, repo: string, cut: string, cellId: string, origin: string, seconds: number, progress: Progress = quiet, sync?: LineSync) {
 	const remote = await repoRemote(env, repo);
 	const branch = `cut/${cut}/${cellId}`;
 	const tree = await WorkingTree.clone(remote, "main", branch);
@@ -575,22 +620,36 @@ export async function runVideoJob(env: Env, repo: string, cut: string, cellId: s
 
 	// Signed at the commit the frame was printed in, so the clip is of exactly that frame even if main moves
 	const image = await frameUrl(env, origin, repo, frameCommit, `cells/${cellId}/frame.webp`);
-	await progress(`animating ${seconds}s from take ${row.take} (${env.VIDEO_MODEL})`);
 	const framePath = `cells/${cellId}/frame.webp`;
-	const clip = await animate(
-		env,
-		{ url: image, jpeg: () => frameJpeg(env, repo, frameCommit, framePath) },
-		motionPrompt(cell),
-		seconds,
-		/static|locked|tripod/i.test(cell.camera),
-	);
+	const jpeg = () => frameJpeg(env, repo, frameCommit, framePath);
+	// The lines as main has them now: a synced line must still be there, word for word (D44)
+	const lines = (await tree.exists(LINES_CSV)) ? parseCsv(await tree.read(LINES_CSV)) : [];
+	const line = sync && lines.find((l) => l.file === sync.file && l.text === sync.text);
+	const mp3 = line && (await tree.exists(line.file)) ? await tree.readBytes(line.file) : undefined;
+	let clip;
+	if (sync && mp3) {
+		await progress(`lip-syncing ${line!.speaker}'s line from take ${row.take}`);
+		clip = await lipSync(env, { jpeg }, { mp3, text: sync.text }, seconds, cell.beat);
+	} else {
+		await progress(`animating ${seconds}s from take ${row.take} (${env.VIDEO_MODEL})`);
+		const cellLines = lines.map((l) => ({ cell: l.cell, speaker: l.speaker }));
+		clip = await animate(
+			env,
+			{ url: image, jpeg },
+			// A line heard over this shot is nobody's on screen (D44)
+			`${motionPrompt(cell)}${voicedOver(cell, cellLines) ? ` ${NOBODY_SPEAKS}` : ""}`,
+			// A synced line that changed since the cut started: the shot is animated like any other
+			sync ? clipSeconds(cell, Number(env.VIDEO_MAX_SECONDS)) : seconds,
+			/static|locked|tripod/i.test(cell.camera),
+		);
+	}
 
 	await tree.commit(
 		{ name: `animator-${cellId}` },
-		`Cell ${cellId}: ${seconds}s clip for cut ${cut}\n\nFrame: cell/${cellId}/take-${row.take} (main@${frameCommit.slice(0, 7)})\nModel: ${env.VIDEO_MODEL}`,
+		`Cell ${cellId}: ${clip.meta.seconds}s clip for cut ${cut}${sync && mp3 ? `, lip-synced to "${sync.text}"` : ""}\n\nFrame: cell/${cellId}/take-${row.take} (main@${frameCommit.slice(0, 7)})\nModel: ${clip.meta.model}`,
 		{
 			[`video/${cellId}.mp4`]: clip.mp4,
-			[`video/${cellId}.json`]: JSON.stringify({ ...clip.meta, cut, frame_take: Number(row.take), frame_commit: frameCommit }, null, 2) + "\n",
+			[`video/${cellId}.json`]: JSON.stringify({ ...clip.meta, cut, frame_take: Number(row.take), frame_commit: frameCommit, ...(sync && mp3 ? { lipsync: sync } : {}) }, null, 2) + "\n",
 		},
 	);
 	await tree.push(branch);

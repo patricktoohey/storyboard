@@ -67,6 +67,8 @@ export interface CarriedFrom {
 	cuts: string[];
 	saved: string[];
 	comparisons: number;
+	// Printed frames that failed the impossible-frame check when carried over (D44): to reshoot or edit
+	reshoot?: string[];
 }
 
 /**

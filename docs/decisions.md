@@ -743,3 +743,44 @@ $0.38 short of a cut it had planned well, and asked the producer for the money i
   change what the gateway spends, only whose budget it comes out of.
 
 Tests: `test/refunds.test.ts`.
+
+## D44: lips that say the line, and carried prints checked again
+
+Two flaws survived the Finale Special (2026-10-11), and a re-run couldn't have fixed either.
+
+**No lip sync, by design.** A clip was made from a silent frame with its line's quotes taken out of the
+prompt (D39), and the line, voiced by ElevenLabs in the cast voice, was laid over it in the mix. Any mouth
+movement was the video model's own and never matched the words. We tested two fixes on Theo's confessional:
+
+- Veo 3.1 speaking the line itself (sound on, the line in the prompt). It moves the mouth to its own voice,
+  but each clip invents that voice, so the cast's voices are lost and a character can drift between shots;
+  about $2.50 a clip. Swapping the voice afterwards (ElevenLabs' speech-to-speech) isn't in Cloudflare's
+  catalog.
+- `pruna/p-video-avatar` from the catalog: a frame and an audio file in, the face animated to that audio.
+  Theo said his line in his cast voice, in sync, in 23 s for $0.025/s. With Maya beside him, Maya mouthed
+  the first half of his line and Theo the rest: the model picks the face.
+
+So:
+
+- **Synced**: a shot whose only line is spoken by the only person in it (`syncedLine` in `sound-rules.ts`).
+  Its clip is the avatar model's, driven by the line's mp3, as long as the line; priced at the avatar's rate
+  when the cut starts (`avatarCost`). The mix lays the line on the clip's first frame instead of after the
+  lead-in, and fitting the film to its length doesn't trim the clip (cut short, the mouth stops mid-line).
+- **Heard over**: any other line. Its shot is animated by the team's drafted model, told that nobody on screen
+  speaks (`NOBODY_SPEAKS`), as voiceover or a voice from off-screen. Reality TV is cut this way: talking heads
+  in sync, the rest under voiceover.
+- The writer sees who is on screen in each cell and is told the rule; the lead is told lines are synced when
+  a cut is made. A synced clip whose line has since been rewritten is mixed like any other clip.
+
+Not a draft pick: every team's single-speaker shots use it. Bring-your-own-key for ElevenLabs' voice changer
+would let Veo do the acting with the cast's voices dubbed on; kept for later, outside the catalog.
+
+**Carried prints checked again.** Opus's carried board kept a cell 06 printed on Oct 9, before the
+impossible-frame question existed (D42): Theo with glasses on his head and over his eyes. Carry-over (D40)
+counts a print as finished, so the lead shot that cell again and printed the old take. Now joining an arena
+with a carried board asks Clef the impossible question of every printed frame (`recheckPrints` in
+`board.ts`); a frame that fails gets a continuity break committed on its take branch, where the lead sees
+any break, and the lead's `carried_over` note names the cells to reshoot or edit. A check that can't run
+blocks nothing.
+
+Tests: `test/lipsync.test.ts`.

@@ -269,6 +269,12 @@ const LOCATIONS = 2;
 // Billed by megapixel: $0.07 for the first out, $0.03 for the frame in (2026-10-10)
 export const EDIT_MODEL = "black-forest-labs/flux-2-max";
 export const EDIT_USD = 0.1;
+// Lip sync (D44): a portrait and an audio file in, the face animated to the audio out, in the catalog. Not a
+// draft pick: every crew's shots with a line spoken by the only person in them use it
+export const AVATAR_MODEL = "pruna/p-video-avatar";
+export const AVATAR_USD_PER_S = 0.025;
+/** A lip-synced clip runs as long as its line; billed per started second at 720p. */
+export const avatarCost = (seconds: number) => Number((Math.ceil(seconds) * AVATAR_USD_PER_S).toFixed(3));
 
 /** What each kind of job costs with this crew, in USD. */
 export function crewCosts(crew: Crew) {

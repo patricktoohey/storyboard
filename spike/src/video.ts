@@ -1,7 +1,7 @@
 // Image-to-video: each printed frame becomes the first frame of its shot's clip. The video models live in
 // Cloudflare's unified catalog (env.AI.run with a provider/model id) and take the image as an HTTPS URL, so
 // the Worker signs a short-lived URL for one frame (frameUrl/verifyFrame) that needs no access key.
-import { MENU, type VideoOption, videoRequest } from "./crew.ts";
+import { AVATAR_MODEL, MENU, type VideoOption, avatarCost, videoRequest } from "./crew.ts";
 import { crewOf } from "./crew-env.ts";
 import type { Cell } from "./vocab.ts";
 
@@ -47,6 +47,9 @@ export function motionPrompt(cell: Pick<Cell, "beat" | "camera" | "shot">) {
 	const camera = /static|locked|tripod/i.test(cell.camera) ? "The camera stays still." : `Camera: ${cell.camera}.`;
 	return `${cell.beat} ${camera} Keep the framing, people, wardrobe and lighting exactly as in the image. Subtle, natural motion; cinematic.`;
 }
+
+// A line in a shot it isn't lip-synced to (D44) is heard over the shot: nobody in it may seem to say it
+export const NOBODY_SPEAKS = "Nobody in the shot speaks: mouths stay closed or still; any voice is heard from off-screen.";
 
 export const SOUND_HINT = "Sound: the natural ambience and effects of the scene only; no music, no speech.";
 // A beat that quotes its line gets voiced by a model with its own sound, "no speech" or not (D39): the
@@ -99,6 +102,38 @@ export async function animate(
 	return {
 		mp4,
 		meta: { model: req.model, audio, prompt: (req.input.prompt as string) ?? prompt, planned_seconds: seconds, seconds: req.billed, usd: req.usd, seed, input: { ...req.input, image: undefined, image_uri: undefined, image_input: undefined, first_frame_image: undefined, content: undefined }, bytes: mp4.byteLength, elapsed_ms: Date.now() - started },
+	};
+}
+
+/**
+ * Lip sync (D44): the shot's printed frame animated by its line's audio, so the speaker's mouth says the
+ * line in the cast voice (the avatar model takes the audio over its own voices). Its own sound is that same
+ * line, so the mix silences it and lays the line on the clip's first frame. Tested 2026-10-11: Theo's
+ * confessional in 23 s at $0.025/s; with Maya beside him she spoke half his line (sound-rules.ts syncedLine).
+ */
+export async function lipSync(env: Env, frame: { jpeg: () => Promise<Uint8Array> }, line: { mp3: Uint8Array; text: string }, seconds: number, beat: string) {
+	const started = Date.now();
+	const seed = Math.floor(Math.random() * 2 ** 31);
+	const input = {
+		image: `data:image/jpeg;base64,${toBase64(await frame.jpeg())}`,
+		audio: `data:audio/mpeg;base64,${toBase64(line.mp3)}`,
+		// Required by the schema; the audio takes priority over it (the tested request sent both)
+		voice_script: line.text.replace(/\[[^\]]*\]/g, "").trim(),
+		voice: "Zephyr (Female)",
+		voice_language: "English (US)",
+		resolution: "720p",
+		video_prompt: `${beat} The person talks; handheld, subtle natural movement. Keep the framing, face, wardrobe and lighting exactly as in the image.`,
+		seed,
+	};
+	const out = (await env.AI.run(AVATAR_MODEL as keyof AiModels, input as never)) as unknown as { video?: string; result?: { video?: string } } | undefined;
+	const url = out?.video ?? out?.result?.video;
+	if (!url) throw new Error(`${AVATAR_MODEL} returned no video: ${JSON.stringify(out).slice(0, 300)}`);
+	const res = await fetch(url);
+	if (!res.ok) throw new Error(`downloading the clip failed: ${res.status}`);
+	const mp4 = new Uint8Array(await res.arrayBuffer());
+	return {
+		mp4,
+		meta: { model: AVATAR_MODEL, audio: false, prompt: input.video_prompt, planned_seconds: seconds, seconds, usd: avatarCost(seconds), seed, bytes: mp4.byteLength, elapsed_ms: Date.now() - started },
 	};
 }
 
