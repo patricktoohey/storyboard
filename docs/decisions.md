@@ -783,4 +783,11 @@ with a carried board asks Clef the impossible question of every printed frame (`
 any break, and the lead's `carried_over` note names the cells to reshoot or edit. A check that can't run
 blocks nothing.
 
+Tested in arena-2026-10-11-28b8b2 (Opus carrying on from its Finale Special board, $15): joining flagged
+cell 06 (p=0.75) and passed cell 07, whose Theo wears one pair; the lead edited cell 06 to one pair on its
+second turn. Cut v8 lip-synced cells 03 (Maya) and 06 (Theo) with the avatar model ($0.075 and $0.125),
+their lines cued on each clip's first frame (10.41 s and 19.05 s); cell 07's line, Ada's with Maya and Theo
+in the shot, was heard over a clip told nobody speaks. Whisper heard all three lines where they were cued.
+The team spent $3.33.
+
 Tests: `test/lipsync.test.ts`.
