@@ -97,22 +97,49 @@ and the UI's Models page shows every option, its price and why any is off (D41).
 frame can be fixed by an edit instead of a re-shoot, and the continuity check now catches the impossible,
 like a second pair of glasses (D42). A job that fails for the platform's reasons is refunded to the team (D43).
 
-## Try it
+## Getting started
 
-Everything lives in [`spike/`](spike/) (see its README for routes and details):
+Deploy your own copy to your own Cloudflare account. Nothing in the code is tied to ours: the account,
+the access key and the gateway token all come from your `spike/.env`.
+
+**You need**
+
+- A Cloudflare account on the **Workers Paid** plan with access to the
+  [Artifacts beta](https://blog.cloudflare.com/artifacts-git-for-agents-beta/). Without Artifacts there are
+  no repos, so nothing runs.
+- **Node 22.6 or newer** (the tests run TypeScript directly), and `git`, `jq`, `curl` and `openssl`.
+- **Docker**, running: the deploy builds the mixer's ffmpeg container image (`spike/mixer/`) locally.
+- **AI Gateway credits** on the account's `default` gateway, with a spend limit. The frontier leads and
+  judges (Claude, GPT, Gemini), most video models (Veo 3.1, H3 Max) and Nano Banana Pro are paid from them.
+  Workers AI models (Llama, Kimi, FLUX.2, Clef) are billed to the account as usual. A first board costs
+  cents; an arena costs about three quarters of the teams' combined budget plus $2; a season is that per round.
+
+**Steps**
 
 ```sh
-cd spike
-scripts/setup.sh      # npm install, the Artifacts namespace, the jobs queue, an access key in .env
-scripts/deploy.sh     # tests, cf deploy, then the skills template
-scripts/smoke.sh      # a real 2-cell board, end to end (a few cents)
+git clone <this repo> storyboard && cd storyboard/spike
+npm install                # includes the `cf` CLI
+npx cf auth login          # opens the browser to authorize your account
+npm run setup              # the `storyboard` Artifacts namespace, the jobs queue, a SPIKE_KEY in .env
+npm run deploy             # types, tests, deploy (Worker + mixer container), the skills template; prints the URL
+export STORYBOARD_URL=https://storyboard-spike.<your-subdomain>.workers.dev
+npm run smoke              # a real 2-cell board, end to end (a few cents)
 ```
 
-Open the Worker's URL and paste `SPIKE_KEY` from `spike/.env`. From there: new board, new arena or new
-season; each arena has a **Replay** button. Third-party models (the frontier leads, the judges, most video)
-are paid from AI Gateway credits, so keep a balance and a spend limit on the `default` gateway. To have a
-season check the balance before it starts, add `CF_ACCOUNT_ID` and `AI_GATEWAY_TOKEN` (an API token with
-AI Gateway Read) to `spike/.env` before deploying.
+Open the printed URL and paste `SPIKE_KEY` from `spike/.env`. From there: a new board, a new arena or a new
+season; the Models page shows every model a crew can draft and its price. Each arena has a **Replay** button.
+
+**Optional: a balance check.** Add `CF_ACCOUNT_ID` and `AI_GATEWAY_TOKEN` (an API token with
+*Account → AI & Machine Learning → AI Gateway → Read*) to `spike/.env` and deploy again. Then `GET /credits` shows the balance, and an
+arena or season that the balance can't cover is refused with a 402 before it spends anything.
+
+**What you start with.** A fresh deploy has the skills from [`skills/`](skills/) and no history: our seasons,
+casts and boards live in our account, so carrying on from them (D40) isn't possible on yours. Start a season;
+a team can carry on from any board it made. `.env` is gitignored; keep it that way, since `SPIKE_KEY` is the
+only thing between the public workers.dev URL and your AI credits.
+
+[`spike/README.md`](spike/README.md) has every route, the manual equivalent of each script, and `curl`
+examples.
 
 ## Docs
 

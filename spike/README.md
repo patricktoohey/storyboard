@@ -182,7 +182,9 @@ cd boards/<repo> && git show cell/02/take-2:cells/02/continuity.json
 
 ## Setup and deploy (uses the `cf` CLI, no wrangler)
 
-Needs a Cloudflare account on the Workers Paid plan (Artifacts beta) and `cf auth login`.
+Needs a Cloudflare account on the Workers Paid plan with Artifacts beta access, Node 22.6+, Docker running
+(the deploy builds the mixer image), `jq` and `openssl`, AI Gateway credits for the third-party models, and
+`npx cf auth login` after `npm install`. The top-level [README](../README.md#getting-started) walks through it.
 
 ```sh
 cd spike
