@@ -20,8 +20,9 @@ import { COMMONS, CREW_ROOM, HELD, type TeamCast, appendTalk, noteReply, persona
 import { type Player, talkLine } from "./cast-rules.ts";
 import type { Job, JobRequest } from "./jobs";
 import { filmSeconds, soundState } from "./sound";
-import { LINES_ESTIMATE, RECAP, type Recap, scoreEstimate } from "./sound-rules.ts";
-import { ask } from "./models";
+import { LINES_ESTIMATE, RECAP, type Recap, recapWithout, scoreEstimate } from "./sound-rules.ts";
+import { ask, checkImpossible } from "./models";
+import { IMPOSSIBLE_MAX } from "./continuity-rules.ts";
 import { outOfCredits } from "./llm";
 import { loadSkill } from "./skills";
 import { repoRemote } from "./template";
@@ -290,7 +291,7 @@ export async function runTurnJob(env: Env, job: TurnJob, progress: Progress) {
 			brief: rules.brief,
 			...(from
 				? {
-						carried_over: `This board carries on from ${from.board}, where your team stopped: its plan, printed shots, takes, saved versions and sound are yours to keep or change. Its cuts (${from.cuts.join(", ") || "none"}) are there to watch and learn from; what you submit this round must be a new cut.${from.reshoot?.length ? ` Checked again on carry-over, the printed frames of cell${from.reshoot.length > 1 ? "s" : ""} ${from.reshoot.join(", ")} show something impossible (see their takes' continuity): reshoot or edit ${from.reshoot.length > 1 ? "them" : "it"} before your next cut.` : ""}`,
+						carried_over: `This board carries on from ${from.board}, where your team stopped: its plan, printed shots, takes, saved versions and sound are yours to keep or change. Its cuts (${from.cuts.join(", ") || "none"}) are there to watch and learn from; what you submit this round must be a new cut.${from.reshoot?.length ? ` Checked again on carry-over, the printed frames of cell${from.reshoot.length > 1 ? "s" : ""} ${from.reshoot.join(", ")} show something impossible (see their takes' continuity): reshoot or edit ${from.reshoot.length > 1 ? "them" : "it"} before your next cut.` : ""}${from.recap_dropped?.length ? ` Your "previously on" still${from.recap_dropped.length > 1 ? "s" : ""} from ${from.recap_dropped.join(", ")} showed something impossible and ${from.recap_dropped.length > 1 ? "were" : "was"} taken out of the recap; choose another recap if you want one.` : ""}`,
 					}
 				: {}),
 			...(producer ? { producer } : {}),
@@ -542,6 +543,10 @@ export async function runTurnJob(env: Env, job: TurnJob, progress: Progress) {
 					files[file] = new Uint8Array(await blob.arrayBuffer());
 					recap.shots.push({ branch, file });
 				}
+				// A still opens the film as it was shot: one with something impossible in it is refused (D44)
+				const scores = await Promise.all(recap.shots.map((r) => checkImpossible(env, files[r.file] as Uint8Array).catch(() => undefined)));
+				const { dropped } = recapWithout(recap, scores, IMPOSSIBLE_MAX);
+				if (dropped.length) throw new Error(`${dropped.map((d) => d.branch).join(", ")} ${dropped.length > 1 ? "show" : "shows"} something impossible or duplicated (like two pairs of glasses or a backwards arm): choose other takes`);
 				files[RECAP] = JSON.stringify(recap, null, 2) + "\n";
 				await onMain(await repoRemote(env, board), (tree) => tree.commit({ name: agent }, `Previously on: ${shots.join(", ")}`, files));
 				detail += `: ${shots.join(", ")}`;

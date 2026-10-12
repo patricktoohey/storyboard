@@ -36,10 +36,10 @@ import {
 import { type Role, type SkillChoice, DEFAULT_SKILLS, ROLES, listSkills, loadSkill, skillTrailer } from "./skills";
 import { forkBoard, repoRemote } from "./template";
 import { NOBODY_SPEAKS, animate, clipSeconds, frameJpeg, frameUrl, lipSync, motionPrompt } from "./video";
-import { LINES_CSV, syncedLine, voicedOver } from "./sound-rules.ts";
+import { LINES_CSV, RECAP, type Recap, recapWithout, syncedLine, voicedOver } from "./sound-rules.ts";
 import type { LineSync } from "./jobs";
 import { nextCut } from "./producer-rules.ts";
-import { recheckedVerdict } from "./continuity-rules.ts";
+import { IMPOSSIBLE_MAX, recheckedVerdict } from "./continuity-rules.ts";
 
 // ── Files on main ────────────────────────────────────────────────────────────────────────────────
 
@@ -356,6 +356,36 @@ export async function recheckPrints(env: Env, repo: string) {
 		}),
 	);
 	return failed.filter((c): c is string => Boolean(c));
+}
+
+/**
+ * A carried board's "previously on" stills checked for the impossible (D44): they are copies of old takes, so
+ * a frame edited on the board could still open the film. A still that fails leaves the recap; returns the
+ * take branches taken out.
+ */
+export async function recheckRecap(env: Env, repo: string) {
+	using handle = await env.ARTIFACTS.get(repo);
+	const text = await (await handle.readFile({ ref: "main", path: RECAP }))?.text();
+	if (!text) return [];
+	const recap = JSON.parse(text) as Recap;
+	const scores = await Promise.all(
+		recap.shots.map(async (shot) => {
+			const blob = await handle.readFile({ ref: "main", path: shot.file });
+			return blob ? checkImpossible(env, new Uint8Array(await new Response(blob.stream()).arrayBuffer())).catch(() => undefined) : undefined;
+		}),
+	);
+	const { dropped, recap: kept } = recapWithout(recap, scores, IMPOSSIBLE_MAX);
+	if (!dropped.length) return [];
+	const removed = kept ? dropped.map((d) => d.file) : [RECAP, ...recap.shots.map((d) => d.file)];
+	await onMain(await repoRemote(env, repo), (tree) =>
+		tree.commit(
+			{ name: "continuity" },
+			`Previously on: ${dropped.map((d) => d.branch).join(", ")} taken out on carry-over\n\nSomething in ${dropped.length > 1 ? "these stills" : "this still"} is impossible or duplicated${kept ? "" : `; fewer than two stills left, so no recap`}`,
+			kept ? { [RECAP]: JSON.stringify(kept, null, 2) + "\n" } : {},
+			removed,
+		),
+	);
+	return dropped.map((d) => d.branch);
 }
 
 /** Continuity agent: commits its verdict onto the take branch it judged. */

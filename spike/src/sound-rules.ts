@@ -206,6 +206,17 @@ export interface Recap {
 	shots: { branch: string; file: string }[];
 }
 /**
+ * A recap with its impossible stills taken out (D44): Opus's opened every film after Oct 9 on Theo's two pairs
+ * of glasses, a take its own confessional had since replaced. `scores` are the impossible question's answers, a
+ * still per score; left with fewer than RECAP_SHOTS.min, the film has no recap.
+ */
+export function recapWithout(r: Recap, scores: (number | undefined)[], max: number) {
+	const bad = (i: number) => (scores[i] ?? 0) > max;
+	const shots = r.shots.filter((_, i) => !bad(i));
+	const dropped = r.shots.filter((_, i) => bad(i));
+	return { dropped, recap: shots.length >= RECAP_SHOTS.min ? { shots } : null };
+}
+/**
  * The cut's clips fitted to `seconds`, with the recap ahead of them: its stills share RECAP_SECONDS, and every
  * shot after is trimmed by the same share to make room, so the film keeps its length (the last shot takes the
  * rounding). A film already short enough with no recap comes back as it is.

@@ -790,4 +790,14 @@ their lines cued on each clip's first frame (10.41 s and 19.05 s); cell 07's lin
 in the shot, was heard over a clip told nobody speaks. Whisper heard all three lines where they were cued.
 The team spent $3.33.
 
+**Recap stills checked too.** v8 still opened on Theo's two pairs of glasses: the "previously on" recap
+(D38) Opus chose on Oct 9 copies `cell/06/take-1` into `recap/` on main, so editing the printed cell left the
+copy. Clef scored that still 0.91. Now the recap tool refuses takes that fail the impossible question, and
+joining with a carried board takes failing stills out of the recap (`recheckRecap`); fewer than two left
+is no recap, and the lead's `carried_over` note says which went.
+
+What Clef doesn't see: in the same film, Maya's arm bent back to a light switch scored 0.01, and Maya and
+Theo reaching for one mouse at 14 s scored 0.03 (0.19 when the question named it). Anatomy and hands in
+motion are past what a frame question catches.
+
 Tests: `test/lipsync.test.ts`.

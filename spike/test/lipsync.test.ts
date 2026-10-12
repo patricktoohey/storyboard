@@ -5,7 +5,7 @@ import { test } from "node:test";
 import { IMPOSSIBLE_MAX, recheckedVerdict } from "../src/continuity-rules.ts";
 import { estimate } from "../src/costs.ts";
 import { AVATAR_USD_PER_S, DEFAULT_CREW, avatarCost } from "../src/crew.ts";
-import { type MixClip, cueLines, mixPlan, syncedLine, voicedOver, withRecap } from "../src/sound-rules.ts";
+import { type MixClip, cueLines, mixPlan, recapWithout, syncedLine, voicedOver, withRecap } from "../src/sound-rules.ts";
 
 // Opus's Finale Special: Theo alone in the confessional; Theo and Maya at the desk
 const lines = [
@@ -85,4 +85,16 @@ test("D44: a carried-over print that fails the impossible question becomes a bre
 	assert.match(broken.rechecked, /carried over/);
 	// Checked twice, the issue is stated once
 	assert.equal(recheckedVerdict(broken, 0.8)!.issues.length, 1);
+});
+
+test("D44: a recap still with something impossible in it is taken out, and two or more must be left", () => {
+	// Opus's recap since Oct 9: Theo's first take with both pairs of glasses scored 0.91 in the test round's film
+	const recap = { shots: [{ branch: "cell/06/take-1", file: "recap/01.webp" }, { branch: "cell/03/take-1", file: "recap/02.webp" }, { branch: "cell/07/take-4", file: "recap/03.webp" }] };
+	const out = recapWithout(recap, [0.91, 0.01, 0.01], IMPOSSIBLE_MAX);
+	assert.deepEqual(out.dropped.map((d) => d.branch), ["cell/06/take-1"]);
+	assert.deepEqual(out.recap?.shots.map((d) => d.file), ["recap/02.webp", "recap/03.webp"]);
+	// A check that couldn't run keeps the still
+	assert.equal(recapWithout(recap, [undefined, 0.01, 0.01], IMPOSSIBLE_MAX).dropped.length, 0);
+	// One still left is no recap
+	assert.equal(recapWithout(recap, [0.91, 0.8, 0.01], IMPOSSIBLE_MAX).recap, null);
 });

@@ -69,6 +69,8 @@ export interface CarriedFrom {
 	comparisons: number;
 	// Printed frames that failed the impossible-frame check when carried over (D44): to reshoot or edit
 	reshoot?: string[];
+	// "Previously on" stills taken out of the recap for the same reason (D44)
+	recap_dropped?: string[];
 }
 
 /**
