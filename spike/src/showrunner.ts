@@ -20,6 +20,8 @@ import { COMMONS, CREW_ROOM, HELD, type TeamCast, appendTalk, noteReply, persona
 import { type Player, talkLine } from "./cast-rules.ts";
 import type { Job, JobRequest } from "./jobs";
 import { filmSeconds, soundState } from "./sound";
+import { inspectionNote } from "./inspect-rules.ts";
+import { parseCsv } from "./csv.ts";
 import { LINES_ESTIMATE, RECAP, type Recap, recapWithout, scoreEstimate } from "./sound-rules.ts";
 import { ask, checkImpossible } from "./models";
 import { IMPOSSIBLE_MAX } from "./continuity-rules.ts";
@@ -59,7 +61,14 @@ your video model makes any. Sound lives on main like everything else; a new cut 
 puts the current sound under an existing cut without rendering its video again. A film without sound is
 allowed, and judged as such. When a cell's only line is spoken by the one person in that shot, its clip is
 lip-synced to the line (we see them say it, in their voice); any other line is heard over its shot with
-nobody's mouth moving. Lines are synced when a cut is made, so write lines before you cut.`;
+nobody's mouth moving. Lines are synced when a cut is made, so write lines before you cut.
+
+An inspector (a frontier vision model) looks at every frame you print and watches every clip, for what is
+physically wrong: twisted limbs, merged hands, duplicated glasses, garbled lettering. Its verdict is shown
+beside the take and the clip. It is a warning, not a rule: it is right most of the time and also flags about
+3 clean shots in 10, so look at what it names and decide. A new cut keeps each clip from an earlier cut that
+was made from the same printed take and passed the inspector, at no cost, and renders the rest: a flagged clip
+is rendered again, and fixing one shot no longer costs a whole cut.`;
 
 /** How the final round is ranked, when a panel ranks it (D33, D34): the leads are told up front. */
 const judging = (rules: Rules) =>
@@ -286,6 +295,8 @@ export async function runTurnJob(env: Env, job: TurnJob, progress: Progress) {
 		).filter((s) => s !== undefined);
 		await progress(`reading the board and its history`);
 		const history = await boardHistory(env, board, scores);
+		// The newest cut's clips: kept or new, and what the inspector saw (D45)
+		const latestClips = cuts[0] ? await cutClips(env, board, cuts[0]) : [];
 		const producer = producerView(notes);
 		const view = {
 			brief: rules.brief,
@@ -351,11 +362,13 @@ export async function runTurnJob(env: Env, job: TurnJob, progress: Progress) {
 							: !t.done
 								? "shooting"
 								: t.stale ? "stale (a character changed since)" : t.continuity?.ok ? "continuity ok" : `continuity: ${(t.continuity?.issues ?? []).join("; ")}`,
+						...(t.inspection ? { inspector: inspectionNote(t.inspection, "frame") } : {}),
 						...(t.idea ? { idea: t.idea } : {}),
 						...(t.edit ? { edit_of: t.edit.from, edit: t.edit.instruction } : {}),
 						prompt: t.prompt?.slice(0, 300),
 					})),
 			})),
+			...(latestClips.length ? { [`clips_in_${cuts[0]}`]: latestClips } : {}),
 			judges: scores.map((s) => ({ judge: s.judge, total: s.total, scores: s.scores, of_commit: String(s.commit).slice(0, 7) })),
 			history,
 		};
@@ -683,4 +696,20 @@ async function next<T extends { result: "acted" | "waited" }>(env: Env, job: Tur
 		if (!(err instanceof LimitError)) throw err;
 	}
 	return outcome;
+}
+
+/** A cut's clips as the lead reads them: kept from an earlier cut or rendered, and the inspector's verdict. */
+async function cutClips(env: Env, board: string, cut: string) {
+	using handle = await env.ARTIFACTS.get(board);
+	const edl = parseCsv(await (await handle.readFile({ ref: `cut/${cut}`, path: "video/edl.csv" }).catch(() => null))?.text() ?? "");
+	return Promise.all(
+		edl.map(async (e) => {
+			const meta = JSON.parse((await (await handle.readFile({ ref: `cut/${cut}`, path: `video/${e.cell}.json` }).catch(() => null))?.text()) ?? "{}") as { kept_from?: string; inspection?: { wrong: boolean; problems: string[] } };
+			return {
+				cell: e.cell,
+				clip: meta.kept_from ? `kept from ${meta.kept_from}` : "rendered for this cut",
+				inspector: meta.inspection ? inspectionNote(meta.inspection, "clip") : "not inspected",
+			};
+		}),
+	);
 }

@@ -796,8 +796,47 @@ copy. Clef scored that still 0.91. Now the recap tool refuses takes that fail th
 joining with a carried board takes failing stills out of the recap (`recheckRecap`); fewer than two left
 is no recap, and the lead's `carried_over` note says which went.
 
-What Clef doesn't see: in the same film, Maya's arm bent back to a light switch scored 0.01, and Maya and
-Theo reaching for one mouse at 14 s scored 0.03 (0.19 when the question named it). Anatomy and hands in
-motion are past what a frame question catches.
+What Clef doesn't see: in the same film, Maya's arm bent back to a light switch scored 0.01. Anatomy is
+past what one frame question catches (D45).
 
 Tests: `test/lipsync.test.ts`.
+
+## D45: an inspector for frames and clips, and cuts that keep good clips
+
+Clef's impossible question (D42) caught Theo's two pairs of glasses in some renders and missed the rest:
+Maya's arm bent back to a light switch, garbled lettering ("EELIN TIMES", "SLOIND PLACE"), and three of five
+double-glasses Theos. Jev, the decision model Clef replaces, takes no images, so it can't do better.
+
+**Calibration** (2026-10-11): 22 frames from the season, 12 with a fault (5 double-glasses Theos and the
+recap still, the arm, 4 garbled signs and posters) and 10 clean, each model asked the same script
+supervisor's question:
+
+| Model | Faults caught (of 12) | Clean frames flagged (of 10) | Per frame |
+|---|---|---|---|
+| Gemini 3.1 Pro | 12, 12, 11, 11 (four runs) | 3, 3, 4, 3 | about $0.015 (it thinks ~1,000 tokens) |
+| Claude Sonnet 5.5 | 9 | 0 | about $0.005 |
+| Claude Opus 5.5 | 7 | 0 | about $0.009 |
+| GPT-6.1 Sol | 7 | 0 | about $0.002 |
+| GPT-5.4 mini | 6 | 0 | under $0.001 |
+| Clef | 3 | 0 | |
+
+Only Gemini caught the double glasses that the others missed. Its false alarms are steady (the same
+corridor's soft hands every run, sometimes scribbled sticky notes) and a stricter prompt only moved them,
+so requiring two models to agree would drop exactly the faults that started this.
+
+**The inspector** is Gemini 3.1 Pro, and its verdict is a warning, never a block:
+- Every printed frame is inspected once (`inspectPrints`): the verdict is committed on the take branch as
+  `inspection.json`, and the lead sees it beside the take. A carried board's prints are inspected on joining.
+- Every rendered clip is watched whole (Gemini takes the mp4), with the motion added to the question: hands
+  or limbs that merge or change, people or objects that appear or vanish. The verdict is in the clip's meta,
+  and the lead sees the newest cut's clips with it.
+- The lead is told it is right most of the time and flags about 3 clean shots in 10: look, then reshoot,
+  edit, or keep it. Clef's questions stay on every take.
+- The team pays: the print job and the video job report the inspection's cost (D19).
+
+**Cuts keep good clips.** Every cut rendered every shot again, so one bad Veo clip cost a whole cut. Now a
+clip records its recipe (printed take, model, prompt, length, synced line), and a new cut keeps the newest
+earlier clip with the same recipe that the inspector passed, free. A flagged clip is rendered again. The
+cut's price shown to the lead and reserved from the budget is still the full one.
+
+Tests: `test/inspect.test.ts`.

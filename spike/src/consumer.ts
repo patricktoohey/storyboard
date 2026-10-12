@@ -1,6 +1,6 @@
 // The storyboard-jobs queue consumer. One job per invocation: run it, reporting each stage to the jobs
 // ledger, and queue whatever it leads to (a board's takes, a continuity retake, a bible edit's takes).
-import { printTakes, retakeOptions, runAssembleJob, runBibleJob, runBoardJob, runTakeJob, runVideoJob } from "./board";
+import { inspectPrints, printTakes, retakeOptions, runAssembleJob, runBibleJob, runBoardJob, runTakeJob, runVideoJob } from "./board";
 import { queueLiveComparison, queueLiveJudging, runCompareJob, runJudgeJob } from "./arena";
 import { runCastJob, runDraftPick, runSeasonEvent, runSeasonStep } from "./season";
 import { limitsOf, report, submit } from "./coordinator";
@@ -57,11 +57,17 @@ async function run(env: Env, job: Job) {
 			await printTakes(env, job.repo, job.picks, job.message);
 			// In an arena, a new print is scored live
 			await queueLiveJudging(env, job.repo).catch((e) => console.error("live judging", e));
-			return { detail: job.picks.map((p) => p.branch).join(", ") };
+			// The inspector looks at each newly printed frame (D45); a merge is free, the inspection isn't
+			await progress("the inspector looking at the printed frames");
+			const cost = await inspectPrints(env, job.repo, job.picks).catch((e) => (console.error("inspection", e), 0));
+			return { detail: job.picks.map((p) => p.branch).join(", "), cost };
 		}
 		case "video": {
 			const clip = await runVideoJob(env, job.repo, job.cut, job.cell, job.origin, job.seconds, progress, job.sync);
-			return { detail: `${clip.seconds}s clip (${clip.model}), ${(clip.bytes / 1e6).toFixed(1)} MB in ${Math.round(clip.elapsed_ms / 1000)}s` };
+			if ("kept_from" in clip) return { detail: `${clip.seconds}s clip kept from ${clip.kept_from}`, cost: 0 };
+			const flagged = clip.inspection?.wrong ? `; inspector flags ${clip.inspection.problems.join("; ")}` : "";
+			// The clip's own price plus the inspector's; a clip without a price keeps its estimate
+			return { detail: `${clip.seconds}s clip (${clip.model}), ${(clip.bytes / 1e6).toFixed(1)} MB in ${Math.round(clip.elapsed_ms / 1000)}s${flagged}`, ...(clip.usd !== undefined ? { cost: clip.usd } : {}) };
 		}
 		case "assemble": {
 			const cut = await runAssembleJob(env, job.repo, job.cut, job.cells, progress);

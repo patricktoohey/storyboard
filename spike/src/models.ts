@@ -5,6 +5,7 @@ import { IMPOSSIBLE_QUESTION, SETTING_SHOTS, continuityQuestions, continuityVerd
 import { llmFor } from "./crew-env";
 import { EDIT_MODEL, MENU, type RendererOption, nearestRatio } from "./crew.ts";
 import { RATE_LIMITED, llmRequest, llmText, llmUsage, retryDelay } from "./llm.ts";
+import { INSPECTOR, type Inspected, type Inspection, inspectCost, inspectRequest, parseInspection } from "./inspect-rules.ts";
 import { normalizePositions, withBlocking, withStaged } from "./blocking.ts";
 import { insertLooks } from "./looks";
 import { type NoteAction, routerRequest } from "./router.ts";
@@ -472,6 +473,13 @@ export async function checkContinuity(
  * The impossible-frame question alone (D44), for a printed frame carried over from a board shot before the
  * question existed: Opus's carried Theo kept both pairs of glasses through the Finale Special.
  */
+/** The inspector (D45): Gemini's verdict on a printed frame or a clip; an answer it can't read is no verdict. */
+export async function inspect(env: Env, kind: Inspected, bytes: Uint8Array, mime: string, beat?: string): Promise<Inspection | undefined> {
+	const out = await withRetry(() => env.AI.run(INSPECTOR.id as keyof AiModels, inspectRequest(kind, toBase64(bytes), mime, beat) as never), [...TRANSIENT, RATE_LIMITED]);
+	const verdict = parseInspection(out);
+	return verdict && { ...verdict, model: INSPECTOR.id, usd: inspectCost(out) };
+}
+
 export async function checkImpossible(env: Env, webp: Uint8Array) {
 	const detail = await encode(env, webp, "image/webp", 640);
 	const { answers } = await clef(env, {}, [toBase64(detail)], { impossible: { type: "noul", instructions: IMPOSSIBLE_QUESTION } });

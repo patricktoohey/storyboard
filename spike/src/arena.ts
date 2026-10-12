@@ -3,7 +3,7 @@
 // (so its judges are skills like any other) holding brief.md, rules.json, teams/, scores/ and submissions/.
 // Each team is its own board repo, run by a showrunner (showrunner.ts).
 import { type Comparison, type Criterion, type JudgeScore, leaderboard, matchups, rubricOf, sampleCells, winRates } from "./arena-rules.ts";
-import { onMain, recheckPrints, recheckRecap } from "./board";
+import { inspectPrinted, onMain, recheckPrints, recheckRecap } from "./board";
 import { submit, ledger, startLedger } from "./coordinator";
 import { HELD } from "./cast";
 import { lastTalk } from "./cast-rules.ts";
@@ -210,6 +210,8 @@ export async function createArena(
 			const [reshoot, recap_dropped] = t.from
 				? await Promise.all([recheckPrints(env, t.board).catch(() => []), recheckRecap(env, t.board).catch(() => [])])
 				: [[], []];
+			// And looked at by the inspector, whose verdicts the lead sees beside the takes (D45)
+			if (t.from) await inspectPrinted(env, t.board).catch((e) => console.warn(`inspecting ${t.board}: ${e}`));
 			const from = t.from && { ...t.from, ...(reshoot.length ? { reshoot } : {}), ...(recap_dropped.length ? { recap_dropped } : {}) };
 			await onMain(board, async (tree) =>
 				tree.commit({ name: "arena" }, t.from ? `Join ${arena} as ${t.team}, carrying on from ${t.from.board} at ${t.from.commit.slice(0, 7)}` : `Join ${arena} as ${t.team}`, {

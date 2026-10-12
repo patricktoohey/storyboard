@@ -21,6 +21,7 @@ import {
 	checkContinuity,
 	checkImpossible,
 	cinematograph,
+	inspect,
 	direct,
 	editBible,
 	portraitPath,
@@ -40,6 +41,8 @@ import { LINES_CSV, RECAP, type Recap, recapWithout, syncedLine, voicedOver } fr
 import type { LineSync } from "./jobs";
 import { nextCut } from "./producer-rules.ts";
 import { IMPOSSIBLE_MAX, recheckedVerdict } from "./continuity-rules.ts";
+import { type Inspection, clipRecipe, reusableClip } from "./inspect-rules.ts";
+import { AVATAR_MODEL } from "./crew.ts";
 
 // ── Files on main ────────────────────────────────────────────────────────────────────────────────
 
@@ -449,6 +452,46 @@ export async function printTake(env: Env, repo: string, cellId: string, take: nu
 	return { printed: branch, commit };
 }
 
+/**
+ * The inspector on printed frames (D45): each printed take's frame, unless already inspected, gets Gemini's
+ * verdict committed on its take branch as inspection.json, where the lead sees it. A check that can't run
+ * leaves no verdict and blocks nothing. Returns what the inspections cost.
+ */
+export async function inspectPrints(env: Env, repo: string, picks: { cell: string; branch: string }[]) {
+	const remote = await repoRemote(env, repo);
+	using handle = await env.ARTIFACTS.get(repo);
+	const rows = parseCsv(await (await handle.readFile({ ref: "main", path: "storyboard.csv" }))?.text() ?? "");
+	const costs = await Promise.all(
+		picks.map(async ({ cell, branch }) => {
+			const path = `cells/${cell}/inspection.json`;
+			if (await handle.readFile({ ref: branch, path }).catch(() => null)) return 0;
+			const blob = await handle.readFile({ ref: branch, path: `cells/${cell}/frame.webp` });
+			if (!blob) return 0;
+			const verdict = await inspect(env, "frame", new Uint8Array(await new Response(blob.stream()).arrayBuffer()), "image/webp", rows.find((r) => r.id === cell)?.beat).catch((e) => {
+				console.warn(`inspecting ${branch}: ${e}`);
+				return undefined;
+			});
+			if (!verdict) return 0;
+			const tree = await WorkingTree.clone(remote, branch);
+			await tree.commit(
+				{ name: `inspector-${cell}` },
+				`Cell ${cell} take ${branch.split("take-")[1]}: ${verdict.wrong ? `inspector flags ${verdict.problems.join("; ")}` : "inspector: nothing wrong"}`,
+				{ [path]: JSON.stringify(verdict, null, 2) + "\n" },
+			);
+			await tree.push(branch);
+			return verdict.usd;
+		}),
+	);
+	return Number(costs.reduce((a, b) => a + b, 0).toFixed(4));
+}
+
+/** A carried board's printed frames, inspected on joining a round (D45); the arena pays, as for its checks. */
+export async function inspectPrinted(env: Env, repo: string) {
+	using handle = await env.ARTIFACTS.get(repo);
+	const printed = parseCsv(await (await handle.readFile({ ref: "main", path: "storyboard.csv" }))?.text() ?? "").filter((r) => r.take);
+	return inspectPrints(env, repo, printed.map((r) => ({ cell: r.id, branch: `cell/${r.id}/take-${r.take}` })));
+}
+
 // ── Jobs (run by the queue consumer) and the fast route halves that queue them ───────────────────
 
 /** Route: fork the template into a new board repo. The coordinator then queues the board job. */
@@ -656,34 +699,63 @@ export async function runVideoJob(env: Env, repo: string, cut: string, cellId: s
 	const lines = (await tree.exists(LINES_CSV)) ? parseCsv(await tree.read(LINES_CSV)) : [];
 	const line = sync && lines.find((l) => l.file === sync.file && l.text === sync.text);
 	const mp3 = line && (await tree.exists(line.file)) ? await tree.readBytes(line.file) : undefined;
+	const synced = Boolean(sync && mp3);
+	const cellLines = lines.map((l) => ({ cell: l.cell, speaker: l.speaker }));
+	// A line heard over this shot is nobody's on screen (D44)
+	const prompt = `${motionPrompt(cell)}${voicedOver(cell, cellLines) ? ` ${NOBODY_SPEAKS}` : ""}`;
+	// A synced line that changed since the cut started: the shot is animated like any other
+	const length = sync && !synced ? clipSeconds(cell, Number(env.VIDEO_MAX_SECONDS)) : seconds;
+	const recipe = clipRecipe({ take: row.take, model: synced ? AVATAR_MODEL : env.VIDEO_MODEL, prompt: synced ? cell.beat : prompt, seconds: length, ...(synced ? { sync } : {}) });
+
+	// An earlier cut's clip made the same way, that the inspector passed, is kept rather than rendered (D45)
+	const earlier = (await WorkingTree.listBranches(remote, "cut/"))
+		.map((b) => ({ b, n: Number(new RegExp(`^cut/v(\\d+)/${cellId}$`).exec(b)?.[1] ?? 0) }))
+		.filter((x) => x.n && `v${x.n}` !== cut)
+		.sort((a, b) => b.n - a.n);
+	using handle = await env.ARTIFACTS.get(repo);
+	const metas = await Promise.all(
+		earlier.map(async ({ b }) => ({ branch: b, meta: await readJson(handle, b, `video/${cellId}.json`).catch(() => undefined) as (Record<string, unknown> & { recipe?: string; inspection?: Inspection }) | undefined })),
+	);
+	const kept = reusableClip(recipe, metas);
+	const keptMp4 = kept && (await handle.readFile({ ref: kept.branch, path: `video/${cellId}.mp4` }));
+	if (kept && keptMp4) {
+		await progress(`keeping the clip from ${kept.branch}: same take, same recipe, passed inspection`);
+		const mp4 = new Uint8Array(await new Response(keptMp4.stream()).arrayBuffer());
+		await tree.commit(
+			{ name: `animator-${cellId}` },
+			`Cell ${cellId}: clip kept from ${kept.branch} for cut ${cut}\n\nFrame: cell/${cellId}/take-${row.take} (main@${frameCommit.slice(0, 7)}), unchanged since`,
+			{ [`video/${cellId}.mp4`]: mp4, [`video/${cellId}.json`]: JSON.stringify({ ...kept.meta, cut, frame_commit: frameCommit, kept_from: kept.branch, usd: 0 }, null, 2) + "\n" },
+		);
+		await tree.push(branch);
+		return { branch, seconds: Number(kept.meta!.seconds), bytes: mp4.byteLength, elapsed_ms: 0, model: String(kept.meta!.model), kept_from: kept.branch, usd: 0 };
+	}
+
 	let clip;
 	if (sync && mp3) {
 		await progress(`lip-syncing ${line!.speaker}'s line from take ${row.take}`);
 		clip = await lipSync(env, { jpeg }, { mp3, text: sync.text }, seconds, cell.beat);
 	} else {
-		await progress(`animating ${seconds}s from take ${row.take} (${env.VIDEO_MODEL})`);
-		const cellLines = lines.map((l) => ({ cell: l.cell, speaker: l.speaker }));
-		clip = await animate(
-			env,
-			{ url: image, jpeg },
-			// A line heard over this shot is nobody's on screen (D44)
-			`${motionPrompt(cell)}${voicedOver(cell, cellLines) ? ` ${NOBODY_SPEAKS}` : ""}`,
-			// A synced line that changed since the cut started: the shot is animated like any other
-			sync ? clipSeconds(cell, Number(env.VIDEO_MAX_SECONDS)) : seconds,
-			/static|locked|tripod/i.test(cell.camera),
-		);
+		await progress(`animating ${length}s from take ${row.take} (${env.VIDEO_MODEL})`);
+		clip = await animate(env, { url: image, jpeg }, prompt, length, /static|locked|tripod/i.test(cell.camera));
 	}
+	// The inspector watches the clip (D45): a flagged clip is never kept, so the next cut renders it again
+	await progress("the inspector watching the clip");
+	const inspection = await inspect(env, "clip", clip.mp4, "video/mp4", cell.beat).catch((e) => {
+		console.warn(`inspecting ${branch}: ${e}`);
+		return undefined;
+	});
 
 	await tree.commit(
 		{ name: `animator-${cellId}` },
-		`Cell ${cellId}: ${clip.meta.seconds}s clip for cut ${cut}${sync && mp3 ? `, lip-synced to "${sync.text}"` : ""}\n\nFrame: cell/${cellId}/take-${row.take} (main@${frameCommit.slice(0, 7)})\nModel: ${clip.meta.model}`,
+		`Cell ${cellId}: ${clip.meta.seconds}s clip for cut ${cut}${synced ? `, lip-synced to "${sync!.text}"` : ""}${inspection?.wrong ? `; inspector flags ${inspection.problems.join("; ")}` : ""}\n\nFrame: cell/${cellId}/take-${row.take} (main@${frameCommit.slice(0, 7)})\nModel: ${clip.meta.model}`,
 		{
 			[`video/${cellId}.mp4`]: clip.mp4,
-			[`video/${cellId}.json`]: JSON.stringify({ ...clip.meta, cut, frame_take: Number(row.take), frame_commit: frameCommit, ...(sync && mp3 ? { lipsync: sync } : {}) }, null, 2) + "\n",
+			[`video/${cellId}.json`]: JSON.stringify({ ...clip.meta, cut, frame_take: Number(row.take), frame_commit: frameCommit, ...(synced ? { lipsync: sync } : {}), recipe, ...(inspection ? { inspection } : {}) }, null, 2) + "\n",
 		},
 	);
 	await tree.push(branch);
-	return { branch, seconds: clip.meta.seconds, bytes: clip.mp4.byteLength, elapsed_ms: clip.meta.elapsed_ms, model: clip.meta.model };
+	const usd = typeof clip.meta.usd === "number" ? Number((clip.meta.usd + (inspection?.usd ?? 0)).toFixed(4)) : undefined;
+	return { branch, seconds: clip.meta.seconds, bytes: clip.mp4.byteLength, elapsed_ms: clip.meta.elapsed_ms, model: clip.meta.model, inspection, usd };
 }
 
 /**
@@ -773,7 +845,7 @@ export async function boardState(env: Env, repoName: string) {
 	const takes = await Promise.all(
 		branches.map(async (branch) => {
 			const cell = branch.split("/")[1];
-			const [prompt, renderMeta, critic, continuity, characters, idea, edit] = await Promise.all([
+			const [prompt, renderMeta, critic, continuity, characters, idea, edit, inspection] = await Promise.all([
 				repo.readFile({ ref: branch, path: `cells/${cell}/prompt.md` }).then((b) => b?.text()),
 				readJson(repo, branch, `cells/${cell}/render.json`),
 				readJson(repo, branch, `cells/${cell}/review.json`),
@@ -782,6 +854,7 @@ export async function boardState(env: Env, repoName: string) {
 				repo.readFile({ ref: branch, path: "characters.json" }).then((b) => b?.text()),
 				repo.readFile({ ref: branch, path: `cells/${cell}/idea.md` }).then((b) => b?.text()),
 				repo.readFile({ ref: branch, path: `cells/${cell}/edit.md` }).then((b) => b?.text()),
+				readJson(repo, branch, `cells/${cell}/inspection.json`) as Promise<Inspection | undefined>,
 			]);
 			return {
 				cell,
@@ -797,6 +870,8 @@ export async function boardState(env: Env, repoName: string) {
 				adherence: critic?.adherence?.score,
 				framing: critic?.framing?.choice,
 				continuity: continuity && { ok: continuity.ok, issues: continuity.issues },
+				// The inspector's verdict on a printed frame (D45): a warning, not a break
+				inspection: inspection && { wrong: inspection.wrong, problems: inspection.problems },
 				// Shot and judged against characters that have since changed: its verdict no longer holds
 				stale: characters !== undefined && staleFor(board.cells.find((c) => c.id === cell)?.characters ?? [], characters),
 			};
