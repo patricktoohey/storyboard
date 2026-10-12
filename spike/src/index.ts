@@ -248,7 +248,7 @@ export default {
 					const out = (await env.AI.run(model as keyof AiModels, JSON.parse(body) as never)) as unknown as Record<string, unknown>;
 					const media = JSON.stringify(out).match(/"(?:audio|video)":"(https:[^"]+)"/)?.[1];
 					const bytes = media ? (await (await fetch(media)).arrayBuffer()).byteLength : undefined;
-					return Response.json({ model, ms: Date.now() - started, bytes, media, raw: JSON.stringify(out).slice(0, 1500) });
+					return Response.json({ model, ms: Date.now() - started, bytes, media, raw: JSON.stringify(out).slice(0, 20000) });
 				} catch (e) {
 					return Response.json({ model, ms: Date.now() - started, error: String(e) });
 				}
