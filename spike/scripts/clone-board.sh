@@ -26,7 +26,9 @@ for b in $(git for-each-ref --format='%(refname:strip=3)' refs/remotes/origin | 
 done
 
 echo "== $REPO ($(pwd))"
-git log --graph --all --format='%h %an: %s' | head -60
+# Every branch but the jobs ledger, which the coordinator commits to on each step of each job
+git log --graph --exclude=jobs --branches --format='%h %an: %s' -n 40
+[ -n "$(git for-each-ref --count=1 'refs/heads/cell/')" ] || exit 0
 echo
 printf '%-18s %-26s %-9s %s\n' TAKE SKILL ADHERENCE CONTINUITY
 for b in $(git for-each-ref --format='%(refname:short)' 'refs/heads/cell/'); do
