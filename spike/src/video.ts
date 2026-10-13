@@ -65,6 +65,8 @@ export function clipSeconds(cell: Pick<Cell, "duration_s">, cap: number) {
 
 /** Runs the crew's image-to-video model (each provider has its own request shape) and downloads the clip. */
 const PLAIN_MOTION = "Subtle natural motion; the camera stays still.";
+/** The prompt a clip is retried with after a 7003: plain motion, still silent if the shot is heard over. */
+export const plainMotion = (prompt: string) => (prompt.includes(NOBODY_SPEAKS) ? `${PLAIN_MOTION} ${NOBODY_SPEAKS}` : PLAIN_MOTION);
 
 export async function animate(
 	env: Env,
@@ -88,9 +90,12 @@ export async function animate(
 		// Hailuo answered one beat's motion prompt with "7003: User Input Error"; the same frame animated with
 		// the plain prompt (season-2026-10-08-0a8064). One retry with it, recorded in the clip's metadata.
 		if (!String(err).includes("7003") || prompt === PLAIN_MOTION) throw err;
+		// The plain prompt keeps "nobody speaks": without it, Wan had the Editor talk through the Leader's line in
+		// Gemini's final (cell 04, a two-shot heard over)
+		const plain = plainMotion(prompt);
 		// MiniMax H3 carries its prompt as the first content item
-		if (Array.isArray(req.input.content)) req.input.content[0] = { type: "text", text: PLAIN_MOTION };
-		else req.input.prompt = PLAIN_MOTION;
+		if (Array.isArray(req.input.content)) req.input.content[0] = { type: "text", text: plain };
+		else req.input.prompt = plain;
 		return env.AI.run(req.model as keyof AiModels, req.input as never);
 	})) as unknown as Out;
 	// The catalog returns the clip as a URL, either bare or wrapped in { state, result }; MiniMax H3 as a task

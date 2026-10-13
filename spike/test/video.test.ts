@@ -1,7 +1,7 @@
 // D17: frames reach the video provider through signed, expiring URLs that grant one frame and nothing else.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { clipSeconds, frameUrl, motionPrompt, verifyFrame } from "../src/video.ts";
+import { NOBODY_SPEAKS, clipSeconds, frameUrl, motionPrompt, plainMotion, verifyFrame } from "../src/video.ts";
 
 const env = { SPIKE_KEY: "test-key" } as Env;
 const origin = "https://storyboard.example";
@@ -41,4 +41,10 @@ test("clips follow the cell's planned duration, within 2 s and the cost cap", ()
 test("the motion prompt says what moves; the frame already fixes the look", () => {
 	assert.match(motionPrompt({ beat: "She rows out.", camera: "static", shot: "WS" }), /^She rows out\. The camera stays still\./);
 	assert.match(motionPrompt({ beat: "He turns.", camera: "slow push-in", shot: "CU" }), /Camera: slow push-in\./);
+});
+
+test("D44: a clip retried with the plain prompt after a 7003 still keeps a heard-over shot silent", () => {
+	// Gemini's final, cell 04: Wan retried plain had the Editor talking through the Leader's line
+	assert.equal(plainMotion(`The leader points. ${NOBODY_SPEAKS}`), `Subtle natural motion; the camera stays still. ${NOBODY_SPEAKS}`);
+	assert.equal(plainMotion("The leader points."), "Subtle natural motion; the camera stays still.");
 });
