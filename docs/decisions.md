@@ -425,6 +425,16 @@ there (every take is its own branch, and a print merges one per shot), but a tak
 a note's rewrite: nobody could say "shoot shot 3 three different ways". In Season 1, Opus got there by hand:
 its second comparison differed from the saved version only in shot 1, a one-shot test of two ideas.
 
+The idea has a name: set-based development. Toyota carried several competing designs well into development,
+some to working prototypes, narrowed the set as evidence ruled options out, and committed as late as it
+could, and still reached market faster (Sobek, Ward and Liker, "Toyota's Principles of Set-Based Concurrent
+Engineering", *Sloan Management Review*, Winter 1999). Mary and Tom Poppendieck brought it to software in
+*Lean Software Development: An Agile Toolkit* (2003), as set-based development under "Amplify Learning",
+beside options thinking and deciding as late as possible. Here the set is a cell's takes, each developed
+to a finished frame on its own branch; the checks rule options out rather than pick a winner; the print is
+the late commitment, and the options it passed over stay in history. An arena does the same with whole
+films.
+
 - **`ideas`**: a lead names two or three ideas for one shot (`{"name", "idea"}`); each becomes a take on its
   own branch (`cell/03/take-N`), shot in parallel. The idea goes to the cinematographer ("the idea wins
   where it changes the staging or framing") and onto the branch as `cells/03/idea.md`; the commit says
