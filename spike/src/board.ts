@@ -919,8 +919,23 @@ export async function boardState(env: Env, repoName: string) {
 	};
 }
 
+/**
+ * Every repo in the namespace, page by page. One page of 100 held arenas, seasons, team repos and boards
+ * together, so once there were more than 100 the earliest boards (the taxi, the diner) dropped off the list.
+ */
+export async function allRepos(env: Env) {
+	const repos: Awaited<ReturnType<Env["ARTIFACTS"]["list"]>>["repos"] = [];
+	let cursor: string | undefined;
+	do {
+		const page = await env.ARTIFACTS.list({ limit: 200, ...(cursor ? { cursor } : {}) });
+		repos.push(...page.repos);
+		cursor = page.repos.length ? page.cursor : undefined;
+	} while (cursor);
+	return repos;
+}
+
 export async function listBoards(env: Env) {
-	const { repos } = await env.ARTIFACTS.list({ limit: 100 });
+	const repos = await allRepos(env);
 	return repos
 		.filter((r) => r.name.startsWith("board-"))
 		.sort((a, b) => (b.createdAt ?? "").localeCompare(a.createdAt ?? ""))

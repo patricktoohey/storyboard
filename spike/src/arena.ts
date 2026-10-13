@@ -3,7 +3,7 @@
 // (so its judges are skills like any other) holding brief.md, rules.json, teams/, scores/ and submissions/.
 // Each team is its own board repo, run by a showrunner (showrunner.ts).
 import { type Comparison, type Criterion, type JudgeScore, leaderboard, matchups, rubricOf, sampleCells, winRates } from "./arena-rules.ts";
-import { inspectPrinted, onMain, recheckPrints, recheckRecap } from "./board";
+import { allRepos, inspectPrinted, onMain, recheckPrints, recheckRecap } from "./board";
 import { submit, ledger, startLedger } from "./coordinator";
 import { HELD } from "./cast";
 import { lastTalk } from "./cast-rules.ts";
@@ -791,7 +791,7 @@ export async function closeArena(env: Env, arena: string) {
 // ── Read model ─────────────────────────────────────────────────────────────────────────────────────
 
 export async function listArenas(env: Env) {
-	const { repos } = await env.ARTIFACTS.list({ limit: 100 });
+	const repos = await allRepos(env);
 	return repos
 		.filter((r) => r.name.startsWith("arena-"))
 		.sort((a, b) => (b.createdAt ?? "").localeCompare(a.createdAt ?? ""))

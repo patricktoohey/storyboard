@@ -12,7 +12,7 @@
 import { arenaState, createArena, DEFAULT_TEAMS, PANEL, readRules, runCompareJob, type TeamSpec, teamSpec } from "./arena";
 import { outOfCredits } from "./llm";
 import { type Comparison, type RoundResult, replaceStrategy, seasonStandings, strategyOf } from "./arena-rules.ts";
-import { onMain } from "./board";
+import { allRepos, onMain } from "./board";
 import {
 	COMMONS,
 	CONFESSIONALS,
@@ -1267,7 +1267,7 @@ function maskCrew(s: Season, team: string, crew: unknown) {
 // ── Read model ─────────────────────────────────────────────────────────────────────────────────────
 
 export async function listSeasons(env: Env) {
-	const { repos } = await env.ARTIFACTS.list({ limit: 100 });
+	const repos = await allRepos(env);
 	return repos.filter((r) => r.name.startsWith("season-")).map((r) => ({ name: r.name, description: r.description, createdAt: r.createdAt }));
 }
 
