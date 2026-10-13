@@ -50,14 +50,14 @@ export class WorkingTree {
 		return tree;
 	}
 
-	/** Shallow, single-branch clone, then optionally start a new branch from it. */
-	static async clone(remote: Remote, from: string, newBranch?: string): Promise<WorkingTree> {
+	/** Shallow, single-branch clone (its tip, or `depth` commits back), then optionally start a new branch from it. */
+	static async clone(remote: Remote, from: string, newBranch?: string, depth = 1): Promise<WorkingTree> {
 		for (let attempt = 1; ; attempt++) {
 			// A fresh tree per attempt: a failed clone can leave a half-written object store behind
 			const fs = new MemoryFS();
 			const tree = new WorkingTree(fs, remote);
 			try {
-				await git.clone({ fs, http, dir: tree.dir, url: remote.url, ref: from, singleBranch: true, depth: 1, onAuth: tree.auth });
+				await git.clone({ fs, http, dir: tree.dir, url: remote.url, ref: from, singleBranch: true, depth, onAuth: tree.auth });
 			} catch (err) {
 				if (attempt >= 3 || !retryable(err)) throw err;
 				await new Promise((r) => setTimeout(r, 400 * attempt));
@@ -113,6 +113,17 @@ export class WorkingTree {
 		const paths = (await git.listFiles({ fs: this.fs, dir: this.dir, ref: oid })).filter((p) => p.startsWith(prefix));
 		const blobs = await Promise.all(paths.map((filepath) => git.readBlob({ fs: this.fs, dir: this.dir, oid, filepath })));
 		return Object.fromEntries(paths.map((p, i) => [p, blobs[i].blob]));
+	}
+
+	/** Every file path in a commit this tree has fetched. */
+	async pathsAt(oid: string) {
+		return git.listFiles({ fs: this.fs, dir: this.dir, ref: oid });
+	}
+
+	/** Deletes a branch on the remote: only ever on a round's own fork (D46), never the board it came from. */
+	async deleteBranch(ref: string) {
+		const result = await git.push({ fs: this.fs, http, dir: this.dir, url: this.remote.url, remoteRef: ref, delete: true, onAuth: this.auth });
+		if (!result.ok) throw new Error(`deleting ${ref} failed: ${JSON.stringify(result.refs)}`);
 	}
 
 	/**

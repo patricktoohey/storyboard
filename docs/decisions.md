@@ -859,3 +859,44 @@ Two problems changed the rules:
 Also seen: once, a batch with the v9 assembly and a lead turn was delivered twice, so the Worker running it
 died; there are no logs to say why (perhaps memory, with clips and their base64 copies held for inspection
 beside edits). The lead cut again. One carried frame got no verdict: Gemini didn't answer in time.
+
+## D46: start a round from any commit, in any style
+
+**The idea.** A board is a repo, so every state a team's film was ever in is a commit. A new round should
+be able to start from any of them, as if what came after had never happened, and the agents run again from
+there. Change something first, and the same film is made again differently from that point:
+- fix a scene description, or replace a beat;
+- put another model in a role (the lead, or the crew the lead drafts on its first turn);
+- change the film's style (its cinematographer), and have every shot made again in the new one.
+
+The original is never touched. A round always works on a fork, so the first run stays as it was, and the
+two can be compared side by side: the same history up to the commit, two different futures after it. This
+is the "next Git platform" idea applied to the film: branching and rewinding apply to agents' work, not
+only code.
+
+**What exists.** A round can carry on from a board (D40), but only from where the board stopped: `from`
+names a board, the round forks every branch at its tip and records the commit it started from. Inside a
+round the lead can already save, restore and compare versions. A team's spec can now also name its
+`cinematographer` (`{"team": "opus", "from": "...", "cinematographer": "cinematographer-documentary"}`), and
+new takes are shot in that style.
+
+**The commit start** (`from: {board, commit}`, built; `rewindBoard` in history.ts):
+- The round forks the board as before, then rewinds its own fork: main gets one commit whose files are
+  exactly the commit's (plan, frames, sound, skills, lessons), so the later work stays in the history.
+- The takes, cuts and saved versions made after the commit are deleted from the fork, or the lead would see
+  work from a future that hasn't happened, and could print it. Only the fork: the board it came from keeps
+  everything. A branch existed at the commit if it has a commit of its own at least that old (a take
+  printed before and inspected after did exist); a saved version, which has none, if what it points at is.
+- The carry-over record (cuts, saves, comparisons) and the crew (board.json) are taken at the commit.
+- The commit is a full id or a prefix of at least 7 characters on the board's main.
+
+**Next: forks pile up.** Every round is a new repo (28 boards today). `GET /boards` lists them, but not
+their lineage, which is in each board's board.json (`from`). A cleanup would show the tree of boards (which
+fork came from which, and at what commit) and delete the ones nobody needs, a test round's for example.
+Deleting a repo can't be undone, so it should list first and delete only what's named.
+
+**What a restyle needs.** A new style only applies to new takes: printed frames keep the style they were
+shot in until the lead reshoots them, and each reshoot costs a take and its clip. A restyle round would tell
+the lead every cell is to be shot again in the new style, and budget for it: about a take per cell plus a
+new cut, $3-6 for 8 cells with today's crews. The old style stays on the earlier take branches, so each
+cell's old and new versions can be compared, and the panel can judge the two films against each other.

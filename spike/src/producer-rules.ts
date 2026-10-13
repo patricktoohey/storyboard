@@ -62,6 +62,8 @@ export function producerLines(notes: ProducerNote[], minute: (iso?: string) => s
 export interface CarriedFrom {
 	board: string;
 	commit: string;
+	// Started from this commit rather than where the board stopped (D46): the fork was rewound to it
+	rewound?: boolean;
 	// The earlier round's cuts, saved versions and comparisons: kept to look at and learn from, but never
 	// submitted or judged as this round's work
 	cuts: string[];

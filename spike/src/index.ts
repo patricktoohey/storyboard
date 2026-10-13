@@ -70,7 +70,10 @@ async function readMain(env: Env, repo: string, path: string) {
 function badTeams(teams: (string | TeamSpec)[] | undefined) {
 	for (const t of (teams ?? []).map(teamSpec)) {
 		if (!/^[a-z0-9-]{1,24}$/.test(t.team ?? "")) return `team names are lowercase slugs: "${t.team}"`;
-		if (t.from !== undefined && !/^board-[a-z0-9-]+$/.test(t.from)) return `"from" names a board repo: "${t.from}"`;
+		const from = typeof t.from === "object" && t.from ? t.from : { board: t.from, commit: undefined };
+		if (t.from !== undefined && !/^board-[a-z0-9-]+$/.test(String(from.board))) return `"from" names a board repo, or {board, commit}: "${JSON.stringify(t.from)}"`;
+		if (from.commit !== undefined && !/^[0-9a-f]{7,40}$/.test(String(from.commit))) return `"from.commit" is a commit id of 7 to 40 hex characters: "${from.commit}"`;
+		if (t.cinematographer !== undefined && !/^cinematographer(-[a-z0-9-]+)?$/.test(t.cinematographer)) return `"cinematographer" names a cinematographer skill: "${t.cinematographer}"`;
 		if (t.lead && !(t.lead in MENU.lead)) return `no lead model "${t.lead}"; choose from ${Object.keys(MENU.lead).join(", ")}`;
 	}
 	return undefined;

@@ -18,3 +18,22 @@ export function versionPaths(csv: string, characters: { name: string }[], locati
 	];
 }
 
+/**
+ * Whether a branch existed when main was at a commit made at `at` (seconds), for starting a round there
+ * (D46). A branch starts from main, so its history is main's up to where it branched, then its own commits:
+ * it existed if one of its own commits is that old. A take printed before then and inspected after still
+ * existed; one shot after, or a cut made after, didn't. A saved version has no commits of its own (it is
+ * main as it was), so it existed if what it points at is that old.
+ */
+export function existedAt(branchLog: { hash: string; authoredAt: number }[], mainHashes: Set<string>, at: number) {
+	const own = branchLog.filter((c) => !mainHashes.has(c.hash));
+	return own.length ? own.some((c) => c.authoredAt <= at) : (branchLog[0]?.authoredAt ?? Infinity) <= at;
+}
+
+/** A commit on main by its id or a prefix of at least 7 characters, in a log listed newest first. */
+export function findOnMain<C extends { hash: string }>(mainLog: C[], commit: string) {
+	if (commit.length < 7) return undefined;
+	const index = mainLog.findIndex((c) => c.hash.startsWith(commit));
+	return index < 0 ? undefined : { index, commit: mainLog[index] };
+}
+

@@ -7,7 +7,7 @@ import { type JudgeScore, rubricOf, sampleCells } from "./arena-rules.ts";
 import { onMain } from "./board";
 import { parseCsv } from "./csv.ts";
 import { rivalVersion } from "./format-rules.ts";
-import { versionPaths } from "./versions.ts";
+import { existedAt, findOnMain, versionPaths } from "./versions.ts";
 import { WorkingTree } from "./git";
 import { loadSkill } from "./skills";
 import { repoRemote } from "./template";
@@ -185,4 +185,51 @@ export async function compareVersions(
 		);
 	});
 	return record;
+}
+
+// Deep enough for any board: a carried board's main grows by about a hundred commits a round
+const MAIN_LOG = 2000;
+const BRANCH_LOG = 60;
+
+/** A board as it was when main was at a commit (D46): that commit, and the branches that existed then. */
+export async function boardAt(env: Env, board: string, commit: string) {
+	const main = await logOf(env, board, "main", MAIN_LOG);
+	const found = findOnMain(main, commit);
+	if (!found) throw new Error(`${commit} is not a commit on ${board}'s main (give at least 7 characters)`);
+	const hashes = new Set(main.map((c) => c.hash));
+	const remote = await repoRemote(env, board);
+	const branches = (await Promise.all(["cell/", "cut/", SAVED].map((p) => WorkingTree.listBranches(remote, p)))).flat();
+	const existed = await Promise.all(branches.map(async (b) => existedAt(await logOf(env, board, b, BRANCH_LOG), hashes, found.commit.authoredAt)));
+	return {
+		commit: found.commit.hash,
+		depth: found.index + 1,
+		message: found.commit.message.split("\n")[0],
+		kept: branches.filter((_, i) => existed[i]),
+		later: branches.filter((_, i) => !existed[i]),
+	};
+}
+
+/**
+ * Rewinds a new round's board to an earlier commit (D46), as if what came after had not happened: main gets
+ * one commit whose files are exactly that commit's (plan, frames, sound, skills and lessons as they were),
+ * and the takes, cuts and saved versions made after it are deleted from this fork. Only ever called on the
+ * round's own fork: the board it was forked from keeps everything, and main's history here keeps the later
+ * work too, under the rewind.
+ */
+export async function rewindBoard(env: Env, fork: string, commit: string) {
+	const to = await boardAt(env, fork, commit);
+	const remote = await repoRemote(env, fork);
+	const tree = await WorkingTree.clone(remote, "main", undefined, to.depth);
+	if ((await tree.head()) !== to.commit) {
+		const [paths, current] = await Promise.all([tree.pathsAt(to.commit), tree.pathsAt("HEAD")]);
+		await tree.commit(
+			{ name: "arena" },
+			`Rewind to ${to.commit.slice(0, 7)} ("${to.message.slice(0, 80)}"): this round starts there, as if what followed hadn't happened; it is still in the history below`,
+			await tree.filesAt(to.commit, ""),
+			current.filter((p) => !paths.includes(p)),
+		);
+		await tree.push("main");
+	}
+	for (const b of to.later) await tree.deleteBranch(b);
+	return to;
 }

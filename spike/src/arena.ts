@@ -14,7 +14,7 @@ import { type Ending, type Evidence, endingsRequest, forfeit, panelRequest, pane
 import type { LlmKey } from "./cast-rules.ts";
 import { MENU } from "./crew.ts";
 import { ENDING_RUBRIC, type EndingsResult, PROCESS_RUBRIC, PROCESS_SHARE, briefWithNote, endingsNote, gitMoves, networkNote, processPrompt, processRecord, processWeight } from "./process-rules.ts";
-import { COMPARISONS, SAVED } from "./history.ts";
+import { COMPARISONS, SAVED, boardAt, rewindBoard } from "./history.ts";
 import { type CarriedFrom, PRODUCER_NOTES, type ProducerNote, roundCuts } from "./producer-rules.ts";
 import { TRANSIENT, ask, withRetry } from "./models";
 import { OUT_OF_CREDITS, RATE_LIMITED, outOfCredits } from "./llm";
@@ -64,8 +64,12 @@ export interface TeamSpec {
 	// A twist the lead took (format-rules.ts): money on its budget, minutes off its clock
 	twist?: { usd: number; minutes: number; text: string };
 	// A board to carry on from (D40): the team starts where that board stopped, every branch with it, and
-	// keeps its showrunner, cinematographer, cast and pinned lead unless given others
-	from?: string;
+	// keeps its showrunner, cinematographer, cast and pinned lead unless given others. With a commit (D46), it
+	// starts where that board's main was at that commit instead, as if what followed hadn't happened
+	from?: string | { board: string; commit: string };
+	// The film's style (D46): a cinematographer skill, e.g. "cinematographer-documentary"; new takes are shot
+	// in it, while frames already printed keep the style they were shot in
+	cinematographer?: string;
 }
 export const teamSpec = (t: string | TeamSpec): TeamSpec => (typeof t === "string" ? { team: t } : t);
 // Clef on contact sheets: quick and cheap, so they score live during a round and judge teams' own comparisons
@@ -94,6 +98,20 @@ const json = (v: unknown) => JSON.stringify(v, null, 2) + "\n";
 async function readText(env: Env, repo: string, path: string, ref = "main") {
 	using handle = await env.ARTIFACTS.get(repo);
 	return (await handle.readFile({ ref, path }).catch(() => null))?.text();
+}
+
+/** Where a board was at an earlier commit (D46): only the cuts and saved versions that existed then. */
+async function startingAt(env: Env, board: string, commit: string): Promise<CarriedFrom> {
+	const at = await boardAt(env, board, commit);
+	const comparisons = await readText(env, board, COMPARISONS, at.commit);
+	return {
+		board,
+		commit: at.commit,
+		rewound: true,
+		cuts: at.kept.filter((b) => /^cut\/v\d+$/.test(b)).map((b) => b.slice(4)),
+		saved: at.kept.filter((b) => b.startsWith(SAVED)).map((b) => b.slice(SAVED.length)),
+		comparisons: comparisons ? JSON.parse(comparisons).length : 0,
+	};
 }
 
 /** Where a board stopped (D40): its main, and the cuts it made, which a new round carries but can't submit. */
@@ -152,19 +170,23 @@ export async function createArena(
 	// Read each team's showrunner skill from the arena's own copy of the skills
 	const arenaTree = await WorkingTree.clone(remote, "main");
 	const teams = await Promise.all(
-		(opts.teams ?? DEFAULT_TEAMS).map(teamSpec).map(async ({ team, showrunner, lead, cast, bonus, twist, from }) => {
-			// A carried-over board (D40): where it stopped, its crew's skills and its cast
-			const prior = from ? JSON.parse((await readText(env, from, "board.json")) ?? "null") : undefined;
-			if (from && !prior?.skills) throw new Error(`${from} is not a board`);
-			const carried: CarriedFrom | undefined = from ? await stoppedAt(env, from) : undefined;
+		(opts.teams ?? DEFAULT_TEAMS).map(teamSpec).map(async ({ team, showrunner, lead, cast, bonus, twist, from, cinematographer: style }) => {
+			// A carried-over board (D40): where it stopped, or the commit it starts from (D46), its crew's skills and its cast
+			const fromBoard = typeof from === "string" ? from : from?.board;
+			const carried: CarriedFrom | undefined = !fromBoard ? undefined : typeof from === "object" ? await startingAt(env, fromBoard, from.commit) : await stoppedAt(env, fromBoard);
+			const prior = fromBoard ? JSON.parse((await readText(env, fromBoard, "board.json", carried!.commit)) ?? "null") : undefined;
+			if (fromBoard && !prior?.skills) throw new Error(`${fromBoard} is not a board`);
 			cast ??= prior?.cast;
 			// Its pinned lead too: a season's GPT team stays GPT
 			lead ??= prior?.lead;
 			showrunner ??= prior?.skills?.showrunner ?? `showrunner-${team}`;
-			const source = from ?? opts.season?.teamRepos[team];
+			const source = fromBoard ?? opts.season?.teamRepos[team];
 			// A season team's showrunner skill lives in its own repo (it evolves there); others in the template
 			const skill = await loadSkill(source ? await WorkingTree.clone(await repoRemote(env, source), "main") : arenaTree, showrunner!);
-			const cinematographer = opts.season?.cinematographers[team] ?? prior?.skills?.cinematographer ?? skill.metadata.cinematographer ?? "cinematographer";
+			const cinematographer = opts.season?.cinematographers[team] ?? style ?? prior?.skills?.cinematographer ?? skill.metadata.cinematographer ?? "cinematographer";
+			if (style) await loadSkill(arenaTree, style).catch(() => {
+				throw new Error(`${style} is not a cinematographer skill`);
+			});
 			const own = twist?.minutes ? { deadline: new Date(Date.parse(deadline) + twist.minutes * 60_000).toISOString() } : {};
 			return { team, board: `board-${team}-${id}`, showrunner: showrunner!, cinematographer, source, ...(lead ? { lead } : {}), ...(cast ? { team_name: cast.team_name } : {}), ...(carried ? { from: carried } : {}), ...own, cast, bonus, twist };
 		}),
@@ -204,6 +226,8 @@ export async function createArena(
 	await Promise.all(
 		teams.map(async (t) => {
 			const board = await forkBoard(env, t.board, `${t.team} in ${arena}`, t.source, Boolean(t.from));
+			// Started from an earlier commit (D46): this fork goes back to it, the board it came from keeps everything
+			if (t.from?.rewound) await rewindBoard(env, t.board, t.from.commit);
 			if (t.from) await startLedger(env, t.board, `New round in ${arena}: the ledger starts empty; ${t.from.board}'s rows are in this branch's history`);
 			// Its printed frames and recap stills checked again for the impossible (D44); a check that can't run
 			// blocks nothing
