@@ -81,7 +81,7 @@ async function run(env: Env, job: Job) {
 		case "lines":
 			return runLinesJob(env, job.repo, job.direction, progress);
 		case "mix":
-			return runMixJob(env, job.repo, job.cut, progress);
+			return runMixJob(env, job.repo, job.cut, progress, job.sound);
 		case "turn":
 			return runTurnJob(env, job, progress);
 		case "compare": {

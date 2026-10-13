@@ -267,7 +267,7 @@ const WHISPER = "@cf/openai/whisper-large-v3-turbo";
  * it in the mixer Container, and commits video/teaser.mp4, video/mix.json and the sound it used to the cut.
  * A cut without any sound is still mixed: one file, every clip at one size.
  */
-export async function runMixJob(env: Env, repo: string, cut: string, progress: Progress) {
+export async function runMixJob(env: Env, repo: string, cut: string, progress: Progress, sound = "main") {
 	const branch = `cut/${cut}`;
 	const edl = parseCsv<Record<string, string>>(await readText(env, repo, "video/edl.csv", branch) ?? "");
 	if (!edl.length) throw new Error(`${branch} has no edit decision list`);
@@ -279,10 +279,12 @@ export async function runMixJob(env: Env, repo: string, cut: string, progress: P
 	);
 	// "Previously on" (D38): main's recap stills open the film, in four seconds taken from it; and a film
 	// planned longer than the brief is fitted to it (D39)
-	const recapJson = await readText(env, repo, RECAP);
+	// The sound is main's (what the lead has now), or a commit's: a cut's own mix commit remixes the film as it
+	// was submitted, not with lines written after it
+	const recapJson = await readText(env, repo, RECAP, sound);
 
-	const scoreMp3 = await readBytes(env, repo, SCORE);
-	const lineRows = parseCsv<Record<string, string>>(await readText(env, repo, LINES_CSV) ?? "");
+	const scoreMp3 = await readBytes(env, repo, SCORE, sound);
+	const lineRows = parseCsv<Record<string, string>>(await readText(env, repo, LINES_CSV, sound) ?? "");
 	const lines: MixLine[] = lineRows.map((r) => ({ cell: r.cell, file: r.file, seconds: Number(r.seconds), speaker: r.speaker, text: r.text }));
 	// A clip lip-synced to a line that is still on main word for word starts that line with it (D44); one
 	// synced to a line since rewritten is cut like any other clip, and the new line is heard over it
@@ -296,7 +298,7 @@ export async function runMixJob(env: Env, repo: string, cut: string, progress: P
 	await progress(`mixing ${clips.length} clips${scoreMp3 ? ", the score" : ""}${plan.cues.length ? `, ${plan.cues.length} lines` : ""}`);
 	const sources: Record<string, Uint8Array> = {};
 	for (const f of plan.files) {
-		const bytes = f === SCORE ? scoreMp3 : await readBytes(env, repo, f, f.startsWith("video/") ? branch : "main");
+		const bytes = f === SCORE ? scoreMp3 : await readBytes(env, repo, f, f.startsWith("video/") ? branch : sound);
 		if (!bytes) throw new Error(`missing ${f}`);
 		sources[f] = bytes;
 	}
@@ -345,13 +347,13 @@ export async function runMixJob(env: Env, repo: string, cut: string, progress: P
 	// The sound goes onto the cut with the teaser, so the cut is the whole film as mixed
 	const remote = await repoRemote(env, repo);
 	const tree = await WorkingTree.clone(remote, branch);
-	const [scoreJson, linesCsv] = await Promise.all([readText(env, repo, "sound/score.json"), readText(env, repo, LINES_CSV)]);
+	const [scoreJson, linesCsv] = await Promise.all([readText(env, repo, "sound/score.json", sound), readText(env, repo, LINES_CSV, sound)]);
 	const mix = {
 		seconds: plan.total,
 		sound_signature: soundSignature(scoreJson, linesCsv, recapJson),
 		...(recapJson ? { recap: JSON.parse(recapJson) } : {}),
 		clips: plan.clips.map((c, i) => ({ cell: c.cell, file: c.file, seconds: c.seconds, own_sound: c.audio, ...(c.synced ? { lip_synced: true } : {}), ...(clips[i].audio && !c.audio ? { own_sound_dropped: "under a line" } : {}) })),
-		score: scoreMp3 ? { file: SCORE, ...JSON.parse((await readText(env, repo, "sound/score.json")) ?? "{}") } : null,
+		score: scoreMp3 ? { file: SCORE, ...JSON.parse((await readText(env, repo, "sound/score.json", sound)) ?? "{}") } : null,
 		lines: plan.cues,
 		levels: { clips_under_score: 0.6, score: 0.8, lines: 1.3, ducking: "sidechain, ratio 6" },
 		ffmpeg_ms: Number(res.headers.get("x-ffmpeg-ms")) || Date.now() - started,
@@ -360,10 +362,10 @@ export async function runMixJob(env: Env, repo: string, cut: string, progress: P
 	};
 	const extra = Object.fromEntries(Object.entries(sources).filter(([f]) => f.startsWith("sound/") || f.startsWith("recap/")));
 	for (const p of [LINES_CSV, VOICES_JSON, "sound/score.json", RECAP]) {
-		const t = await readText(env, repo, p);
+		const t = await readText(env, repo, p, sound);
 		if (t) extra[p] = new TextEncoder().encode(t);
 	}
-	await tree.commit({ name: "mixer" }, `Mix ${cut}: ${plan.total}s, ${plan.clips.filter((c) => c.audio).length} clips with their own sound${scoreMp3 ? ", score" : ""}, ${plan.cues.length} lines`, {
+	await tree.commit({ name: "mixer" }, `Mix ${cut}${sound === "main" ? "" : ` with the sound at ${sound.slice(0, 7)}`}: ${plan.total}s, ${plan.clips.filter((c) => c.audio).length} clips with their own sound${scoreMp3 ? ", score" : ""}, ${plan.cues.length} lines`, {
 		"video/teaser.mp4": mp4,
 		"video/mix.json": JSON.stringify(mix, null, 2) + "\n",
 		...evidence,

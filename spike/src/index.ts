@@ -10,7 +10,8 @@
 //   POST /boards                               {"concept", "cells"?, "skills"?: {"cinematographer": "cinematographer-noir"}} -> 202, queued
 //   POST /boards/:repo/cut                     animate every printed frame (image-to-video), then assemble cut/vN
 //   POST /boards/:repo/score|lines             {"direction"}  the score at the film's length, or the film's lines in their voices
-//   POST /boards/:repo/mix                     {"cut": "v1"}  mix a cut (clips, score, lines) into cut/v1:video/teaser.mp4
+//   POST /boards/:repo/mix                     {"cut": "v1", "sound"?: commit}  mix a cut (clips, score, lines) into cut/v1:video/teaser.mp4
+//                                              (sound: take the score and lines from that commit, not main; e.g. the cut's own mix)
 //   GET  /public/frame.jpg?...&sig=            one frame via a signed, expiring URL (for the video provider; no key)
 //   GET  /boards/:repo/jobs                    the jobs ledger (jobs.csv on the board's `jobs` branch), newest first
 //   GET  /boards/:repo/state                   everything the UI shows: cells, takes, notes, skills, main log
@@ -319,9 +320,10 @@ export default {
 					return Response.json({ note: await addProducerNoteTo(env, repoName, note, id) }, { status: 201 });
 				}
 				if (method === "POST" && action === "mix") {
-					const { cut } = await json<{ cut?: string }>(request);
+					const { cut, sound } = await json<{ cut?: string; sound?: string }>(request);
 					if (!cut) return Response.json({ error: "cut is required (v1, v2, ...)" }, { status: 400 });
-					return Response.json({ jobs: await submit(env, repoName, [{ kind: "mix", cut: cut.replace(/^cut\//, "") }]) }, { status: 202 });
+					if (sound !== undefined && !/^[0-9a-f]{40}$/.test(sound)) return Response.json({ error: "sound is a full commit id" }, { status: 400 });
+					return Response.json({ jobs: await submit(env, repoName, [{ kind: "mix", cut: cut.replace(/^cut\//, ""), ...(sound ? { sound } : {}) }]) }, { status: 202 });
 				}
 				// Fix one detail of a frame (D42): a new take whose frame is the printed one (or a named take's), edited
 				if (method === "POST" && action === "cells" && id && sub === "edits") {
