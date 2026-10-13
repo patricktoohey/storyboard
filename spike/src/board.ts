@@ -719,7 +719,7 @@ export async function runVideoJob(env: Env, repo: string, cut: string, cellId: s
 	const kept = reusableClip(recipe, metas);
 	const keptMp4 = kept && (await handle.readFile({ ref: kept.branch, path: `video/${cellId}.mp4` }));
 	if (kept && keptMp4) {
-		await progress(`keeping the clip from ${kept.branch}: same take, same recipe, passed inspection`);
+		await progress(`keeping the clip from ${kept.branch}: same take, same recipe, nothing wrong in motion`);
 		const mp4 = new Uint8Array(await new Response(keptMp4.stream()).arrayBuffer());
 		await tree.commit(
 			{ name: `animator-${cellId}` },

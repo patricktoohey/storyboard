@@ -65,7 +65,7 @@ async function run(env: Env, job: Job) {
 		case "video": {
 			const clip = await runVideoJob(env, job.repo, job.cut, job.cell, job.origin, job.seconds, progress, job.sync);
 			if ("kept_from" in clip) return { detail: `${clip.seconds}s clip kept from ${clip.kept_from}`, cost: 0 };
-			const flagged = clip.inspection?.wrong ? `; inspector flags ${clip.inspection.problems.join("; ")}` : "";
+			const flagged = clip.inspection?.wrong ? `; inspector flags ${clip.inspection.problems.join("; ")}${clip.inspection.motion === false ? " (in the frame, not the motion)" : ""}` : "";
 			// The clip's own price plus the inspector's; a clip without a price keeps its estimate
 			return { detail: `${clip.seconds}s clip (${clip.model}), ${(clip.bytes / 1e6).toFixed(1)} MB in ${Math.round(clip.elapsed_ms / 1000)}s${flagged}`, ...(clip.usd !== undefined ? { cost: clip.usd } : {}) };
 		}

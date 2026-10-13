@@ -64,11 +64,13 @@ lip-synced to the line (we see them say it, in their voice); any other line is h
 nobody's mouth moving. Lines are synced when a cut is made, so write lines before you cut.
 
 An inspector (a frontier vision model) looks at every frame you print and watches every clip, for what is
-physically wrong: twisted limbs, merged hands, duplicated glasses, garbled lettering. Its verdict is shown
+physically wrong: twisted limbs, merged hands, duplicated glasses, garbled titles. Its verdict is shown
 beside the take and the clip. It is a warning, not a rule: it is right most of the time and also flags about
 3 clean shots in 10, so look at what it names and decide. A new cut keeps each clip from an earlier cut that
-was made from the same printed take and passed the inspector, at no cost, and renders the rest: a flagged clip
-is rendered again, and fixing one shot no longer costs a whole cut.`;
+was made from the same printed take, at no cost, and renders the rest; fixing one shot no longer costs a whole
+cut. A clip flagged for something that goes wrong in motion is rendered again. One flagged for something
+already in its printed frame is kept: rendering the same frame again brings the fault back, so fix the frame
+(edit or reshoot it and print the fix) and the next cut renders that clip from the new take.`;
 
 /** How the final round is ranked, when a panel ranks it (D33, D34): the leads are told up front. */
 const judging = (rules: Rules) =>
@@ -704,7 +706,7 @@ async function cutClips(env: Env, board: string, cut: string) {
 	const edl = parseCsv(await (await handle.readFile({ ref: `cut/${cut}`, path: "video/edl.csv" }).catch(() => null))?.text() ?? "");
 	return Promise.all(
 		edl.map(async (e) => {
-			const meta = JSON.parse((await (await handle.readFile({ ref: `cut/${cut}`, path: `video/${e.cell}.json` }).catch(() => null))?.text()) ?? "{}") as { kept_from?: string; inspection?: { wrong: boolean; problems: string[] } };
+			const meta = JSON.parse((await (await handle.readFile({ ref: `cut/${cut}`, path: `video/${e.cell}.json` }).catch(() => null))?.text()) ?? "{}") as { kept_from?: string; inspection?: { wrong: boolean; problems: string[]; motion?: boolean } };
 			return {
 				cell: e.cell,
 				clip: meta.kept_from ? `kept from ${meta.kept_from}` : "rendered for this cut",

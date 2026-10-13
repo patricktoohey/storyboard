@@ -840,3 +840,22 @@ earlier clip with the same recipe that the inspector passed, free. A flagged cli
 cut's price shown to the lead and reserved from the budget is still the full one.
 
 Tests: `test/inspect.test.ts`.
+
+**Tested** (arena-2026-10-13-412d9e: Opus carrying on from its last board, $15, 30 minutes; it spent $6.39
+and submitted v11). The lead edited the three flagged hands, counted fingers itself, and printed the fixes
+though the inspector flagged them again. The inspector caught a clip that cut by itself to another angle,
+where the people overlap and change. Cell 08's clip was kept, free, from v9 into v10 and v10 into v11.
+Two problems changed the rules:
+- **A flagged clip was rendered again even when rendering couldn't fix it.** Six of v11's eight clips were
+  flagged, mostly for hands and lettering already in their printed frames; rendering the same frame brings
+  the same fault back, so the re-roll cost about $1.10 for nothing. A clip's verdict now says whether its
+  fault comes with the motion (`motion`). Only those are rendered again; one already in the frame is kept,
+  and the lead is told to edit or reshoot the frame, which gives the next cut a new recipe.
+- **Background writing was flagged in nearly every shot** (sticky notes, screens, clock faces). The
+  question now asks only about text meant to be read (captions, name titles, title cards, signs the shot is
+  about). Calibrated again on the same 22 frames: 12 of 12 faults caught (every misspelled poster and the
+  taxi sign among them), and 3 of 10 false alarms, all soft hands.
+
+Also seen: once, a batch with the v9 assembly and a lead turn was delivered twice, so the Worker running it
+died; there are no logs to say why (perhaps memory, with clips and their base64 copies held for inspection
+beside edits). The lead cut again. One carried frame got no verdict: Gemini didn't answer in time.
