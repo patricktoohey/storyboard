@@ -900,3 +900,20 @@ shot in until the lead reshoots them, and each reshoot costs a take and its clip
 the lead every cell is to be shot again in the new style, and budget for it: about a take per cell plus a
 new cut, $3-6 for 8 cells with today's crews. The old style stays on the earlier take branches, so each
 cell's old and new versions can be compared, and the panel can judge the two films against each other.
+
+**The final round** (arena-2026-10-13-33c7e6: Opus 5.5, GPT-6.1 Sol and Gemini 3.1 Pro, each from scratch
+with the Open showrunner, $16 and 60 minutes). GPT won, 58% to Opus's 53% and Gemini's 39%. The films were
+nearly even (55% to 54%); GPT won on process (67%: ten Git moves to Opus's eight and Gemini's two). Opus
+submitted its first cut with $6.75 left because a new cut was priced at $6.80, though most clips would have
+been kept free: its later fixes never reached the film. A cut's price should count only the clips it
+renders. (A first attempt carried on from the season's last boards, which turned out never to have planned:
+a carried board with no plan now plans.)
+
+**Tested** (arena-2026-10-13-64c8e2): Opus's final board from `5f73173` ("Print first cut"), in the
+documentary style, $12 and 30 minutes. The rewind commit has the same tree as `5f73173`; the fork kept 12
+of the original's 27 take branches and the one save made by then, and lost cut v1, its eight clips and the
+later saves; the original kept everything. With the money it had lacked, Opus made three cuts and submitted
+v3, which kept clips from v2. As expected, the style barely changed: Opus edited its noir frames rather than
+reshooting them, and an edit keeps the frame's look (the takes are labelled with the new cinematographer,
+but only the new title-card ideas were shot in it). A restyle has to ask for every cell to be shot again.
+One clip job was lost mid-render, as in the D45 test, so v2 went out with seven clips; v3 had all eight.
