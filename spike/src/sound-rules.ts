@@ -249,23 +249,44 @@ export interface MixLine {
 // The frame is 1344x576 (about 2.35:1); clips come back at each model's own size and are fitted to this
 export const MIX_WIDTH = 1280;
 export const MIX_HEIGHT = 544;
+export const MIX_FPS = 24;
 const LINE_LEAD_IN = 0.3;
 const LINE_GAP = 0.2;
 
-/** When each line starts: in its cell, after a short lead-in, one after another; lines past the end are cut. */
+/**
+ * When each line starts: in its cell, after a short lead-in, one after another; lines past the end are cut.
+ * A lip-synced line starts with its clip, whatever is still being said, so a line before it that would run
+ * into it starts sooner, as far back as the line before that allows (into the shot before, as a J-cut), and
+ * is cut short (`trim`) when even that leaves too little room. GPT's final had Mara's 4.9 s line over a
+ * 3.8 s shot still talking 1.4 s into Theo's synced "This season, we can branch".
+ */
 export function cueLines(clips: MixClip[], lines: MixLine[]) {
 	const total = clips.reduce((s, c) => s + c.seconds, 0);
+	const synced: number[] = [];
+	clips.reduce((start, c) => {
+		if (c.synced && lines.some((l) => l.cell === c.cell)) synced.push(start);
+		return start + c.seconds;
+	}, 0);
 	let start = 0;
 	let free = 0;
-	const cues: (MixLine & { at: number })[] = [];
+	const cues: (MixLine & { at: number; trim?: number })[] = [];
 	for (const clip of clips) {
 		for (const line of lines.filter((l) => l.cell === clip.cell)) {
 			// A lip-synced clip's line starts with it: the mouth moves from its first frame
-			const at = Number((clip.synced ? start : Math.max(start + LINE_LEAD_IN, free)).toFixed(2));
+			let at = clip.synced ? start : Math.max(start + LINE_LEAD_IN, free);
+			let seconds = line.seconds;
+			const next = clip.synced ? undefined : synced.find((t) => t > start);
+			if (next !== undefined && at + seconds + LINE_GAP > next) {
+				at = Math.max(free, next - LINE_GAP - seconds, 0);
+				seconds = Math.min(seconds, next - LINE_GAP - at);
+			}
+			at = Number(at.toFixed(2));
+			seconds = Number(seconds.toFixed(2));
 			// A line needs room to be heard (its first 1.5 s), or it's cut
+			if (seconds < Math.min(line.seconds, 1.5)) continue;
 			if (at + Math.min(line.seconds, 1.5) > total) break;
-			cues.push({ ...line, at });
-			free = at + line.seconds + LINE_GAP;
+			cues.push({ ...line, at, ...(seconds < line.seconds ? { seconds, trim: seconds } : {}) });
+			free = at + seconds + LINE_GAP;
 		}
 		start += clip.seconds;
 	}
@@ -298,15 +319,28 @@ export const mixName = (path: string) => path.replace(/[^a-zA-Z0-9.]+/g, "_");
  */
 export function mixPlan(cut: MixClip[], score: { file: string } | undefined, lines: MixLine[]) {
 	if (!cut.length) throw new Error("nothing to mix: no clips");
-	const { cues, total } = cueLines(cut, lines);
-	const clips = quietUnderLines(cut, cues);
+	// Every cut on a whole frame, so the picture (which concatenates whole frames) and the lines cued on these
+	// times agree: unrounded, the lines drifted a frame or so a shot, three by Opus's sixth in the final (D44)
+	let edge = 0;
+	let t = 0;
+	const framed = cut.reduce<MixClip[]>((out, c) => {
+		t += c.seconds;
+		const end = Math.round(t * MIX_FPS);
+		out.push({ ...c, seconds: Number(((end - edge) / MIX_FPS).toFixed(4)) });
+		edge = end;
+		return out;
+	}, []);
+	const { cues } = cueLines(framed, lines);
+	const total = edge / MIX_FPS;
+	const clips = quietUnderLines(framed, cues);
 	const files = [...clips.map((c) => c.file), ...(score ? [score.file] : []), ...cues.map((c) => c.file)];
+	const cueStart = (x: MixClip) => Number(clips.slice(0, clips.indexOf(x)).reduce((t, y) => t + y.seconds, 0).toFixed(2));
 	const stereo = "aresample=44100,aformat=sample_fmts=fltp:channel_layouts=stereo";
 	const f: string[] = [];
 	clips.forEach((c, i) => {
 		const d = c.seconds;
 		f.push(
-			`[${i}:v]scale=${MIX_WIDTH}:${MIX_HEIGHT}:force_original_aspect_ratio=decrease,pad=${MIX_WIDTH}:${MIX_HEIGHT}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,${c.still ? "hue=s=0.3," : ""}fps=24,tpad=stop_mode=clone:stop_duration=${d},trim=duration=${d},setpts=PTS-STARTPTS[v${i}]`,
+			`[${i}:v]scale=${MIX_WIDTH}:${MIX_HEIGHT}:force_original_aspect_ratio=decrease,pad=${MIX_WIDTH}:${MIX_HEIGHT}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,${c.still ? "hue=s=0.3," : ""}fps=${MIX_FPS},tpad=stop_mode=clone:stop_duration=${d},trim=end_frame=${Math.round(d * MIX_FPS)},setpts=PTS-STARTPTS[v${i}]`,
 		);
 		f.push(
 			c.audio
@@ -326,7 +360,13 @@ export function mixPlan(cut: MixClip[], score: { file: string } | undefined, lin
 		const first = clips.length + (score ? 1 : 0);
 		cues.forEach((c, j) => {
 			const ms = Math.round(c.at * 1000);
-			f.push(`[${first + j}:a]${stereo},adelay=${ms}:all=1,volume=1.3[l${j}]`);
+			// A line cut short before a synced line fades out over its last 0.15 s
+			const trim = c.trim ? `atrim=duration=${c.trim},afade=t=out:st=${Math.max(0, c.trim - 0.15).toFixed(2)}:d=0.15,` : "";
+			// A synced line is heard from its clip: the avatar model returns the voice it moved the mouth to, re-timed
+			// (Opus's sixth ran 12% longer than its line, its pause 0.4 s late), so the line's own file drifts
+			const own = clips.findIndex((x) => x.synced && x.cell === c.cell && c.at === cueStart(x));
+			const voice = own >= 0 ? `[${own}:a]${stereo},atrim=duration=${clips[own].seconds},asetpts=PTS-STARTPTS,` : `[${first + j}:a]${stereo},${trim}`;
+			f.push(`${voice}adelay=${ms}:all=1,volume=1.3[l${j}]`);
 		});
 		f.push(cues.length > 1 ? `${cues.map((_, j) => `[l${j}]`).join("")}amix=inputs=${cues.length}:duration=longest:normalize=0[vox]` : `[l0]anull[vox]`);
 		// The voices run to the end, so the ducked bed (which stops with its sidechain) does too
