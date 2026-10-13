@@ -191,9 +191,12 @@ export async function runTurnJob(env: Env, job: TurnJob, progress: Progress) {
 	// A failed plan doesn't count: the showrunner plans again rather than waiting forever
 	// A board carried on from an earlier round (D40) has its plan already
 	const from: CarriedFrom | undefined = cfg.from;
-	const planRequested = Boolean(from) || rows.some((r) => r.kind === "board" && r.status !== "failed");
-	const state = planRequested ? await boardState(env, board) : undefined;
+	// only if it had one: the season's last round left boards that never planned, and a round carrying on from
+	// them waited for a plan nobody had asked for
+	const asked = rows.some((r) => r.kind === "board" && r.status !== "failed");
+	const state = from || asked ? await boardState(env, board) : undefined;
 	const planned = Boolean(state && !("pending" in state && state.pending));
+	const planRequested = asked || (Boolean(from) && planned);
 	const cap = Number(env.VIDEO_MAX_SECONDS);
 	const drafted = crewFrom(cfg.crew);
 	const lead: Crew["lead"] = cfg.lead in MENU.lead ? cfg.lead : DEFAULT_CREW.lead;
