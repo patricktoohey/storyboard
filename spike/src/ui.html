@@ -775,7 +775,7 @@ function render() {
       <div class="roles"><span class="small muted">Skills on this board</span>${["director", "cinematographer", "casting"].map(roleSelect).join("")}
         ${s.crew && menuCache ? `<span class="small muted" style="margin-top:6px">Models on this board · the next take, edit or cut uses them</span>${CREW_SLOTS.map((slot) => crewSelect(menuCache, slot, slot === "renderer" && remakePick?.repo === s.repo ? remakePick.renderer : s.crew[slot], "data-crew")).join("")}
           ${remakePick?.repo === s.repo ? `<div class="small" style="max-width:420px">A new renderer changes every face, set and frame, so it gets its own board: this plan, cast and shot again with <b>${esc(remakePick.renderer)}</b>. This board stays as it is.
-            <div class="row" style="margin-top:4px"><button class="primary" id="doremake">Remake with ${esc(remakePick.renderer)}</button><button id="noremake">Cancel</button></div></div>` : ""}` : ""}
+            <div class="row" style="margin-top:4px"><button class="primary" id="doremake">Remake with ${esc(remakePick.renderer)}</button><button id="noremake">Cancel</button></div></div>` : `<button id="remakesame" title="A new board from this plan: every portrait, set and frame made again with these models, so they all match">Remake with these models</button>`}` : ""}
         ${makeVideoButton(s)}</div>
     </section>
     ${teamHtml(s)}
@@ -1032,6 +1032,8 @@ async function hydrate(cutKept = false) {
       location.hash = out.repo;
     } catch (err) { doRemake.disabled = false; }
   };
+  const remakeSame = $("#remakesame");
+  if (remakeSame) remakeSame.onclick = () => { remakePick = { repo: state.repo, renderer: state.crew.renderer }; render(); };
   const noRemake = $("#noremake");
   if (noRemake) noRemake.onclick = () => { remakePick = null; render(); };
   document.querySelectorAll("select[data-role]").forEach((el) => (el.onchange = async () => {
