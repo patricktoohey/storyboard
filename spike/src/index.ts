@@ -7,7 +7,7 @@
 //   GET  /                                     the review UI (asks for the key, keeps it in the browser)
 //   GET  /skills                               skills in the template library
 //   GET  /boards                               list boards
-//   POST /boards                               {"concept", "cells"?, "skills"?: {"cinematographer": "cinematographer-noir"}} -> 202, queued
+//   POST /boards                               {"concept", "cells"?, "skills"?: {"cinematographer": "cinematographer-noir"}, "crew"?: {slot: option}} -> 202, queued
 //   POST /boards/:repo/cut                     animate every printed frame (image-to-video), then assemble cut/vN
 //   POST /boards/:repo/score|lines             {"direction"}  the score at the film's length, or the film's lines in their voices
 //   POST /boards/:repo/mix                     {"cut": "v1", "sound"?: commit}  mix a cut (clips, score, lines) into cut/v1:video/teaser.mp4
@@ -20,6 +20,7 @@
 //   POST /boards/:repo/cells/:id/print         {"take"}  merge that take into main
 //   POST /boards/:repo/cells/:id/edits         {"instruction", "take"?}  a new take: the printed frame (or that take's) edited (D42)
 //   POST /boards/:repo/producer                {"note", "cell"?}  the producer's note; the team's lead answers it on its next turn (D40)
+//   POST /boards/:repo/crew                    {"crew": {"renderer": "nano-banana-pro", …}}  pick this board's models (not an arena team's)
 //   POST /boards/:repo/roles/:role             {"skill"} which skill fills a role on this board
 //   PUT  /boards/:repo/skills/:name            SKILL.md body; optional x-message header -> commit to board main
 //   POST /boards/:repo/skills/:name/promote    copy the board's skill to storyboard-template
@@ -42,7 +43,7 @@
 //   POST /sweep                                mark jobs with no progress for 10 minutes failed (also runs every 5 minutes)
 //   POST /template[?reset=1]                   create the template / add newly bundled skills (reset: overwrite with bundled)
 // Every route except GET / requires `Authorization: Bearer $SPIKE_KEY`.
-import { addNote, boardState, chooseSkill, editSkill, listBoards, printTake, startBoard, startCut } from "./board";
+import { addNote, boardState, chooseCrew, chooseSkill, editSkill, listBoards, printTake, startBoard, startCut } from "./board";
 import { DEFAULT_TEAMS, PANEL, type TeamSpec, arenaState, closeArena, createArena, listArenas, teamSpec } from "./arena";
 import { creditBalance, seasonEstimate, tooLittle } from "./credits";
 import { addProducerNoteTo } from "./showrunner";
@@ -59,7 +60,7 @@ import { isRole, listSkills } from "./skills";
 import { TEMPLATE, ensureTemplate, promoteSkill, repoRemote } from "./template";
 import ui from "./ui.html?raw";
 import { animate, frameJpeg, frameUrl, verifyFrame } from "./video";
-import { type Crew, DEFAULT_CREW, MENU, isCrew, menuView } from "./crew.ts";
+import { type Crew, CrewError, DEFAULT_CREW, MENU, crewFrom, isCrew, menuView } from "./crew.ts";
 import { PRODUCER_NOTES } from "./producer-rules.ts";
 
 async function readMain(env: Env, repo: string, path: string) {
@@ -279,10 +280,10 @@ export default {
 			if (root === "boards" && !repoName) {
 				if (method === "GET") return Response.json(await listBoards(env));
 				if (method === "POST") {
-					const { concept, cells = 3, skills } = await json<{ concept?: string; cells?: number; skills?: Record<string, string> }>(request);
+					const { concept, cells = 3, skills, crew } = await json<{ concept?: string; cells?: number; skills?: Record<string, string>; crew?: Record<string, string> }>(request);
 					if (!concept) return Response.json({ error: "concept is required" }, { status: 400 });
 					// Returns once the repo exists; directing, casting and shooting run as queued jobs
-					const repo = await startBoard(env, concept);
+					const repo = await startBoard(env, concept, crew);
 					const jobs = await submit(env, repo, [{ kind: "board", concept, cells: Math.min(Math.max(cells, 1), 8), skills: skills ?? {} }]);
 					return Response.json({ repo, jobs }, { status: 202 });
 				}
@@ -295,7 +296,9 @@ export default {
 					const [s, cfg, notes] = await Promise.all([boardState(env, repoName), readMain(env, repoName, "board.json"), readMain(env, repoName, PRODUCER_NOTES)]);
 					const c = cfg ? JSON.parse(cfg) : {};
 					const team = c.arena ? { arena: c.arena, team: c.team, lead: c.lead ?? c.crew?.lead ?? null, crew: c.crew ?? null, budget_usd: c.budget_usd, deadline: c.deadline, from: c.from ?? null, team_name: c.cast?.team_name ?? null } : null;
-					return Response.json({ ...s, team, producer: notes ? JSON.parse(notes) : [] });
+					// Outside an arena a person picks the models (D47); before any pick, the default crew
+					const crew = c.arena ? null : (crewFrom(c.crew) ?? DEFAULT_CREW);
+					return Response.json({ ...s, team, crew, producer: notes ? JSON.parse(notes) : [] });
 				}
 				if (method === "GET" && action === "jobs") return Response.json(await ledger(env, repoName));
 				if (method === "POST" && action === "cut") {
@@ -351,6 +354,11 @@ export default {
 						return Response.json(await printTake(env, repoName, id, take));
 					}
 				}
+				if (method === "POST" && action === "crew") {
+					const { crew } = await json<{ crew?: Record<string, string> }>(request);
+					if (!crew || typeof crew !== "object") return Response.json({ error: 'crew is required, e.g. {"crew": {"renderer": "nano-banana-pro"}}' }, { status: 400 });
+					return Response.json(await chooseCrew(env, repoName, crew));
+				}
 				if (method === "POST" && action === "roles" && isRole(id)) {
 					const { skill } = await json<{ skill?: string }>(request);
 					if (!skill) return Response.json({ error: "skill is required" }, { status: 400 });
@@ -389,6 +397,7 @@ export default {
 		} catch (err) {
 			// Over an arena team's budget or past its deadline: refused, not failed
 			if (err instanceof LimitError) return Response.json({ error: err.message }, { status: 402 });
+			if (err instanceof CrewError) return Response.json({ error: err.message }, { status: 400 });
 			console.error(err);
 			return Response.json({ error: String(err) }, { status: 500 });
 		}

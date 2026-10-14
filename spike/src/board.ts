@@ -42,7 +42,7 @@ import type { LineSync } from "./jobs";
 import { nextCut } from "./producer-rules.ts";
 import { IMPOSSIBLE_MAX, recheckedVerdict } from "./continuity-rules.ts";
 import { type Inspection, clipRecipe, reusableClip } from "./inspect-rules.ts";
-import { AVATAR_MODEL } from "./crew.ts";
+import { AVATAR_MODEL, type Crew, CrewError, DEFAULT_CREW, SLOTS, changeCrew, crewFrom } from "./crew.ts";
 
 // ── Files on main ────────────────────────────────────────────────────────────────────────────────
 
@@ -495,9 +495,12 @@ export async function inspectPrinted(env: Env, repo: string) {
 // ── Jobs (run by the queue consumer) and the fast route halves that queue them ───────────────────
 
 /** Route: fork the template into a new board repo. The coordinator then queues the board job. */
-export async function startBoard(env: Env, concept: string) {
+export async function startBoard(env: Env, concept: string, crew?: Record<string, unknown>) {
+	if (crew) changeCrew(undefined, crew); // a bad choice is refused before a repo exists
 	const repo = `board-${new Date().toISOString().slice(0, 10)}-${crypto.randomUUID().slice(0, 6)}`;
 	await forkBoard(env, repo, concept.slice(0, 200));
+	// Before the board job is queued, so the director already plans with the chosen lead
+	if (crew) await chooseCrew(env, repo, crew);
 	return repo;
 }
 
@@ -812,6 +815,27 @@ export async function chooseSkill(env: Env, repo: string, role: Role, name: stri
 		const config = (await tree.exists("board.json")) ? JSON.parse(await tree.read("board.json")) : { skills: DEFAULT_SKILLS };
 		config.skills = { ...DEFAULT_SKILLS, ...config.skills, [role]: name };
 		await tree.commit({ name: "user" }, `Use ${name} as ${role}`, { "board.json": JSON.stringify(config, null, 2) + "\n" });
+		return config;
+	});
+}
+
+/**
+ * A person picks a board's models: the crew in board.json, as one commit by the user. Every job reads it
+ * when it starts (limitsOf), so the next take, edit or cut uses the new models; earlier takes keep theirs
+ * (render.json says which). An arena board's crew is its lead's draft, so it can't be changed here.
+ */
+export async function chooseCrew(env: Env, repo: string, change: Record<string, unknown>) {
+	const remote = await repoRemote(env, repo);
+	return onMain(remote, async (tree) => {
+		const config = (await tree.exists("board.json")) ? JSON.parse(await tree.read("board.json")) : { skills: DEFAULT_SKILLS };
+		if (config.arena) throw new CrewError(`${repo} is a team's board in ${config.arena}: its lead drafts the crew`);
+		const before: Crew = crewFrom(config.crew) ?? DEFAULT_CREW;
+		const crew = changeCrew(before, change);
+		const changed = SLOTS.filter((s) => crew[s] !== before[s]);
+		if (config.crew && !changed.length) return config;
+		config.crew = crew;
+		const message = changed.length ? `Models: ${changed.map((s) => `${s} ${crew[s]}`).join(", ")}` : "Models: the defaults, written down";
+		await tree.commit({ name: "user" }, message, { "board.json": JSON.stringify(config, null, 2) + "\n" });
 		return config;
 	});
 }

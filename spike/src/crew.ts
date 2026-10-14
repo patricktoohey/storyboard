@@ -241,6 +241,20 @@ export function draftOptions(slot: Slot): string[] {
 export const isCrew = (c: unknown): c is Crew =>
 	typeof c === "object" && c !== null && SLOTS.every((s) => (c as Record<string, string>)[s] in MENU[s]);
 
+/** A person's choice of models for a board: the crew with these slots changed. Throws CrewError naming what's wrong. */
+export class CrewError extends Error {}
+export function changeCrew(current: Crew | undefined, change: Record<string, unknown>): Crew {
+	const crew: Record<string, string> = { ...(current ?? DEFAULT_CREW) };
+	for (const [slot, key] of Object.entries(change)) {
+		if (!(SLOTS as string[]).includes(slot)) throw new CrewError(`no slot "${slot}"; the slots are ${SLOTS.join(", ")}`);
+		const option = (MENU[slot as Slot] as Record<string, { unavailable?: string }>)[String(key)];
+		if (!option) throw new CrewError(`no ${slot} "${key}" on the menu (GET /menu)`);
+		if (option.unavailable) throw new CrewError(`${key} is off: ${option.unavailable}`);
+		crew[slot] = String(key);
+	}
+	return crew as Crew;
+}
+
 /** A crew from board.json; crews drafted before the lead slot existed used their one LLM for everything. */
 export function crewFrom(c: unknown): Crew | undefined {
 	if (typeof c !== "object" || c === null) return undefined;

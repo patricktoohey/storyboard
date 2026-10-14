@@ -927,3 +927,21 @@ v3, which kept clips from v2. As expected, the style barely changed: Opus edited
 reshooting them, and an edit keeps the frame's look (the takes are labelled with the new cinematographer,
 but only the new title-card ideas were shot in it). A restyle has to ask for every cell to be shot again.
 One clip job was lost mid-render, as in the D45 test, so v2 went out with seven clips; v3 had all eight.
+
+## D47: a person picks a board's models
+
+Outside an arena a board ran on the default crew (Llama 3.3 70B, FLUX.2 klein 9B, Clef, Wan 2.7), and the
+only way to use another model was a team's draft. Every job already read a `crew` from `board.json` (an
+arena board's draft is written there), so a person's choice goes in the same place:
+
+- **New board**: the form's Models section has a select per slot, filled from the menu the Models page shows
+  (options that are off aren't offered). `POST /boards` takes `crew` with only the slots that change; a bad
+  choice is refused with why (400) before a repo exists. The crew is committed before the board job is
+  queued, so the director already plans with the chosen lead.
+- **An existing board**: the same selects sit under its skills; `POST /boards/:repo/crew` commits the change
+  as the user ("Models: renderer nano-banana-pro"). The next take, edit or cut uses it; earlier takes keep
+  their models, and `render.json` says which.
+- An arena team's board refuses: its crew is its lead's draft, and changing it would change the contest.
+
+Tested by `crew.test.ts` (`changeCrew`: unchanged slots stay; an unknown slot, an unknown model or one that's
+off is refused).

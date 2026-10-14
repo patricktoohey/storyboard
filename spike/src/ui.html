@@ -37,6 +37,9 @@ main { padding: 20px; max-width: 1500px; margin: 0 auto; }
 .cast img { width: 56px; height: 56px; object-fit: cover; border-radius: 50%; border: 2px solid var(--line); background: var(--panel-2); }
 .roles { display: grid; gap: 6px; align-content: start; min-width: 260px; }
 .roles label { display: grid; grid-template-columns: 110px 1fr; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); }
+.roles select, .crewpick select { max-width: 300px; }
+.crewpick { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 6px 16px; }
+.crewpick label { display: grid; grid-template-columns: 110px 1fr; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); }
 .layout { display: grid; grid-template-columns: 1fr 300px; gap: 18px; align-items: start; }
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(380px, 1fr)); gap: 16px; }
 .cell { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; display: flex; flex-direction: column; }
@@ -264,6 +267,8 @@ async function renderNew() {
         <label class="small muted">Cinematographer <select id="cine">${opts("cinematographer")}</select></label>
         <button class="primary" id="create">Create board</button>
       </div>
+      ${menu ? `<details><summary class="small muted">Models: the default crew, or pick your own from the <a href="#models">menu</a></summary>
+        <div class="crewpick" style="margin-top:8px">${CREW_SLOTS.map((slot) => crewSelect(menu, slot, menu.default_crew[slot], "data-newcrew")).join("")}</div></details>` : ""}
       <div class="status" id="newstatus"></div>
     </div>
     <div class="panel newboard" style="margin-top:18px">
@@ -358,7 +363,9 @@ async function renderNew() {
     $("#create").disabled = true;
     $("#newstatus").textContent = "Forking the template…";
     try {
-      const out = await api("/boards", { method: "POST", body: JSON.stringify({ concept, cells: Number($("#ncells").value), skills: { cinematographer: $("#cine").value } }) });
+      // Only the slots changed from the default crew; none means the board keeps the default
+      const crew = Object.fromEntries([...document.querySelectorAll("select[data-newcrew]")].filter((el) => el.value !== menu.default_crew[el.dataset.newcrew]).map((el) => [el.dataset.newcrew, el.value]));
+      const out = await api("/boards", { method: "POST", body: JSON.stringify({ concept, cells: Number($("#ncells").value), skills: { cinematographer: $("#cine").value }, ...(Object.keys(crew).length ? { crew } : {}) }) });
       // The board exists now; directing, casting and shooting run as jobs you can watch
       location.hash = out.repo;
       await loadBoards();
@@ -707,7 +714,7 @@ async function openBoard(repo) {
 }
 
 async function refresh() {
-  const next = await api(`/boards/${state.repo}/state`);
+  const [next] = await Promise.all([api(`/boards/${state.repo}/state`), getMenu()]);
   state = next;
   // Typing a note or an edit: a re-render would replace the box under the cursor, so the board catches up
   // when the box loses focus instead
@@ -764,6 +771,7 @@ function render() {
           ${(s.locations || []).map((l) => `<figure><img data-ref="main" data-path="${esc(l.image)}" alt="" style="border-radius:6px;width:96px"><figcaption><b>${esc(l.name)}</b><br><span class="small muted">${esc(l.look)}</span></figcaption></figure>`).join("")}</div>
       </div>
       <div class="roles"><span class="small muted">Skills on this board</span>${["director", "cinematographer", "casting"].map(roleSelect).join("")}
+        ${s.crew && menuCache ? `<span class="small muted" style="margin-top:6px">Models on this board · the next take, edit or cut uses them</span>${CREW_SLOTS.map((slot) => crewSelect(menuCache, slot, s.crew[slot], "data-crew")).join("")}` : ""}
         ${makeVideoButton(s)}</div>
     </section>
     ${teamHtml(s)}
@@ -800,6 +808,15 @@ const SLOT_NAMES = {
   critic: { short: "critic", title: "Continuity critic", what: "Checks each take against the bible: faces, wardrobe, props." },
   video: { short: "video", title: "Video", what: "Animates the printed frames into the cut. Score and lines carry the sound." },
 };
+
+// The crew menu (GET /menu), fetched once: a board outside an arena picks its models from it
+let menuCache = null;
+const getMenu = async () => (menuCache ??= await api("/menu").catch(() => null));
+const CREW_SLOTS = ["lead", "llm", "renderer", "critic", "video"];
+/** One select per crew slot: every model that's on, plus the chosen one even if it has since been switched off. */
+const crewSelect = (menu, slot, chosen, attr) => `<label title="${esc(SLOT_NAMES[slot].what)}">${esc(SLOT_NAMES[slot].title)}<select ${attr}="${slot}">${menu.slots[slot]
+  .filter((o) => !o.unavailable || o.key === chosen)
+  .map((o) => `<option value="${esc(o.key)}" ${o.key === chosen ? "selected" : ""}>${esc(o.key)} · ${esc(o.price)}</option>`).join("")}</select></label>`;
 
 let producerDraft = "";
 let producerFocus = false;
@@ -863,7 +880,7 @@ function makeVideoButton(s) {
   const seconds = printed.reduce((n, c) => n + Math.max(2, Math.min(VIDEO_MAX_S, Math.round(c.duration_s) || 3)), 0);
   const running = jobs.some((j) => (j.kind === "video" || j.kind === "assemble") && openJob(j));
   return `<button class="primary" data-board-act="cut" ${running ? "disabled" : ""} title="Animates each printed frame (image-to-video), then assembles the clips">
-    ${running ? "Rendering video…" : `Make video · ${printed.length} clips, ${seconds}s, ≈$${(seconds * VIDEO_PRICE_PER_S).toFixed(2)}`}</button>`;
+    ${running ? "Rendering video…" : `Make video · ${printed.length} clips, ${seconds}s${!s.crew || s.crew.video === "wan-2.7-i2v" ? `, ≈$${(seconds * VIDEO_PRICE_PER_S).toFixed(2)}` : ` with ${s.crew.video}`}`}</button>`;
 }
 
 /** The board's sound on main: the score's brief and every line, each playable. */
@@ -990,6 +1007,9 @@ async function hydrate(cutKept = false) {
     const url = await img(el.dataset.ref, el.dataset.path, !el.dataset.live);
     if (url) el.src = url;
   });
+  document.querySelectorAll("select[data-crew]").forEach((el) => (el.onchange = async () => {
+    await run(`Switching the ${SLOT_NAMES[el.dataset.crew].short} to ${el.value}…`, [], () => api(`/boards/${state.repo}/crew`, { method: "POST", body: JSON.stringify({ crew: { [el.dataset.crew]: el.value } }) }));
+  }));
   document.querySelectorAll("select[data-role]").forEach((el) => (el.onchange = async () => {
     await run(`Switching ${el.dataset.role}…`, [], () => api(`/boards/${state.repo}/roles/${el.dataset.role}`, { method: "POST", body: JSON.stringify({ skill: el.value }) }));
   }));

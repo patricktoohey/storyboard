@@ -2,7 +2,7 @@
 // crew to a budget, and the per-provider video requests.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { DEFAULT_CREW, MENU, SLOTS, type Crew, cheapestFilm, clipCost, crewCosts, crewFrom, draftOptions, fitToBudget, isCrew, menuView, nearestRatio, videoRequest } from "../src/crew.ts";
+import { CrewError, DEFAULT_CREW, MENU, SLOTS, type Crew, changeCrew, cheapestFilm, clipCost, crewCosts, crewFrom, draftOptions, fitToBudget, isCrew, menuView, nearestRatio, videoRequest } from "../src/crew.ts";
 import { estimate } from "../src/costs.ts";
 
 const budget: Crew = { llm: "gemma-4", lead: "gemma-4", renderer: "flux-2-klein-4b", critic: "clef-flash", video: "hailuo-2.3-fast" };
@@ -119,4 +119,14 @@ test("the Models page lists every option with its price, and why an off option i
 	assert.equal(video["flux-3-video"].audio, true);
 	assert.match(m.renderer.find((o) => o.key === "nano-banana-pro")!.price, /^\$0\.140 a frame/);
 	assert.match(m.lead.find((o) => o.key === "claude-opus-5.5")!.price, /^\$4 in, \$20 out per million tokens$/);
+});
+
+test("a person picks a board's models from the menu: unchanged slots stay, and an unknown slot, an unknown model or one that's off is refused with why", () => {
+	const crew = changeCrew(undefined, { renderer: "nano-banana-pro", video: "veo-3.1" });
+	assert.deepEqual(crew, { ...DEFAULT_CREW, renderer: "nano-banana-pro", video: "veo-3.1" });
+	assert.ok(isCrew(crew));
+	assert.deepEqual(changeCrew(crew, { video: "wan-2.7-i2v" }), { ...crew, video: "wan-2.7-i2v" });
+	assert.throws(() => changeCrew(undefined, { editor: "clef" }), (e) => e instanceof CrewError && /no slot "editor"/.test(e.message));
+	assert.throws(() => changeCrew(undefined, { renderer: "dall-e" }), (e) => e instanceof CrewError && /no renderer "dall-e"/.test(e.message));
+	assert.throws(() => changeCrew(undefined, { video: "seedance-2.5" }), (e) => e instanceof CrewError && /seedance-2\.5 is off: /.test(e.message));
 });
