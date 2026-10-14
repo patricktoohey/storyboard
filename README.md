@@ -33,7 +33,7 @@ and not "GitHub with agents added on top".
 | a rejected push | the coordinator's only lock: take numbers, budgets and "print exactly once" are all compare-and-swap commits |
 | `git log` | the production itself, replayable as video |
 
-## Where things stand (2026-10-09)
+## Where things stand (2026-10-13)
 
 Working and deployed (Workers, Artifacts, Queues, Workers AI, AI Gateway, Images, all driven by the `cf` CLI):
 
@@ -60,7 +60,7 @@ Working and deployed (Workers, Artifacts, Queues, Workers AI, AI Gateway, Images
   earlier version that did better. In the comparison season (same skill, different lead models), Claude
   Opus 5.5 won both rounds, and in round 2 saved, compared twice, restored its saved version and submitted
   the cut made from it.
-- **Tests**: 186 unit tests (`npm test`), live model evals (`npm run eval`), an end-to-end smoke test.
+- **Tests**: 197 unit tests (`npm test`), live model evals (`npm run eval`), an end-to-end smoke test.
 
 ### Season 2
 
@@ -97,6 +97,13 @@ and the UI's Models page shows every option, its price and why any is off (D41).
 frame can be fixed by an edit instead of a re-shoot, and the continuity check now catches the impossible,
 like a second pair of glasses (D42). A job that fails for the platform's reasons is refunded to the team (D43).
 
+For the final (Oct 11–13), characters say their lines in their cast voices with their lips in sync, and a
+mix takes all of its sound from one commit (D44). An inspector model checks every printed frame and every
+clip for the impossible (a second pair of glasses, garbled signs) and the lead sees its verdict, and a new
+cut keeps any clip whose recipe hasn't changed instead of rendering every shot again (D45). And any commit
+can start a round: fork a board at that point, change a scene, a model or the whole style, and the agents
+make the film again from there, next to the original (D46).
+
 ## Getting started
 
 Deploy your own copy to your own Cloudflare account. Nothing in the code is tied to ours: the account,
@@ -117,7 +124,7 @@ the access key and the gateway token all come from your `spike/.env`.
 **Steps**
 
 ```sh
-git clone <this repo> storyboard && cd storyboard/spike
+git clone https://github.com/patricktoohey/storyboard.git && cd storyboard/spike
 npm install                # includes the `cf` CLI
 npx cf auth login          # opens the browser to authorize your account
 npm run setup              # the `storyboard` Artifacts namespace, the jobs queue, a SPIKE_KEY in .env
@@ -128,6 +135,13 @@ npm run smoke              # a real 2-cell board, end to end (a few cents)
 
 Open the printed URL and paste `SPIKE_KEY` from `spike/.env`. From there: a new board, a new arena or a new
 season; the Models page shows every model a crew can draft and its price. Each arena has a **Replay** button.
+
+**Walk any repo with Git.** Boards, arenas, seasons and teams are all Artifacts repos. To see one as plain
+Git, with every take branch and the agents' commits:
+
+```sh
+scripts/clone-board.sh <repo>    # e.g. a board-… name from the UI; cloned into spike/boards/<repo>
+```
 
 **Optional: a balance check.** Add `CF_ACCOUNT_ID` and `AI_GATEWAY_TOKEN` (an API token with
 *Account → AI & Machine Learning → AI Gateway → Read*) to `spike/.env` and deploy again. Then `GET /credits` shows the balance, and an
