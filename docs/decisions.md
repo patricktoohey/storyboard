@@ -945,3 +945,26 @@ arena board's draft is written there), so a person's choice goes in the same pla
 
 Tested by `crew.test.ts` (`changeCrew`: unchanged slots stay; an unknown slot, an unknown model or one that's
 off is refused).
+
+## D48: a new renderer is a remake, not a switch
+
+Changing a board's renderer in place (D47) left its shared pieces behind: the cast's portraits and the
+scouted sets are made once, when the board is planned, and every take uses them as references. The first
+retake after a switch to another renderer drew a character who no longer matched the frames beside it.
+Making every shared piece and every frame again in place would be the whole board again anyway, and would
+lose the original to compare against.
+
+So a new renderer makes a **remake**: a new board forked from the source's main as it stands (concept,
+bible, characters, locations, beats and notes, with their history), with everything a renderer made
+cleared (`remake-rules.ts`: each cell's frame and take outputs, the portraits, the sets) and every cell a
+draft again. The remake job casts and scouts again with the new crew, then every cell is shot and the
+first cut printed, as for a new board. The director isn't asked again, so it is the same film made with
+other models. The source is untouched except for a link to its remake in `board.json` (`remakes`), and
+the remake links back (`remade_from`, with the commit and the old crew); the board page shows both.
+
+The other slots still change in place: the lead, the cinematographer, the critic and the video model
+don't make anything that other frames depend on. In the UI, choosing a renderer on an existing board
+offers "Remake with …" instead of switching. `POST /boards/:repo/remake` works on any board, including
+an arena team's, and the remake is a plain board without its budget or deadline.
+
+Tested by `remake.test.ts` (what is cleared and what is kept; cells back to drafts).

@@ -767,11 +767,15 @@ function render() {
       <div>
         <h2>${esc(s.title)}</h2>
         <div class="muted">${esc(s.concept)}</div>
+        ${s.remade_from ? `<div class="small muted">Remake of <a href="#${esc(s.remade_from.board)}">${esc(s.remade_from.board)}</a> at <code>${esc(s.remade_from.commit.slice(0, 7))}</code>, which used ${esc(s.remade_from.crew.renderer)}</div>` : ""}
+        ${(s.remakes || []).map((r) => `<div class="small muted">Remade as <a href="#${esc(r.board)}">${esc(r.board)}</a> with ${esc(r.crew.renderer)}</div>`).join("")}
         <div class="cast">${s.characters.map((c) => `<figure><img data-ref="main" data-path="${esc(c.portrait)}" alt=""><figcaption><b>${esc(c.name)}</b><br><span class="small muted">${esc(c.look)}</span></figcaption></figure>`).join("")}
           ${(s.locations || []).map((l) => `<figure><img data-ref="main" data-path="${esc(l.image)}" alt="" style="border-radius:6px;width:96px"><figcaption><b>${esc(l.name)}</b><br><span class="small muted">${esc(l.look)}</span></figcaption></figure>`).join("")}</div>
       </div>
       <div class="roles"><span class="small muted">Skills on this board</span>${["director", "cinematographer", "casting"].map(roleSelect).join("")}
-        ${s.crew && menuCache ? `<span class="small muted" style="margin-top:6px">Models on this board · the next take, edit or cut uses them</span>${CREW_SLOTS.map((slot) => crewSelect(menuCache, slot, s.crew[slot], "data-crew")).join("")}` : ""}
+        ${s.crew && menuCache ? `<span class="small muted" style="margin-top:6px">Models on this board · the next take, edit or cut uses them</span>${CREW_SLOTS.map((slot) => crewSelect(menuCache, slot, slot === "renderer" && remakePick?.repo === s.repo ? remakePick.renderer : s.crew[slot], "data-crew")).join("")}
+          ${remakePick?.repo === s.repo ? `<div class="small" style="max-width:420px">A new renderer changes every face, set and frame, so it gets its own board: this plan, cast and shot again with <b>${esc(remakePick.renderer)}</b>. This board stays as it is.
+            <div class="row" style="margin-top:4px"><button class="primary" id="doremake">Remake with ${esc(remakePick.renderer)}</button><button id="noremake">Cancel</button></div></div>` : ""}` : ""}
         ${makeVideoButton(s)}</div>
     </section>
     ${teamHtml(s)}
@@ -817,6 +821,9 @@ const CREW_SLOTS = ["lead", "llm", "renderer", "critic", "video"];
 const crewSelect = (menu, slot, chosen, attr) => `<label title="${esc(SLOT_NAMES[slot].what)}">${esc(SLOT_NAMES[slot].title)}<select ${attr}="${slot}">${menu.slots[slot]
   .filter((o) => !o.unavailable || o.key === chosen)
   .map((o) => `<option value="${esc(o.key)}" ${o.key === chosen ? "selected" : ""}>${esc(o.key)} · ${esc(o.price)}</option>`).join("")}</select></label>`;
+
+// A renderer picked on an existing board, waiting for "Remake" (D48): kept across re-renders until answered
+let remakePick = null;
 
 let producerDraft = "";
 let producerFocus = false;
@@ -1008,8 +1015,25 @@ async function hydrate(cutKept = false) {
     if (url) el.src = url;
   });
   document.querySelectorAll("select[data-crew]").forEach((el) => (el.onchange = async () => {
+    // The renderer draws the shared portraits and sets too, so a new one means a remake, not a switch in place
+    if (el.dataset.crew === "renderer") {
+      remakePick = el.value === state.crew.renderer ? null : { repo: state.repo, renderer: el.value };
+      return render();
+    }
     await run(`Switching the ${SLOT_NAMES[el.dataset.crew].short} to ${el.value}…`, [], () => api(`/boards/${state.repo}/crew`, { method: "POST", body: JSON.stringify({ crew: { [el.dataset.crew]: el.value } }) }));
   }));
+  const doRemake = $("#doremake");
+  if (doRemake) doRemake.onclick = async () => {
+    doRemake.disabled = true;
+    try {
+      const out = await run(`Remaking with ${remakePick.renderer}…`, [], () => api(`/boards/${state.repo}/remake`, { method: "POST", body: JSON.stringify({ crew: { renderer: remakePick.renderer } }) }));
+      remakePick = null;
+      await loadBoards();
+      location.hash = out.repo;
+    } catch (err) { doRemake.disabled = false; }
+  };
+  const noRemake = $("#noremake");
+  if (noRemake) noRemake.onclick = () => { remakePick = null; render(); };
   document.querySelectorAll("select[data-role]").forEach((el) => (el.onchange = async () => {
     await run(`Switching ${el.dataset.role}…`, [], () => api(`/boards/${state.repo}/roles/${el.dataset.role}`, { method: "POST", body: JSON.stringify({ skill: el.value }) }));
   }));

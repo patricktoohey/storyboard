@@ -10,6 +10,8 @@ export function estimate(req: JobRequest, crew: Crew = DEFAULT_CREW): number {
 	const c = crewCosts(crew);
 	switch (req.kind) {
 		case "board":
+		// A remake casts and scouts as a new board does; its plan is copied, so the director's call is a little over
+		case "remake":
 			return c.board;
 		case "take":
 			return req.opts?.edit ? c.edit : c.take;

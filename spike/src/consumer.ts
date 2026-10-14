@@ -1,6 +1,6 @@
 // The storyboard-jobs queue consumer. One job per invocation: run it, reporting each stage to the jobs
 // ledger, and queue whatever it leads to (a board's takes, a continuity retake, a bible edit's takes).
-import { inspectPrints, printTakes, retakeOptions, runAssembleJob, runBibleJob, runBoardJob, runTakeJob, runVideoJob } from "./board";
+import { inspectPrints, printTakes, retakeOptions, runAssembleJob, runBibleJob, runBoardJob, runRemakeJob, runTakeJob, runVideoJob } from "./board";
 import { queueLiveComparison, queueLiveJudging, runCompareJob, runJudgeJob } from "./arena";
 import { runCastJob, runDraftPick, runSeasonEvent, runSeasonStep } from "./season";
 import { limitsOf, report, submit } from "./coordinator";
@@ -15,8 +15,9 @@ const FIRST_TAKES_STAGGER_S = 8;
 async function run(env: Env, job: Job) {
 	const progress = (detail: string) => report(env, job, "running", detail);
 	switch (job.kind) {
-		case "board": {
-			const board = await runBoardJob(env, job.repo, job.concept, job.cells, job.skills, progress);
+		case "board":
+		case "remake": {
+			const board = job.kind === "board" ? await runBoardJob(env, job.repo, job.concept, job.cells, job.skills, progress) : await runRemakeJob(env, job.repo, progress);
 			// Every cell's first take in one group; when the group closes, the ledger queues the first-cut print.
 			// Staggered, from a random start: three teams' first takes at once hit the per-minute limit (D38)
 			await submit(

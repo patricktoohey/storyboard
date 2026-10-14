@@ -20,6 +20,7 @@
 //   POST /boards/:repo/cells/:id/print         {"take"}  merge that take into main
 //   POST /boards/:repo/cells/:id/edits         {"instruction", "take"?}  a new take: the printed frame (or that take's) edited (D42)
 //   POST /boards/:repo/producer                {"note", "cell"?}  the producer's note; the team's lead answers it on its next turn (D40)
+//   POST /boards/:repo/remake                  {"crew"?: {slot: option}}  a new board from this one's plan, every portrait, set and frame made again (D48)
 //   POST /boards/:repo/crew                    {"crew": {"renderer": "nano-banana-pro", …}}  pick this board's models (not an arena team's)
 //   POST /boards/:repo/roles/:role             {"skill"} which skill fills a role on this board
 //   PUT  /boards/:repo/skills/:name            SKILL.md body; optional x-message header -> commit to board main
@@ -43,7 +44,7 @@
 //   POST /sweep                                mark jobs with no progress for 10 minutes failed (also runs every 5 minutes)
 //   POST /template[?reset=1]                   create the template / add newly bundled skills (reset: overwrite with bundled)
 // Every route except GET / requires `Authorization: Bearer $SPIKE_KEY`.
-import { addNote, boardState, chooseCrew, chooseSkill, editSkill, listBoards, printTake, startBoard, startCut } from "./board";
+import { addNote, boardState, chooseCrew, chooseSkill, startRemake, editSkill, listBoards, printTake, startBoard, startCut } from "./board";
 import { DEFAULT_TEAMS, PANEL, type TeamSpec, arenaState, closeArena, createArena, listArenas, teamSpec } from "./arena";
 import { creditBalance, seasonEstimate, tooLittle } from "./credits";
 import { addProducerNoteTo } from "./showrunner";
@@ -298,7 +299,7 @@ export default {
 					const team = c.arena ? { arena: c.arena, team: c.team, lead: c.lead ?? c.crew?.lead ?? null, crew: c.crew ?? null, budget_usd: c.budget_usd, deadline: c.deadline, from: c.from ?? null, team_name: c.cast?.team_name ?? null } : null;
 					// Outside an arena a person picks the models (D47); before any pick, the default crew
 					const crew = c.arena ? null : (crewFrom(c.crew) ?? DEFAULT_CREW);
-					return Response.json({ ...s, team, crew, producer: notes ? JSON.parse(notes) : [] });
+					return Response.json({ ...s, team, crew, remade_from: c.remade_from ?? null, remakes: c.remakes ?? [], producer: notes ? JSON.parse(notes) : [] });
 				}
 				if (method === "GET" && action === "jobs") return Response.json(await ledger(env, repoName));
 				if (method === "POST" && action === "cut") {
@@ -353,6 +354,13 @@ export default {
 						if (!take) return Response.json({ error: "take is required" }, { status: 400 });
 						return Response.json(await printTake(env, repoName, id, take));
 					}
+				}
+				if (method === "POST" && action === "remake") {
+					// A new board from this one's plan with other models (D48); returns once the copy exists
+					const { crew = {} } = await json<{ crew?: Record<string, string> }>(request);
+					const remake = await startRemake(env, repoName, crew);
+					const jobs = await submit(env, remake.repo, [{ kind: "remake", from: repoName }]);
+					return Response.json({ ...remake, jobs }, { status: 202 });
 				}
 				if (method === "POST" && action === "crew") {
 					const { crew } = await json<{ crew?: Record<string, string> }>(request);

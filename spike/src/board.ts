@@ -42,6 +42,7 @@ import type { LineSync } from "./jobs";
 import { nextCut } from "./producer-rules.ts";
 import { IMPOSSIBLE_MAX, recheckedVerdict } from "./continuity-rules.ts";
 import { type Inspection, clipRecipe, reusableClip } from "./inspect-rules.ts";
+import { remakeClears, remakeRows } from "./remake-rules.ts";
 import { AVATAR_MODEL, type Crew, CrewError, DEFAULT_CREW, SLOTS, changeCrew, crewFrom } from "./crew.ts";
 
 // ── Files on main ────────────────────────────────────────────────────────────────────────────────
@@ -495,9 +496,11 @@ export async function inspectPrinted(env: Env, repo: string) {
 // ── Jobs (run by the queue consumer) and the fast route halves that queue them ───────────────────
 
 /** Route: fork the template into a new board repo. The coordinator then queues the board job. */
+const newBoardName = () => `board-${new Date().toISOString().slice(0, 10)}-${crypto.randomUUID().slice(0, 6)}`;
+
 export async function startBoard(env: Env, concept: string, crew?: Record<string, unknown>) {
 	if (crew) changeCrew(undefined, crew); // a bad choice is refused before a repo exists
-	const repo = `board-${new Date().toISOString().slice(0, 10)}-${crypto.randomUUID().slice(0, 6)}`;
+	const repo = newBoardName();
 	await forkBoard(env, repo, concept.slice(0, 200));
 	// Before the board job is queued, so the director already plans with the chosen lead
 	if (crew) await chooseCrew(env, repo, crew);
@@ -553,6 +556,58 @@ export async function runBoardJob(
 		),
 	]);
 	return { title: directed.board.title, cells: directed.board.cells.map((c) => c.id) };
+}
+
+/**
+ * A remake (D48): a new board from another's plan, with other models. The source's main is forked as it
+ * stands (concept, bible, characters, locations, beats, notes and their history) and everything a renderer
+ * made is cleared, so no frame from the old look can sit beside the new one. The remake job then casts,
+ * scouts and shoots every cell again. The source is untouched except for a link to its remake.
+ */
+export async function startRemake(env: Env, source: string, change: Record<string, unknown>) {
+	using handle = await env.ARTIFACTS.get(source);
+	const read = async (path: string) => (await handle.readFile({ ref: "main", path }))?.text();
+	if (!(await read("characters.json"))) throw new CrewError(`${source} has no plan yet: remake it once it's directed`);
+	const config = JSON.parse((await read("board.json")) ?? "{}");
+	const before: Crew = crewFrom(config.crew) ?? DEFAULT_CREW;
+	const crew = changeCrew(before, change);
+	const changed = SLOTS.filter((s) => crew[s] !== before[s]);
+	const models = changed.length ? changed.map((s) => `${s} ${crew[s]}`).join(", ") : "the same models";
+	const [head] = await handle.log({ ref: "main", limit: 1 });
+	const repo = newBoardName();
+	const remote = await forkBoard(env, repo, `Remake of ${source} with ${models}`.slice(0, 200), source);
+	await onMain(remote, async (tree) => {
+		const paths: string[] = [];
+		for (const dir of await tree.list("cells")) for (const f of await tree.list(`cells/${dir}`)) paths.push(`cells/${dir}/${f}`);
+		for (const dir of ["bible/refs", "bible/locations"]) for (const f of await tree.list(dir)) paths.push(`${dir}/${f}`);
+		const drop = remakeClears(paths);
+		const rows = remakeRows(parseCsv(await tree.read("storyboard.csv")));
+		// A plain board even when the source was an arena team's: no budget, deadline or team
+		const files: Files = {
+			"board.json": JSON.stringify({ skills: config.skills ?? DEFAULT_SKILLS, crew, remade_from: { board: source, commit: head.hash, crew: before } }, null, 2) + "\n",
+			"storyboard.csv": toCsv(rows),
+		};
+		await tree.commit({ name: "user" }, `Remake of ${source} at ${head.hash.slice(0, 7)} with ${models}: every portrait, set and frame to be made again`, files, drop);
+	});
+	await onMain(await repoRemote(env, source), async (tree) => {
+		const own = (await tree.exists("board.json")) ? JSON.parse(await tree.read("board.json")) : { skills: DEFAULT_SKILLS };
+		own.remakes = [...(own.remakes ?? []), { board: repo, crew, at: new Date().toISOString() }];
+		await tree.commit({ name: "user" }, `Remade as ${repo} with ${models}`, { "board.json": JSON.stringify(own, null, 2) + "\n" });
+	});
+	return { repo, crew, from: { board: source, commit: head.hash } };
+}
+
+/** Job: a remake's cast and sets, made again with its crew; the consumer then queues every cell's first take. */
+export async function runRemakeJob(env: Env, repo: string, progress: Progress = quiet) {
+	const remote = await repoRemote(env, repo);
+	const tree = await WorkingTree.clone(remote, "main");
+	const characters = JSON.parse(await tree.read("characters.json")) as Character[];
+	const locations = (await tree.exists("locations.json")) ? (JSON.parse(await tree.read("locations.json")) as Location[]) : [];
+	const casting = { ...DEFAULT_SKILLS, ...JSON.parse(await tree.read("board.json")).skills }.casting;
+	const rows = parseCsv(await tree.read("storyboard.csv"));
+	await progress(`casting ${characters.map((c) => c.name).join(", ") || "nobody"} and scouting ${locations.map((l) => l.name).join(", ") || "no locations"} again`);
+	await Promise.all([castCharacters(env, remote, characters, casting, "Recast for the remake"), scoutLocations(env, remote, locations, casting)]);
+	return { title: `the remake of ${repo}`, cells: rows.map((r) => r.id) };
 }
 
 /** Job: one take of one cell, shot and judged. */

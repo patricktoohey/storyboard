@@ -30,6 +30,8 @@ interface JobBase {
 export type Job = JobBase &
 	(
 		| { kind: "board"; concept: string; cells: number; skills: Record<string, string> }
+		// A remake (D48): another board's plan, every portrait, set and frame made again with this board's crew
+		| { kind: "remake"; from: string }
 		// attempt 2 is the automatic retake after a continuity break; it doesn't retake again
 		| { kind: "take"; cell: string; take: number; attempt: 1 | 2; opts: TakeOptions }
 		| { kind: "bible"; cell: string; note: string }
@@ -63,6 +65,7 @@ export type Job = JobBase &
 /** A job as submitted, before the coordinator assigns an id (and, for takes, a take number). */
 export type JobRequest =
 	| { kind: "board"; concept: string; cells: number; skills: Record<string, string> }
+	| { kind: "remake"; from: string }
 	| { kind: "take"; cell: string; attempt?: 1 | 2; opts?: TakeOptions }
 	| { kind: "bible"; cell: string; note: string }
 	| { kind: "print"; picks: { cell: string; branch: string }[]; message: string }
